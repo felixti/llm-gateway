@@ -3,8 +3,8 @@
  * Provides async, fire-and-forget audit logging and usage archival
  */
 
-import { database } from "./client";
-import { logger } from "../observability/logger";
+import { logger } from '../observability/logger';
+import { database } from './client';
 
 // Types for audit records
 interface RequestAuditRecord {
@@ -73,7 +73,7 @@ export async function logRequestAudit(record: RequestAuditRecord): Promise<void>
   try {
     await database.execute({ query, params });
   } catch (error) {
-    logger.error("Failed to log request audit", { requestId: record.requestId, error });
+    logger.error('Failed to log request audit', { requestId: record.requestId, error });
   }
 }
 
@@ -108,7 +108,11 @@ export async function archiveMonthlyUsage(record: UsageArchiveRecord): Promise<v
   try {
     await database.execute({ query, params });
   } catch (error) {
-    logger.error("Failed to archive monthly usage", { userId: record.userId, month: record.month, error });
+    logger.error('Failed to archive monthly usage', {
+      userId: record.userId,
+      month: record.month,
+      error,
+    });
     throw error;
   }
 }
@@ -127,7 +131,7 @@ export async function logPatRevocation(record: PatRevocationRecord): Promise<voi
   try {
     await database.execute({ query, params });
   } catch (error) {
-    logger.error("Failed to log PAT revocation", { patId: record.patId, error });
+    logger.error('Failed to log PAT revocation', { patId: record.patId, error });
     throw error;
   }
 }

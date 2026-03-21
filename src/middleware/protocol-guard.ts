@@ -5,24 +5,24 @@
  * Rejects non-Claude models on /v1/messages
  */
 
-import type { Context, Next } from "hono";
-import { getModelFamily, type ModelFamily } from "../config/deployments";
-import { errorForProtocol } from "../utils/errors";
+import type { Context, Next } from 'hono';
+import { type ModelFamily, getModelFamily } from '../config/deployments';
+import { errorForProtocol } from '../utils/errors';
 
 // Model families allowed per endpoint
 const ALLOWED_FAMILIES_PER_PATH: Record<string, ModelFamily[]> = {
-  "/v1/chat/completions": ["gpt", "kimi", "glm", "minimax"],
-  "/v1/responses": ["gpt"],
-  "/v1/messages": ["claude"],
+  '/v1/chat/completions': ['gpt', 'kimi', 'glm', 'minimax'],
+  '/v1/responses': ['gpt'],
+  '/v1/messages': ['claude'],
 };
 
 /**
  * Get the model name from request body
  */
 function getModelFromBody(body: unknown): string | null {
-  if (body && typeof body === "object" && body !== null) {
+  if (body && typeof body === 'object' && body !== null) {
     const b = body as Record<string, unknown>;
-    if (typeof b.model === "string" && b.model.length > 0) {
+    if (typeof b.model === 'string' && b.model.length > 0) {
       return b.model;
     }
   }
@@ -33,10 +33,7 @@ function getModelFromBody(body: unknown): string | null {
  * Protocol Guard Middleware
  * Validates model matches the endpoint protocol
  */
-export async function protocolGuardMiddleware(
-  c: Context,
-  next: Next
-): Promise<void> {
+export async function protocolGuardMiddleware(c: Context, next: Next): Promise<void> {
   const path = c.req.path;
   const allowedFamilies = ALLOWED_FAMILIES_PER_PATH[path];
 
@@ -47,11 +44,11 @@ export async function protocolGuardMiddleware(
   }
 
   // Get model from body (parse if not already done)
-  let body = c.get("parsedBody");
+  let body = c.get('parsedBody');
   if (!body) {
     try {
       body = await c.req.json();
-      c.set("parsedBody", body);
+      c.set('parsedBody', body);
     } catch {
       // Body not JSON, will be handled by route validation
     }
@@ -67,12 +64,7 @@ export async function protocolGuardMiddleware(
   const modelFamily = getModelFamily(model);
 
   if (!modelFamily) {
-    const error = errorForProtocol(
-      path,
-      400,
-      "model_not_supported",
-      `Unknown model: ${model}`
-    );
+    const error = errorForProtocol(path, 400, 'model_not_supported', `Unknown model: ${model}`);
     c.status(400);
     c.json(error);
     return;
@@ -82,32 +74,27 @@ export async function protocolGuardMiddleware(
   if (!allowedFamilies.includes(modelFamily)) {
     let errorMessage: string;
 
-    if (path === "/v1/chat/completions" || path === "/v1/responses") {
-      if (modelFamily === "claude") {
-        errorMessage = "Claude models are only available via POST /v1/messages";
+    if (path === '/v1/chat/completions' || path === '/v1/responses') {
+      if (modelFamily === 'claude') {
+        errorMessage = 'Claude models are only available via POST /v1/messages';
       } else {
         errorMessage = `Model ${model} is not supported on this endpoint`;
       }
-    } else if (path === "/v1/messages") {
-      errorMessage = "Non-Claude models are only available via POST /v1/chat/completions";
+    } else if (path === '/v1/messages') {
+      errorMessage = 'Non-Claude models are only available via POST /v1/chat/completions';
     } else {
       errorMessage = `Model ${model} is not supported on this endpoint`;
     }
 
-    const error = errorForProtocol(
-      path,
-      400,
-      "model_not_supported",
-      errorMessage
-    );
+    const error = errorForProtocol(path, 400, 'model_not_supported', errorMessage);
     c.status(400);
     c.json(error);
     return;
   }
 
   // Set model in context for downstream use
-  c.set("model", model);
-  c.set("modelFamily", modelFamily);
+  c.set('model', model);
+  c.set('modelFamily', modelFamily);
 
   await next();
 }

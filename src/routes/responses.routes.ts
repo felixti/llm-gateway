@@ -3,38 +3,51 @@
  * OpenAI Responses API endpoint with full middleware chain
  */
 
-import { Hono } from "hono";
-import { z } from "zod";
-import { authMiddleware } from "../middleware/auth";
-import { protocolGuardMiddleware } from "../middleware/protocol-guard";
-import { rateLimitMiddleware } from "../middleware/rate-limit";
-import { quotaMiddleware } from "../middleware/quota";
-import { getDeploymentByAlias } from "../config/deployments";
-import { buildUpstreamUrl, buildRequestBody, proxyNonStreamingChat, proxyStreamingChat } from "../proxy/openai-chat.proxy";
-import { AzureAuthManager } from "../services/azure-auth";
-import { isRequestAllowed } from "../services/circuit-breaker";
-import { errorForProtocol } from "../utils/errors";
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { getDeploymentByAlias } from '../config/deployments';
+import { authMiddleware } from '../middleware/auth';
+import { protocolGuardMiddleware } from '../middleware/protocol-guard';
+import { quotaMiddleware } from '../middleware/quota';
+import { rateLimitMiddleware } from '../middleware/rate-limit';
+import {
+  buildRequestBody,
+  buildUpstreamUrl,
+  proxyNonStreamingChat,
+  proxyStreamingChat,
+} from '../proxy/openai-chat.proxy';
+import { AzureAuthManager } from '../services/azure-auth';
+import { isRequestAllowed } from '../services/circuit-breaker';
+import { errorForProtocol } from '../utils/errors';
 
 // Zod schema for Responses API body validation
 const responsesBodySchema = z.object({
-  model: z.string().min(1, "model is required"),
+  model: z.string().min(1, 'model is required'),
   input: z.union([
     z.string(),
-    z.array(z.object({
-      role: z.enum(["user"]),
-      content: z.string(),
-    })),
+    z.array(
+      z.object({
+        role: z.enum(['user']),
+        content: z.string(),
+      })
+    ),
   ]),
   stream: z.boolean().optional().default(false),
-  tools: z.array(z.object({
-    type: z.literal("function"),
-    name: z.string(),
-    description: z.string().optional(),
-    parameters: z.record(z.unknown()),
-  })).optional(),
-  reasoning: z.object({
-    effort: z.enum(["low", "medium", "high"]),
-  }).optional(),
+  tools: z
+    .array(
+      z.object({
+        type: z.literal('function'),
+        name: z.string(),
+        description: z.string().optional(),
+        parameters: z.record(z.unknown()),
+      })
+    )
+    .optional(),
+  reasoning: z
+    .object({
+      effort: z.enum(['low', 'medium', 'high']),
+    })
+    .optional(),
   max_tokens: z.number().int().positive().optional(),
   max_completion_tokens: z.number().int().positive().optional(),
   temperature: z.number().min(0).max(2).optional(),
@@ -47,19 +60,19 @@ export type ResponsesBody = z.infer<typeof responsesBodySchema>;
 export const responsesRoutes = new Hono();
 
 // Apply middleware chain
-responsesRoutes.use("*", authMiddleware);
-responsesRoutes.use("*", protocolGuardMiddleware);
-responsesRoutes.use("*", rateLimitMiddleware);
-responsesRoutes.use("*", quotaMiddleware);
+responsesRoutes.use('*', authMiddleware);
+responsesRoutes.use('*', protocolGuardMiddleware);
+responsesRoutes.use('*', rateLimitMiddleware);
+responsesRoutes.use('*', quotaMiddleware);
 
 // POST /v1/responses
-responsesRoutes.post("/", async (c) => {
+responsesRoutes.post('/', async (c) => {
   // Parse body
   let body: unknown;
   try {
     body = await c.req.json();
   } catch {
-    const error = errorForProtocol(c.req.path, 400, "invalid_request", "Invalid JSON body");
+    const error = errorForProtocol(c.req.path, 400, 'invalid_request', 'Invalid JSON body');
     c.status(400);
     return c.json(error);
   }
@@ -71,8 +84,8 @@ responsesRoutes.post("/", async (c) => {
     const error = errorForProtocol(
       c.req.path,
       400,
-      "invalid_request",
-      `${firstError.path.join(".")}: ${firstError.message}`
+      'invalid_request',
+      `${firstError.path.join('.')}: ${firstError.message}`
     );
     c.status(400);
     return c.json(error);
@@ -86,7 +99,7 @@ responsesRoutes.post("/", async (c) => {
     const error = errorForProtocol(
       c.req.path,
       400,
-      "model_not_supported",
+      'model_not_supported',
       `Unknown model: ${validatedBody.model}`
     );
     c.status(400);
@@ -98,8 +111,8 @@ responsesRoutes.post("/", async (c) => {
     const error = errorForProtocol(
       c.req.path,
       503,
-      "service_unavailable",
-      "Service temporarily unavailable, please retry"
+      'service_unavailable',
+      'Service temporarily unavailable, please retry'
     );
     return c.json(error, 503);
   }
@@ -116,12 +129,19 @@ responsesRoutes.post("/", async (c) => {
   const upstreamBody = buildRequestBody(chatCompletionsBody, deployment.modelFamily);
 
   // Get context values
-  const requestId = c.get("requestId") || "";
-  const reservationId = c.get("reservationId") || "";
+  const requestId = c.get('requestId') || '';
+  const reservationId = c.get('reservationId') || '';
 
   // Determine streaming
   if (validatedBody.stream) {
-    return proxyStreamingChat(upstreamUrl, authHeaders, upstreamBody, deployment, reservationId, requestId);
+    return proxyStreamingChat(
+      upstreamUrl,
+      authHeaders,
+      upstreamBody,
+      deployment,
+      reservationId,
+      requestId
+    );
   }
 
   return proxyNonStreamingChat(upstreamUrl, authHeaders, upstreamBody, deployment, reservationId);
@@ -134,8 +154,8 @@ function transformToChatCompletions(body: ResponsesBody): Record<string, unknown
   const messages: Array<{ role: string; content: string }> = [];
 
   // Transform input to messages
-  if (typeof body.input === "string") {
-    messages.push({ role: "user", content: body.input });
+  if (typeof body.input === 'string') {
+    messages.push({ role: 'user', content: body.input });
   } else if (Array.isArray(body.input)) {
     for (const item of body.input) {
       messages.push({ role: item.role, content: item.content });
@@ -143,9 +163,11 @@ function transformToChatCompletions(body: ResponsesBody): Record<string, unknown
   }
 
   // Transform tools if present
-  let functions: Array<{ name: string; description?: string; parameters: Record<string, unknown> }> | undefined;
+  let functions:
+    | Array<{ name: string; description?: string; parameters: Record<string, unknown> }>
+    | undefined;
   if (body.tools && body.tools.length > 0) {
-    functions = body.tools.map(tool => ({
+    functions = body.tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
       parameters: tool.parameters,

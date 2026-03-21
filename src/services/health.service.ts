@@ -3,9 +3,13 @@
  * Periodic deployment health checks with circuit breaker integration
  */
 
-import { getAllDeployments, DeploymentConfig, getDeploymentByAlias } from "../config/deployments";
-import { getAzureAuthManager } from "./azure-auth";
-import { recordFailure } from "./circuit-breaker";
+import {
+  type DeploymentConfig,
+  getAllDeployments,
+  getDeploymentByAlias,
+} from '../config/deployments';
+import { getAzureAuthManager } from './azure-auth';
+import { recordFailure } from './circuit-breaker';
 
 // Health check interval in milliseconds
 const HEALTH_CHECK_INTERVAL_MS = 30_000;
@@ -25,25 +29,27 @@ export interface DeploymentHealth {
 /**
  * Perform a lightweight health check for chat-completions (OpenAI-compatible) deployment
  */
-async function checkChatCompletionsHealth(deployment: DeploymentConfig): Promise<{ latencyMs: number }> {
+async function checkChatCompletionsHealth(
+  deployment: DeploymentConfig
+): Promise<{ latencyMs: number }> {
   const authManager = getAzureAuthManager();
   const headers = await authManager.getAuthHeadersForDeployment(deployment);
 
   const url = new URL(deployment.endpoint);
   url.pathname = `/openai/deployments/${deployment.azureModelName}/chat/completions`;
-  url.searchParams.set("api-version", deployment.apiVersion);
+  url.searchParams.set('api-version', deployment.apiVersion);
 
   const startTime = Date.now();
 
   const response = await fetch(url.toString(), {
-    method: "POST",
+    method: 'POST',
     headers: {
       ...headers,
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       model: deployment.azureModelName,
-      messages: [{ role: "user", content: "ping" }],
+      messages: [{ role: 'user', content: 'ping' }],
       max_tokens: 1,
     }),
     signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS),
@@ -63,26 +69,28 @@ async function checkChatCompletionsHealth(deployment: DeploymentConfig): Promise
 /**
  * Perform a lightweight health check for anthropic-messages deployment
  */
-async function checkAnthropicMessagesHealth(deployment: DeploymentConfig): Promise<{ latencyMs: number }> {
+async function checkAnthropicMessagesHealth(
+  deployment: DeploymentConfig
+): Promise<{ latencyMs: number }> {
   const authManager = getAzureAuthManager();
   const headers = await authManager.getAuthHeadersForDeployment(deployment);
 
   const url = new URL(deployment.endpoint);
   url.pathname = `/openai/deployments/${deployment.azureModelName}/messages`;
-  url.searchParams.set("api-version", deployment.apiVersion);
+  url.searchParams.set('api-version', deployment.apiVersion);
 
   const startTime = Date.now();
 
   const response = await fetch(url.toString(), {
-    method: "POST",
+    method: 'POST',
     headers: {
       ...headers,
-      "Content-Type": "application/json",
-      "anthropic-version": "2023-06-01",
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
       model: deployment.azureModelName,
-      messages: [{ role: "user", content: "ping" }],
+      messages: [{ role: 'user', content: 'ping' }],
       max_tokens: 1,
     }),
     signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS),
@@ -101,13 +109,15 @@ async function checkAnthropicMessagesHealth(deployment: DeploymentConfig): Promi
 /**
  * Check health of a single deployment
  */
-export async function checkDeploymentHealth(deployment: DeploymentConfig): Promise<DeploymentHealth> {
+export async function checkDeploymentHealth(
+  deployment: DeploymentConfig
+): Promise<DeploymentHealth> {
   const startTime = Date.now();
 
   try {
     let latencyMs: number;
 
-    if (deployment.protocolFamily === "anthropic-messages") {
+    if (deployment.protocolFamily === 'anthropic-messages') {
       const result = await checkAnthropicMessagesHealth(deployment);
       latencyMs = result.latencyMs;
     } else {
@@ -130,7 +140,7 @@ export async function checkDeploymentHealth(deployment: DeploymentConfig): Promi
       healthy: false,
       latencyMs: Date.now() - startTime,
       lastCheck: new Date(),
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
 }
@@ -138,7 +148,9 @@ export async function checkDeploymentHealth(deployment: DeploymentConfig): Promi
 /**
  * Get health status for a specific deployment by name
  */
-export async function getDeploymentHealth(deploymentName: string): Promise<DeploymentHealth | null> {
+export async function getDeploymentHealth(
+  deploymentName: string
+): Promise<DeploymentHealth | null> {
   const deployment = getDeploymentByAlias(deploymentName);
   if (!deployment) {
     return null;

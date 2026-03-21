@@ -4,13 +4,17 @@
  * Native passthrough - no transformation of request/response
  */
 
-import type { DeploymentConfig } from "../config/deployments";
-import { withRetry } from "../services/retry";
-import { recordSuccess, recordFailure } from "../services/circuit-breaker";
-import { reconcileUsage, releaseReservation } from "../services/quota.service";
-import { handleStreamAbort, parseAnthropicEvents, type AnthropicStreamEvent } from "../utils/streaming";
-import { errorForProtocol } from "../utils/errors";
-import type { TokenUsage } from "../services/pricing.service";
+import type { DeploymentConfig } from '../config/deployments';
+import { recordFailure, recordSuccess } from '../services/circuit-breaker';
+import type { TokenUsage } from '../services/pricing.service';
+import { reconcileUsage, releaseReservation } from '../services/quota.service';
+import { withRetry } from '../services/retry';
+import { errorForProtocol } from '../utils/errors';
+import {
+  type AnthropicStreamEvent,
+  handleStreamAbort,
+  parseAnthropicEvents,
+} from '../utils/streaming';
 
 /**
  * Build upstream URL for Anthropic Messages API
@@ -25,7 +29,7 @@ export function buildUpstreamUrlAnthropic(deployment: DeploymentConfig): string 
  */
 export function extractUsageFromAnthropicEvents(events: AnthropicStreamEvent[]): TokenUsage | null {
   for (const event of events) {
-    if (event.type === "message_delta" && event.usage) {
+    if (event.type === 'message_delta' && event.usage) {
       return {
         prompt_tokens: event.usage.input_tokens,
         completion_tokens: event.usage.output_tokens,
@@ -50,10 +54,10 @@ export async function proxyNonStreamingAnthropic(
 ): Promise<Response> {
   const response = await withRetry(() =>
     fetch(upstreamUrl, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01",
+        'Content-Type': 'application/json',
+        'anthropic-version': '2023-06-01',
         ...headers,
       },
       body: JSON.stringify(body),
@@ -64,14 +68,14 @@ export async function proxyNonStreamingAnthropic(
     recordFailure(deployment.name);
     const errorBody = await response.text();
     const error = errorForProtocol(
-      "/v1/messages",
+      '/v1/messages',
       response.status,
-      "api_error",
+      'api_error',
       `Azure AI Foundry error: ${response.status} ${errorBody}`
     );
     return new Response(JSON.stringify(error), {
       status: response.status,
-      headers: { "Content-Type": "application/json" },
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
@@ -93,7 +97,7 @@ export async function proxyNonStreamingAnthropic(
 
   return new Response(JSON.stringify(responseBody), {
     status: 200,
-    headers: { "Content-Type": "application/json" },
+    headers: { 'Content-Type': 'application/json' },
   });
 }
 
@@ -111,13 +115,13 @@ export async function proxyStreamingAnthropic(
 ): Promise<Response> {
   const response = await withRetry(() =>
     fetch(upstreamUrl, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01",
+        'Content-Type': 'application/json',
+        'anthropic-version': '2023-06-01',
         ...headers,
-        Accept: "text/event-stream",
-        "x-ms-client-request-id": requestId,
+        Accept: 'text/event-stream',
+        'x-ms-client-request-id': requestId,
       },
       body: JSON.stringify({ ...body, stream: true }),
     })
@@ -127,21 +131,21 @@ export async function proxyStreamingAnthropic(
     recordFailure(deployment.name);
     const errorBody = await response.text();
     const error = errorForProtocol(
-      "/v1/messages",
+      '/v1/messages',
       response.status,
-      "api_error",
+      'api_error',
       `Azure AI Foundry error: ${response.status} ${errorBody}`
     );
     return new Response(JSON.stringify(error), {
       status: response.status,
-      headers: { "Content-Type": "application/json" },
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
   recordSuccess(deployment.name);
 
   if (!response.body) {
-    return new Response("Internal Server Error: No response body", { status: 500 });
+    return new Response('Internal Server Error: No response body', { status: 500 });
   }
 
   let usageExtracted = false;
@@ -159,8 +163,8 @@ export async function proxyStreamingAnthropic(
 
           if (usage) {
             usageExtracted = true;
-            reconcileUsage(reservationId, usage, deployment.azureModelName).catch(
-              (err) => console.error("Quota reconciliation error:", err)
+            reconcileUsage(reservationId, usage, deployment.azureModelName).catch((err) =>
+              console.error('Quota reconciliation error:', err)
             );
           }
         }
@@ -175,10 +179,10 @@ export async function proxyStreamingAnthropic(
   return new Response(stream, {
     status: 200,
     headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-      "X-Request-Id": requestId,
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Request-Id': requestId,
     },
   });
 }

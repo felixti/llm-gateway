@@ -4,7 +4,7 @@
  * Handles usage extraction for quota reconciliation
  */
 
-import type { TokenUsage } from "../services/pricing.service";
+import type { TokenUsage } from '../services/pricing.service';
 
 // =============================================================================
 // SSE Parser TransformStream
@@ -51,18 +51,15 @@ export function createOpenAIStreamTransformer() {
   };
 
   return {
-    transform(
-      chunk: Uint8Array,
-      controller: TransformStreamDefaultController
-    ): void {
+    transform(chunk: Uint8Array, controller: TransformStreamDefaultController): void {
       const text = new TextDecoder().decode(chunk);
       const lines = text.split(/\r?\n/);
 
       for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
+        if (!line.startsWith('data:')) continue;
 
         const data = line.slice(5).trim();
-        if (data === "[DONE]") {
+        if (data === '[DONE]') {
           state.done = true;
           controller.enqueue(chunk);
           continue;
@@ -109,10 +106,10 @@ export function extractOpenAIUsage(text: string): TokenUsage | null {
   const lines = text.split(/\r?\n/);
 
   for (const line of lines.reverse()) {
-    if (!line.startsWith("data:")) continue;
+    if (!line.startsWith('data:')) continue;
 
     const data = line.slice(5).trim();
-    if (data === "[DONE]") continue;
+    if (data === '[DONE]') continue;
 
     try {
       const parsed = JSON.parse(data) as OpenAIStreamChunk;
@@ -161,10 +158,7 @@ export interface AnthropicStreamEvent {
  */
 export function createAnthropicStreamTransformer() {
   return {
-    transform(
-      chunk: Uint8Array,
-      controller: TransformStreamDefaultController
-    ): void {
+    transform(chunk: Uint8Array, controller: TransformStreamDefaultController): void {
       // Pass through all chunks - Anthropic streaming is native passthrough
       // We only intercept for usage tracking
       controller.enqueue(chunk);
@@ -183,12 +177,12 @@ export function extractAnthropicUsage(text: string): TokenUsage | null {
   const lines = text.split(/\r?\n/);
 
   for (const line of lines) {
-    if (!line.startsWith("data:")) continue;
+    if (!line.startsWith('data:')) continue;
 
     const data = line.slice(5).trim();
     try {
       const event = JSON.parse(data) as AnthropicStreamEvent;
-      if (event.type === "message_delta" && event.usage) {
+      if (event.type === 'message_delta' && event.usage) {
         return {
           prompt_tokens: event.usage.input_tokens,
           completion_tokens: event.usage.output_tokens,
@@ -213,7 +207,7 @@ export function parseAnthropicEvents(text: string): AnthropicStreamEvent[] {
   const lines = text.split(/\r?\n/);
 
   for (const line of lines) {
-    if (!line.startsWith("data:")) continue;
+    if (!line.startsWith('data:')) continue;
 
     const data = line.slice(5).trim();
     try {
@@ -241,7 +235,7 @@ export function handleStreamAbort(
   return () => {
     if (reservationId) {
       releaseFn(reservationId).catch((err) => {
-        console.error("Failed to release reservation on abort:", err);
+        console.error('Failed to release reservation on abort:', err);
       });
     }
   };

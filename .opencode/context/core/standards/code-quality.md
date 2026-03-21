@@ -167,17 +167,26 @@ function createUser(userData) { return db.insert('users', userData); }
 
 ## Linting & Code Hygiene
 
-### ESLint Configuration
-- Parser: `@typescript-eslint/parser`
-- Plugins: `@typescript-eslint`
-- Config file: `.eslintrc.json` in project root
+### Biome Configuration
+Biome is a fast linter and formatter for JavaScript/TypeScript.
+- Config file: `biome.json` in project root
+- Use `biome.json` for all linting and formatting rules
 
-### Required ESLint Rules
+### Biome Rules (Equivalent to Previous ESLint)
 ```json
 {
-  "no-unused-vars": "off",
-  "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
-  "no-console": "off"
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "correctness": {
+        "noUnusedVariables": "warn"
+      },
+      "style": {
+        "useConst": "warn"
+      }
+    }
+  }
 }
 ```
 
@@ -205,18 +214,31 @@ function processRequest(requestId, data) { ... }
 function processRequest(_requestId, data) { ... }
 ```
 
-**Unused imports**: Remove them entirely
+**Unused imports**: Biome will auto-fix on `bun run lint:fix`
 ```typescript
-// ❌ warning: 'UnusedImport' is imported but never used
+// Let Biome auto-remove unused imports
 import { UsedImport, UnusedImport } from './module';
-
-// ✅ no warning
-import { UsedImport } from './module';
+// Run: bun run lint:fix
 ```
 
 **Placeholder code for future use**: Prefix with `_` or add TODO comment
 ```typescript
 const _pendingFeature = null; // TODO: implement feature X
+```
+
+**Disabling rules inline**: Use biome-ignore when necessary
+```typescript
+// biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry type incompatibility requires cast
+const result = someOpenTelemetryCall() as any;
+```
+
+### Quick Commands
+```bash
+# Check lint
+bun run lint
+
+# Check and fix (including unsafe fixes)
+bun run lint:fix
 ```
 
 ### Pre-commit Hook (Recommended)

@@ -4,9 +4,9 @@
  * Handles reservation, reconciliation, and release of quota
  */
 
-import { Decimal } from "decimal.js";
-import { redis } from "../db/redis";
-import { calculateCost, type TokenUsage } from "./pricing.service";
+import { Decimal } from 'decimal.js';
+import { redis } from '../db/redis';
+import { type TokenUsage, calculateCost } from './pricing.service';
 
 export interface QuotaReservation {
   allowed: boolean;
@@ -24,16 +24,16 @@ export interface QuotaStatus {
 }
 
 // Redis key prefixes
-const QUOTA_KEY_PREFIX = "quota:";
-const RESERVED_KEY_PREFIX = "reserved:";
-const RESERVATION_KEY_PREFIX = "reservation:";
+const QUOTA_KEY_PREFIX = 'quota:';
+const RESERVED_KEY_PREFIX = 'reserved:';
+const RESERVATION_KEY_PREFIX = 'reservation:';
 
 /**
  * Get current month in YYYY-MM format
  */
 function getCurrentMonth(): string {
   const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
 /**
@@ -92,21 +92,21 @@ export async function checkAndReserve(
   try {
     // Get current values
     const [budgetStr, spentStr, reservedStr] = await Promise.all([
-      redis.hget(quotaKey, "budget"),
-      redis.hget(quotaKey, "spent"),
+      redis.hget(quotaKey, 'budget'),
+      redis.hget(quotaKey, 'spent'),
       redis.get(reservedKey),
     ]);
 
-    const budget = parseFloat(budgetStr || "50");
-    const spent = parseFloat(spentStr || "0");
-    const reserved = parseFloat(reservedStr || "0");
-    const cost = parseFloat(costStr);
+    const budget = Number.parseFloat(budgetStr || '50');
+    const spent = Number.parseFloat(spentStr || '0');
+    const reserved = Number.parseFloat(reservedStr || '0');
+    const cost = Number.parseFloat(costStr);
 
     // Check if we can reserve
     if (spent + reserved + cost > budget) {
       return {
         allowed: false,
-        reason: "Insufficient quota",
+        reason: 'Insufficient quota',
       };
     }
 
@@ -115,7 +115,7 @@ export async function checkAndReserve(
 
     // Store reservation with TTL (5 minutes) - use set with EX seconds
     const reservationData = `${costStr}|${userId}|${month}`;
-    await redis.set(reservationKey, reservationData, "EX", 300);
+    await redis.set(reservationKey, reservationData, 'EX', 300);
 
     return {
       allowed: true,
@@ -123,10 +123,10 @@ export async function checkAndReserve(
       estimatedCost,
     };
   } catch (error) {
-    console.error("Quota reservation error:", error);
+    console.error('Quota reservation error:', error);
     return {
       allowed: false,
-      reason: "Reservation failed",
+      reason: 'Reservation failed',
     };
   }
 }
@@ -143,11 +143,11 @@ export async function releaseReservation(reservationId: string): Promise<void> {
     return; // Already released or expired
   }
 
-  const [amountStr, userId, month] = reservationData.split("|");
+  const [amountStr, userId, month] = reservationData.split('|');
   const reservedKey = getReservedKey(userId, month);
 
   // Release the reserved amount
-  await redis.incrbyfloat(reservedKey, -parseFloat(amountStr));
+  await redis.incrbyfloat(reservedKey, -Number.parseFloat(amountStr));
 
   // Delete reservation
   await redis.del(reservationKey);
@@ -170,11 +170,11 @@ export async function reconcileUsage(
     return new Decimal(0);
   }
 
-  const [reservedAmountStr, userId, month] = reservationData.split("|");
+  const [reservedAmountStr, userId, month] = reservationData.split('|');
 
   // Calculate actual cost
   const actualCost = calculateCost(actualUsage, model);
-  const reservedNum = parseFloat(reservedAmountStr);
+  const reservedNum = Number.parseFloat(reservedAmountStr);
 
   // Update spent and reserved amounts
   const quotaKey = getQuotaKey(userId, month);
@@ -182,7 +182,7 @@ export async function reconcileUsage(
 
   // Atomically update spent and release reservation
   await Promise.all([
-    redis.hincrbyfloat(quotaKey, "spent", actualCost.toString()),
+    redis.hincrbyfloat(quotaKey, 'spent', actualCost.toString()),
     redis.incrbyfloat(reservedKey, -reservedNum),
     redis.del(reservationKey),
   ]);
@@ -201,14 +201,14 @@ export async function getQuotaStatus(userId: string): Promise<QuotaStatus> {
 
   // Get budget and spent from Redis
   const [budget, spent, reserved] = await Promise.all([
-    redis.hget(quotaKey, "budget"),
-    redis.hget(quotaKey, "spent"),
+    redis.hget(quotaKey, 'budget'),
+    redis.hget(quotaKey, 'spent'),
     redis.get(reservedKey),
   ]);
 
-  const budgetDecimal = new Decimal(budget || "50");
-  const spentDecimal = new Decimal(spent || "0");
-  const reservedDecimal = new Decimal(reserved || "0");
+  const budgetDecimal = new Decimal(budget || '50');
+  const spentDecimal = new Decimal(spent || '0');
+  const reservedDecimal = new Decimal(reserved || '0');
   const remaining = budgetDecimal.minus(spentDecimal).minus(reservedDecimal);
 
   return {
@@ -233,7 +233,7 @@ export async function setMonthlyBudget(
 
   await redis.hset(quotaKey, {
     budget: budgetUsd.toString(),
-    spent: "0",
+    spent: '0',
     reset_date: getResetDate(),
   });
 }
@@ -255,13 +255,13 @@ export async function cleanupOrphanedReservations(): Promise<number> {
       const ttl = await redis.ttl(key);
       if (ttl === -1) {
         // Key has no TTL, release it
-        const reservationId = key.replace(RESERVATION_KEY_PREFIX, "");
+        const reservationId = key.replace(RESERVATION_KEY_PREFIX, '');
         await releaseReservation(reservationId);
         cleaned++;
       }
     }
   } catch (error) {
-    console.error("Cleanup error:", error);
+    console.error('Cleanup error:', error);
   }
 
   return cleaned;

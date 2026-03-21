@@ -1,11 +1,11 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 // Environment variable schema with Zod validation
 const envSchema = z.object({
   // Application
-  NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
-  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 
   // Azure OpenAI
   AZURE_OPENAI_ENDPOINT: z.string().url().optional(),
@@ -21,17 +21,20 @@ const envSchema = z.object({
   AZURE_ENTRA_CLIENT_SECRET: z.string().optional(),
 
   // Redis
-  REDIS_URL: z.string().url().default("redis://localhost:6379"),
+  REDIS_URL: z.string().url().default('redis://localhost:6379'),
 
   // PostgreSQL
-  DATABASE_URL: z.string().url().default("postgresql://postgres:postgres@localhost:5432/llm_gateway"),
+  DATABASE_URL: z
+    .string()
+    .url()
+    .default('postgresql://postgres:postgres@localhost:5432/llm_gateway'),
 
   // PAT Secret (for HMAC-SHA256 signing)
-  PAT_SECRET: z.string().min(32).default("dev-secret-change-in-production"),
+  PAT_SECRET: z.string().min(32).default('dev-secret-change-in-production'),
 
   // OpenTelemetry
   OTEL_EXPORTER_OTLP_GRPC_ENDPOINT: z.string().url().optional(),
-  OTEL_SERVICE_NAME: z.string().default("llm-gateway"),
+  OTEL_SERVICE_NAME: z.string().default('llm-gateway'),
   OTEL_ENABLED: z.boolean().default(false),
 
   // Rate limiting defaults
@@ -49,23 +52,29 @@ let _env: z.infer<typeof envSchema> | null = null;
 function parseEnvOnce(): z.infer<typeof envSchema> {
   if (_env === null) {
     // In test environment, provide fallback values if validation would fail
-    const testFallback = process.env.NODE_ENV === "test" && !process.env.PAT_SECRET;
-    
+    const testFallback = process.env.NODE_ENV === 'test' && !process.env.PAT_SECRET;
+
     try {
       const result = envSchema.safeParse(process.env);
       if (result.success) {
         _env = result.data;
       } else if (testFallback) {
         // Use defaults for tests
-        _env = envSchema.parse({ ...process.env, PAT_SECRET: "test-secret-that-is-at-least-32-chars!!" });
+        _env = envSchema.parse({
+          ...process.env,
+          PAT_SECRET: 'test-secret-that-is-at-least-32-chars!!',
+        });
       } else {
-        const errors = result.error.errors.map(e => `${e.path.join(".")}: ${e.message}`);
-        throw new Error(`Invalid environment configuration:\n${errors.join("\n")}`);
+        const errors = result.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`);
+        throw new Error(`Invalid environment configuration:\n${errors.join('\n')}`);
       }
     } catch (e) {
-      if (testFallback || process.env.NODE_ENV === "test") {
+      if (testFallback || process.env.NODE_ENV === 'test') {
         // Use defaults for tests
-        _env = envSchema.parse({ ...process.env, PAT_SECRET: "test-secret-that-is-at-least-32-chars!!" });
+        _env = envSchema.parse({
+          ...process.env,
+          PAT_SECRET: 'test-secret-that-is-at-least-32-chars!!',
+        });
       } else {
         throw e;
       }

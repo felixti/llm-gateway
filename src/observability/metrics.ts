@@ -16,11 +16,7 @@ let circuitBreakerState = 0; // 0=CLOSED, 1=OPEN, 2=HALF_OPEN
 /**
  * Increment HTTP request counter
  */
-export function incrementHttpRequests(
-  _method: string,
-  _path: string,
-  _status: number
-): void {
+export function incrementHttpRequests(_method: string, _path: string, _status: number): void {
   httpRequestsTotal++;
 }
 
@@ -56,15 +52,15 @@ export function setQuotaRemainingRatio(ratio: number): void {
  * Set circuit breaker state gauge
  * 0 = CLOSED, 1 = OPEN, 2 = HALF_OPEN
  */
-export function setCircuitBreakerState(state: "CLOSED" | "OPEN" | "HALF_OPEN"): void {
+export function setCircuitBreakerState(state: 'CLOSED' | 'OPEN' | 'HALF_OPEN'): void {
   switch (state) {
-    case "CLOSED":
+    case 'CLOSED':
       circuitBreakerState = 0;
       break;
-    case "OPEN":
+    case 'OPEN':
       circuitBreakerState = 1;
       break;
-    case "HALF_OPEN":
+    case 'HALF_OPEN':
       circuitBreakerState = 2;
       break;
   }

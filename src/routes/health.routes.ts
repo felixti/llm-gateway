@@ -4,20 +4,20 @@
  * GET /ready - critical dependencies check (Redis + Azure connectivity)
  */
 
-import { Hono } from "hono";
-import { isRedisHealthy } from "../db/redis";
-import { getAllDeploymentHealth } from "../services/health.service";
+import { Hono } from 'hono';
+import { isRedisHealthy } from '../db/redis';
+import { getAllDeploymentHealth } from '../services/health.service';
 
 export const healthRoutes = new Hono();
 
 // Package version from environment or fallback
-const APP_VERSION = process.env.APP_VERSION || "1.0.0";
+const APP_VERSION = process.env.APP_VERSION || '1.0.0';
 
 /**
  * GET /health
  * Returns version and timestamp - always returns 200 if server is running
  */
-healthRoutes.get("/health", (c) => {
+healthRoutes.get('/health', (c) => {
   return c.json({
     version: APP_VERSION,
     timestamp: new Date().toISOString(),
@@ -29,7 +29,7 @@ healthRoutes.get("/health", (c) => {
  * Checks critical dependencies: Redis and at least one Azure deployment
  * Returns 503 if critical dependencies are unavailable
  */
-healthRoutes.get("/ready", async (c) => {
+healthRoutes.get('/ready', async (c) => {
   const checks: Record<string, boolean> = {
     redis: false,
     deployments: false,
@@ -56,7 +56,7 @@ healthRoutes.get("/ready", async (c) => {
   if (!isReady) {
     return c.json(
       {
-        status: "not_ready",
+        status: 'not_ready',
         checks,
         timestamp: new Date().toISOString(),
       },
@@ -65,7 +65,7 @@ healthRoutes.get("/ready", async (c) => {
   }
 
   return c.json({
-    status: "ready",
+    status: 'ready',
     checks,
     timestamp: new Date().toISOString(),
   });

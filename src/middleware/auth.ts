@@ -4,19 +4,19 @@
  * Checks Redis blocklist and token expiry
  */
 
-import type { Context, Next } from "hono";
-import { redis } from "../db/redis";
-import { validatePatStructure, hashJtiForBlocklist, type PatToken } from "../utils/auth";
-import { errorForProtocol } from "../utils/errors";
+import type { Context, Next } from 'hono';
+import { redis } from '../db/redis';
+import { type PatToken, hashJtiForBlocklist, validatePatStructure } from '../utils/auth';
+import { errorForProtocol } from '../utils/errors';
 
-const HEADER_AUTHORIZATION = "Authorization";
-const BEARER_PREFIX = "Bearer ";
+const HEADER_AUTHORIZATION = 'Authorization';
+const BEARER_PREFIX = 'Bearer ';
 
 // Context keys
-export const USER_ID_KEY = "userId";
-export const SCOPE_KEY = "scope";
-export const JTI_KEY = "jti";
-export const PAT_TOKEN_KEY = "patToken";
+export const USER_ID_KEY = 'userId';
+export const SCOPE_KEY = 'scope';
+export const JTI_KEY = 'jti';
+export const PAT_TOKEN_KEY = 'patToken';
 
 /**
  * Extract Bearer token from Authorization header
@@ -34,10 +34,10 @@ function extractBearerToken(authHeader: string | undefined): string | null {
 function parseJwtPayload(payloadB64: string): { jti: string; exp: number } | null {
   try {
     // Add padding if needed
-    const padded = payloadB64.padEnd(payloadB64.length + ((4 - (payloadB64.length % 4)) % 4), "=");
+    const padded = payloadB64.padEnd(payloadB64.length + ((4 - (payloadB64.length % 4)) % 4), '=');
     const decoded = JSON.parse(atob(padded));
     return {
-      jti: decoded.jti || "",
+      jti: decoded.jti || '',
       exp: decoded.exp || 0,
     };
   } catch {
@@ -58,10 +58,7 @@ async function getBlocklistEntry(jti: string): Promise<string | null> {
  * PAT Authentication Middleware
  * Validates token, checks blocklist, sets context variables
  */
-export async function authMiddleware(
-  c: Context,
-  next: Next
-): Promise<void> {
+export async function authMiddleware(c: Context, next: Next): Promise<void> {
   const authHeader = c.req.header(HEADER_AUTHORIZATION);
   const rawToken = extractBearerToken(authHeader);
 
@@ -69,8 +66,8 @@ export async function authMiddleware(
     const error = errorForProtocol(
       c.req.path,
       401,
-      "authentication_error",
-      "Missing or invalid Authorization header"
+      'authentication_error',
+      'Missing or invalid Authorization header'
     );
     c.status(401);
     c.json(error);
@@ -84,8 +81,8 @@ export async function authMiddleware(
     const error = errorForProtocol(
       c.req.path,
       401,
-      "authentication_error",
-      validation.error || "Invalid PAT token"
+      'authentication_error',
+      validation.error || 'Invalid PAT token'
     );
     c.status(401);
     c.json(error);
@@ -101,8 +98,8 @@ export async function authMiddleware(
     const error = errorForProtocol(
       c.req.path,
       401,
-      "authentication_error",
-      "Invalid token payload"
+      'authentication_error',
+      'Invalid token payload'
     );
     c.status(401);
     c.json(error);
@@ -112,12 +109,7 @@ export async function authMiddleware(
   // Check expiry
   const now = Math.floor(Date.now() / 1000);
   if (payload.exp && payload.exp < now) {
-    const error = errorForProtocol(
-      c.req.path,
-      401,
-      "authentication_error",
-      "Token has expired"
-    );
+    const error = errorForProtocol(c.req.path, 401, 'authentication_error', 'Token has expired');
     c.status(401);
     c.json(error);
     return;
@@ -130,8 +122,8 @@ export async function authMiddleware(
     const error = errorForProtocol(
       c.req.path,
       401,
-      "authentication_error",
-      "Token has been revoked"
+      'authentication_error',
+      'Token has been revoked'
     );
     c.status(401);
     c.json(error);
@@ -141,7 +133,7 @@ export async function authMiddleware(
   // Set context variables for downstream middleware/handlers
   c.set(USER_ID_KEY, token.userId);
   c.set(JTI_KEY, payload.jti);
-  c.set(SCOPE_KEY, "all"); // TODO: Extract scope from token payload
+  c.set(SCOPE_KEY, 'all'); // TODO: Extract scope from token payload
   c.set(PAT_TOKEN_KEY, token);
 
   await next();

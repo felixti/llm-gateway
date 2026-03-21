@@ -3,28 +3,35 @@
  * OpenAI Chat Completions API endpoint with full middleware chain
  */
 
-import { Hono } from "hono";
-import { z } from "zod";
-import { authMiddleware } from "../middleware/auth";
-import { protocolGuardMiddleware } from "../middleware/protocol-guard";
-import { rateLimitMiddleware } from "../middleware/rate-limit";
-import { quotaMiddleware } from "../middleware/quota";
-import { getDeploymentByAlias } from "../config/deployments";
-import { buildUpstreamUrl, buildRequestBody, proxyNonStreamingChat, proxyStreamingChat } from "../proxy/openai-chat.proxy";
-import { AzureAuthManager } from "../services/azure-auth";
-import { isRequestAllowed } from "../services/circuit-breaker";
-import { errorForProtocol } from "../utils/errors";
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { getDeploymentByAlias } from '../config/deployments';
+import { authMiddleware } from '../middleware/auth';
+import { protocolGuardMiddleware } from '../middleware/protocol-guard';
+import { quotaMiddleware } from '../middleware/quota';
+import { rateLimitMiddleware } from '../middleware/rate-limit';
+import {
+  buildRequestBody,
+  buildUpstreamUrl,
+  proxyNonStreamingChat,
+  proxyStreamingChat,
+} from '../proxy/openai-chat.proxy';
+import { AzureAuthManager } from '../services/azure-auth';
+import { isRequestAllowed } from '../services/circuit-breaker';
+import { errorForProtocol } from '../utils/errors';
 
 // Zod schema for chat completions body validation
 const chatCompletionsBodySchema = z.object({
-  model: z.string().min(1, "model is required"),
-  messages: z.array(
-    z.object({
-      role: z.enum(["system", "user", "assistant", "function"]),
-      content: z.union([z.string(), z.null()]),
-      name: z.string().optional(),
-    })
-  ).min(1, "messages are required"),
+  model: z.string().min(1, 'model is required'),
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(['system', 'user', 'assistant', 'function']),
+        content: z.union([z.string(), z.null()]),
+        name: z.string().optional(),
+      })
+    )
+    .min(1, 'messages are required'),
   stream: z.boolean().optional().default(false),
   max_tokens: z.number().int().positive().optional(),
   max_completion_tokens: z.number().int().positive().optional(),
@@ -36,15 +43,24 @@ const chatCompletionsBodySchema = z.object({
   frequency_penalty: z.number().min(-2).max(2).optional(),
   logit_bias: z.record(z.number()).optional(),
   user: z.string().optional(),
-  functions: z.array(z.object({
-    name: z.string(),
-    description: z.string().optional(),
-    parameters: z.record(z.unknown()),
-  })).optional(),
-  function_call: z.union([z.string(), z.object({
-    name: z.string(),
-    arguments: z.record(z.unknown()),
-  })]).optional(),
+  functions: z
+    .array(
+      z.object({
+        name: z.string(),
+        description: z.string().optional(),
+        parameters: z.record(z.unknown()),
+      })
+    )
+    .optional(),
+  function_call: z
+    .union([
+      z.string(),
+      z.object({
+        name: z.string(),
+        arguments: z.record(z.unknown()),
+      }),
+    ])
+    .optional(),
 });
 
 export type ChatCompletionsBody = z.infer<typeof chatCompletionsBodySchema>;
@@ -53,19 +69,19 @@ export type ChatCompletionsBody = z.infer<typeof chatCompletionsBodySchema>;
 export const chatRoutes = new Hono();
 
 // Apply middleware chain
-chatRoutes.use("*", authMiddleware);
-chatRoutes.use("*", protocolGuardMiddleware);
-chatRoutes.use("*", rateLimitMiddleware);
-chatRoutes.use("*", quotaMiddleware);
+chatRoutes.use('*', authMiddleware);
+chatRoutes.use('*', protocolGuardMiddleware);
+chatRoutes.use('*', rateLimitMiddleware);
+chatRoutes.use('*', quotaMiddleware);
 
 // POST /v1/chat/completions
-chatRoutes.post("/", async (c) => {
+chatRoutes.post('/', async (c) => {
   // Parse body
   let body: unknown;
   try {
     body = await c.req.json();
   } catch {
-    const error = errorForProtocol(c.req.path, 400, "invalid_request", "Invalid JSON body");
+    const error = errorForProtocol(c.req.path, 400, 'invalid_request', 'Invalid JSON body');
     c.status(400);
     return c.json(error);
   }
@@ -77,8 +93,8 @@ chatRoutes.post("/", async (c) => {
     const error = errorForProtocol(
       c.req.path,
       400,
-      "invalid_request",
-      `${firstError.path.join(".")}: ${firstError.message}`
+      'invalid_request',
+      `${firstError.path.join('.')}: ${firstError.message}`
     );
     c.status(400);
     return c.json(error);
@@ -92,7 +108,7 @@ chatRoutes.post("/", async (c) => {
     const error = errorForProtocol(
       c.req.path,
       400,
-      "model_not_supported",
+      'model_not_supported',
       `Unknown model: ${validatedBody.model}`
     );
     c.status(400);
@@ -104,8 +120,8 @@ chatRoutes.post("/", async (c) => {
     const error = errorForProtocol(
       c.req.path,
       503,
-      "service_unavailable",
-      "Service temporarily unavailable, please retry"
+      'service_unavailable',
+      'Service temporarily unavailable, please retry'
     );
     return c.json(error, 503);
   }
@@ -116,15 +132,25 @@ chatRoutes.post("/", async (c) => {
 
   // Build upstream request
   const upstreamUrl = buildUpstreamUrl(deployment, deployment.modelFamily);
-  const upstreamBody = buildRequestBody(validatedBody as Record<string, unknown>, deployment.modelFamily);
+  const upstreamBody = buildRequestBody(
+    validatedBody as Record<string, unknown>,
+    deployment.modelFamily
+  );
 
   // Get context values
-  const requestId = c.get("requestId") || "";
-  const reservationId = c.get("reservationId") || "";
+  const requestId = c.get('requestId') || '';
+  const reservationId = c.get('reservationId') || '';
 
   // Determine streaming
   if (validatedBody.stream) {
-    return proxyStreamingChat(upstreamUrl, authHeaders, upstreamBody, deployment, reservationId, requestId);
+    return proxyStreamingChat(
+      upstreamUrl,
+      authHeaders,
+      upstreamBody,
+      deployment,
+      reservationId,
+      requestId
+    );
   }
 
   return proxyNonStreamingChat(upstreamUrl, authHeaders, upstreamBody, deployment, reservationId);

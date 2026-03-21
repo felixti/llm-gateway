@@ -4,27 +4,28 @@
  * Handles streaming with usage extraction and quota reconciliation
  */
 
-import { Hono } from "hono";
-import type { DeploymentConfig } from "../config/deployments";
-import { getDeploymentByAlias } from "../config/deployments";
-import { AzureAuthManager } from "../services/azure-auth";
-import { withRetry } from "../services/retry";
-import { isRequestAllowed, recordSuccess, recordFailure } from "../services/circuit-breaker";
-import { type TokenUsage } from "../services/pricing.service";
-import { releaseReservation, reconcileUsage } from "../services/quota.service";
-import { createOpenAIStreamTransformer, extractOpenAIUsage, handleStreamAbort } from "../utils/streaming";
-import { errorForProtocol } from "../utils/errors";
+import { Hono } from 'hono';
+import type { DeploymentConfig } from '../config/deployments';
+import { getDeploymentByAlias } from '../config/deployments';
+import { AzureAuthManager } from '../services/azure-auth';
+import { isRequestAllowed, recordFailure, recordSuccess } from '../services/circuit-breaker';
+import type { TokenUsage } from '../services/pricing.service';
+import { reconcileUsage, releaseReservation } from '../services/quota.service';
+import { withRetry } from '../services/retry';
+import { errorForProtocol } from '../utils/errors';
+import {
+  createOpenAIStreamTransformer,
+  extractOpenAIUsage,
+  handleStreamAbort,
+} from '../utils/streaming';
 
 // Model families that use Foundry OpenAI-compatible endpoint
-const FOUNDRY_FAMILIES = ["kimi", "glm", "minimax"];
+const FOUNDRY_FAMILIES = ['kimi', 'glm', 'minimax'];
 
 /**
  * Build upstream URL based on model family
  */
-export function buildUpstreamUrl(
-  deployment: DeploymentConfig,
-  modelFamily: string
-): string {
+export function buildUpstreamUrl(deployment: DeploymentConfig, modelFamily: string): string {
   const { endpoint, name, apiVersion } = deployment;
 
   if (FOUNDRY_FAMILIES.includes(modelFamily)) {
@@ -49,7 +50,7 @@ export function buildRequestBody(
 
   if (upstream.max_tokens && !upstream.max_completion_tokens) {
     upstream.max_completion_tokens = upstream.max_tokens;
-    delete upstream.max_tokens;
+    upstream.max_tokens = undefined;
   }
 
   return upstream;
@@ -67,9 +68,9 @@ export async function proxyNonStreamingChat(
 ): Promise<Response> {
   const response = await withRetry(() =>
     fetch(upstreamUrl, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
         ...headers,
       },
       body: JSON.stringify(body),
@@ -80,14 +81,14 @@ export async function proxyNonStreamingChat(
     recordFailure(deployment.name);
     const errorBody = await response.text();
     const error = errorForProtocol(
-      "/v1/chat/completions",
+      '/v1/chat/completions',
       response.status,
-      "bad_gateway",
+      'bad_gateway',
       `Azure OpenAI error: ${response.status} ${errorBody}`
     );
     return new Response(JSON.stringify(error), {
       status: response.status,
-      headers: { "Content-Type": "application/json" },
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
@@ -116,7 +117,7 @@ export async function proxyNonStreamingChat(
 
   return new Response(JSON.stringify(responseBody), {
     status: 200,
-    headers: { "Content-Type": "application/json" },
+    headers: { 'Content-Type': 'application/json' },
   });
 }
 
@@ -133,12 +134,12 @@ export async function proxyStreamingChat(
 ): Promise<Response> {
   const response = await withRetry(() =>
     fetch(upstreamUrl, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
         ...headers,
-        Accept: "text/event-stream",
-        "x-ms-client-request-id": requestId,
+        Accept: 'text/event-stream',
+        'x-ms-client-request-id': requestId,
       },
       body: JSON.stringify({ ...body, stream: true }),
     })
@@ -148,59 +149,57 @@ export async function proxyStreamingChat(
     recordFailure(deployment.name);
     const errorBody = await response.text();
     const error = errorForProtocol(
-      "/v1/chat/completions",
+      '/v1/chat/completions',
       response.status,
-      "bad_gateway",
+      'bad_gateway',
       `Azure OpenAI error: ${response.status} ${errorBody}`
     );
     return new Response(JSON.stringify(error), {
       status: response.status,
-      headers: { "Content-Type": "application/json" },
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
   recordSuccess(deployment.name);
 
   if (!response.body) {
-    return new Response("Internal Server Error: No response body", { status: 500 });
+    return new Response('Internal Server Error: No response body', { status: 500 });
   }
 
   const transformer = createOpenAIStreamTransformer();
   let usageExtracted = false;
   handleStreamAbort(reservationId, releaseReservation);
 
-  const stream = response.body
-    .pipeThrough(new TransformStream(transformer))
-    .pipeThrough(
-      new TransformStream({
-        transform(chunk, controller) {
-          if (!usageExtracted) {
-            const text = new TextDecoder().decode(chunk);
-            const usage = extractOpenAIUsage(text);
-            if (usage) {
-              usageExtracted = true;
-              if (reservationId) {
-                reconcileUsage(reservationId, usage, deployment.azureModelName).catch(
-                  (err) => console.error("Quota reconciliation error:", err)
-                );
-              }
+  const stream = response.body.pipeThrough(new TransformStream(transformer)).pipeThrough(
+    new TransformStream({
+      transform(chunk, controller) {
+        if (!usageExtracted) {
+          const text = new TextDecoder().decode(chunk);
+          const usage = extractOpenAIUsage(text);
+          if (usage) {
+            usageExtracted = true;
+            if (reservationId) {
+              reconcileUsage(reservationId, usage, deployment.azureModelName).catch((err) =>
+                console.error('Quota reconciliation error:', err)
+              );
             }
           }
-          controller.enqueue(chunk);
-        },
-        flush(controller) {
-          controller.terminate();
-        },
-      })
-    );
+        }
+        controller.enqueue(chunk);
+      },
+      flush(controller) {
+        controller.terminate();
+      },
+    })
+  );
 
   return new Response(stream, {
     status: 200,
     headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-      "X-Request-Id": requestId,
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Request-Id': requestId,
     },
   });
 }
@@ -208,18 +207,18 @@ export async function proxyStreamingChat(
 // Create Hono app for mounting
 const openaiChatProxy = new Hono();
 
-openaiChatProxy.post("/", async (c) => {
-  const deployment = c.get("deployment");
-  const requestId = c.get("requestId") || "";
-  const reservationId = c.get("reservationId") || "";
+openaiChatProxy.post('/', async (c) => {
+  const deployment = c.get('deployment');
+  const requestId = c.get('requestId') || '';
+  const reservationId = c.get('reservationId') || '';
 
   // Check circuit breaker
   if (!isRequestAllowed(deployment.name)) {
     const error = errorForProtocol(
-      "/v1/chat/completions",
+      '/v1/chat/completions',
       503,
-      "service_unavailable",
-      "Service temporarily unavailable, please retry"
+      'service_unavailable',
+      'Service temporarily unavailable, please retry'
     );
     return c.json(error, 503);
   }
@@ -237,7 +236,14 @@ openaiChatProxy.post("/", async (c) => {
 
   // Determine streaming
   if (body.stream === true) {
-    return proxyStreamingChat(upstreamUrl, authHeaders, upstreamBody, deployment, reservationId, requestId);
+    return proxyStreamingChat(
+      upstreamUrl,
+      authHeaders,
+      upstreamBody,
+      deployment,
+      reservationId,
+      requestId
+    );
   }
 
   return proxyNonStreamingChat(upstreamUrl, authHeaders, upstreamBody, deployment, reservationId);

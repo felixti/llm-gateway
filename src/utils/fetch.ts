@@ -26,13 +26,13 @@ export const TLS_VERSION = {
  */
 const SECURITY_HEADERS = {
   // Prevent MIME type sniffing
-  "X-Content-Type-Options": "nosniff",
+  'X-Content-Type-Options': 'nosniff',
   // Prevent clickjacking
-  "X-Frame-Options": "DENY",
+  'X-Frame-Options': 'DENY',
   // Strict transport security (force HTTPS)
-  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   // Content security policy
-  "Content-Security-Policy": "default-src 'none'",
+  'Content-Security-Policy': "default-src 'none'",
 } as const;
 
 /**
@@ -67,7 +67,7 @@ export async function secureFetch(
 ): Promise<Response> {
   // Validate secure context
   if (!isSecureContext()) {
-    throw new Error("Cannot make secure request: not in secure context");
+    throw new Error('Cannot make secure request: not in secure context');
   }
 
   // Add security headers to options

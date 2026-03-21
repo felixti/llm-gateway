@@ -4,10 +4,10 @@
  * Enforces RPM (requests per minute) and TPM (tokens per minute) per user
  */
 
-import type { Context, Next } from "hono";
-import { redis } from "../db/redis";
-import { env } from "../config/env";
-import { errorForProtocol } from "../utils/errors";
+import type { Context, Next } from 'hono';
+import { env } from '../config/env';
+import { redis } from '../db/redis';
+import { errorForProtocol } from '../utils/errors';
 
 // Rate limit constants
 const RPM_LIMIT = env.RATE_LIMIT_RPM;
@@ -15,9 +15,9 @@ const TPM_LIMIT = env.RATE_LIMIT_TPM;
 const WINDOW_SECONDS = 60;
 
 // Header constants
-const HEADER_RATE_LIMIT = "X-RateLimit-Limit";
-const HEADER_RATE_REMAINING = "X-RateLimit-Remaining";
-const HEADER_RATE_RESET = "X-RateLimit-Reset";
+const HEADER_RATE_LIMIT = 'X-RateLimit-Limit';
+const HEADER_RATE_REMAINING = 'X-RateLimit-Remaining';
+const HEADER_RATE_RESET = 'X-RateLimit-Reset';
 
 interface RateLimitResult {
   allowed: boolean;
@@ -61,17 +61,14 @@ async function checkRequestLimit(userId: string): Promise<RateLimitResult> {
 /**
  * Check rate limit for tokens (TPM)
  */
-async function checkTokenLimit(
-  userId: string,
-  tokenCount: number
-): Promise<RateLimitResult> {
+async function checkTokenLimit(userId: string, tokenCount: number): Promise<RateLimitResult> {
   const key = `ratelimit:tpm:${userId}`;
   const now = Date.now();
   const windowStart = now - WINDOW_SECONDS * 1000;
 
   // Get current token count in window and remove old entries
   await redis.zremrangebyscore(key, 0, windowStart);
-  
+
   // Get current count before adding
   const currentCount = await redis.zcard(key);
 
@@ -109,10 +106,10 @@ function setRateLimitHeaders(c: Context, result: RateLimitResult): void {
  * Falls back to 0 if not parseable
  */
 function extractTokenCount(c: Context): number {
-  const body = c.get("parsedBody");
-  if (body && typeof body === "object" && body !== null) {
+  const body = c.get('parsedBody');
+  if (body && typeof body === 'object' && body !== null) {
     const b = body as { max_tokens?: number };
-    if (typeof b.max_tokens === "number" && b.max_tokens > 0) {
+    if (typeof b.max_tokens === 'number' && b.max_tokens > 0) {
       return b.max_tokens;
     }
   }
@@ -123,11 +120,8 @@ function extractTokenCount(c: Context): number {
  * Rate limiting middleware
  * Enforces RPM and TPM limits per user
  */
-export async function rateLimitMiddleware(
-  c: Context,
-  next: Next
-): Promise<void> {
-  const userId = c.get("userId");
+export async function rateLimitMiddleware(c: Context, next: Next): Promise<void> {
+  const userId = c.get('userId');
 
   if (!userId) {
     // No userId means auth middleware hasn't run or failed
@@ -144,8 +138,8 @@ export async function rateLimitMiddleware(
     const error = errorForProtocol(
       c.req.path,
       429,
-      "rate_limit_exceeded",
-      "Rate limit exceeded. Please retry later."
+      'rate_limit_exceeded',
+      'Rate limit exceeded. Please retry later.'
     );
     c.status(429);
     c.json(error);
@@ -161,8 +155,8 @@ export async function rateLimitMiddleware(
       const error = errorForProtocol(
         c.req.path,
         429,
-        "rate_limit_exceeded",
-        "Token rate limit exceeded. Please retry later."
+        'rate_limit_exceeded',
+        'Token rate limit exceeded. Please retry later.'
       );
       c.status(429);
       c.json(error);

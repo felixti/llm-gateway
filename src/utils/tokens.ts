@@ -5,7 +5,7 @@
  */
 
 // tiktoken uses named exports - get_encoding returns a Tiktoken instance
-import { get_encoding, Tiktoken } from "tiktoken";
+import { type Tiktoken, get_encoding } from 'tiktoken';
 
 // Singleton encoder instance for cl100k_base
 let encoder: Tiktoken | null = null;
@@ -13,7 +13,7 @@ let encoder: Tiktoken | null = null;
 /**
  * Claude model identifier prefix
  */
-const CLAUDE_MODEL_PREFIX = "claude-";
+const CLAUDE_MODEL_PREFIX = 'claude-';
 
 /**
  * Fallback: characters per token ratio
@@ -51,7 +51,7 @@ function getEncoder(): Tiktoken | null {
 
   try {
     // get_encoding returns a Tiktoken instance for the specified encoding
-    encoder = get_encoding("cl100k_base");
+    encoder = get_encoding('cl100k_base');
     return encoder;
   } catch {
     return null;
@@ -137,7 +137,7 @@ export function estimateMessagesTokens(
 
   // Estimate tokens from content of each message
   const contentTokens = messages.reduce((sum, msg) => {
-    const content = msg.content || "";
+    const content = msg.content || '';
     return sum + estimateTokens(content, model, options);
   }, 0);
 
@@ -153,7 +153,7 @@ export function estimateMessagesTokens(
 export function estimateAnthropicTokens(
   messages: Array<{ role?: string; content?: string | Array<unknown> }>,
   model: string,
-  thinkingEnabled: boolean = false
+  thinkingEnabled = false
 ): number {
   if (!messages || messages.length === 0) {
     return 0;
@@ -161,7 +161,7 @@ export function estimateAnthropicTokens(
 
   const contentTokens = messages.reduce((sum, msg) => {
     const content = msg.content;
-    if (typeof content === "string") {
+    if (typeof content === 'string') {
       return sum + estimateTokens(content, model, { thinkingEnabled });
     }
     // For content blocks, estimate as string

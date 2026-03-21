@@ -10,7 +10,8 @@
     "test": "bun test",
     "test:unit": "bun test tests/unit",
     "test:integration": "bun test tests/integration",
-    "lint": "eslint src --ext .ts",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -32,12 +33,10 @@
     "@opentelemetry/instrumentation-express": "^0.35.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
     "@types/bun": "^1.0.0",
     "@types/uuid": "^9.0.7",
-    "typescript": "^5.3.3",
-    "eslint": "^8.56.0",
-    "@typescript-eslint/parser": "^6.19.0",
-    "@typescript-eslint/eslint-plugin": "^6.19.0"
+    "typescript": "^5.3.3"
   },
   "engines": {
     "bun": ">=1.0.0"

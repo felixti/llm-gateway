@@ -1,5 +1,5 @@
-import { Decimal } from "decimal.js";
-import pricingData from "./pricing.json";
+import { Decimal } from 'decimal.js';
+import pricingData from './pricing.json';
 
 export interface ModelPricing {
   deploymentPattern: string;
@@ -13,14 +13,17 @@ export interface ModelPricing {
 interface PricingData {
   version: string;
   currency: string;
-  models: Record<string, {
-    deployment_pattern: string;
-    input_per_million: number;
-    output_per_million: number;
-    thinking_tokens_per_million?: number;
-    cache_write_per_million?: number;
-    cache_read_per_million?: number;
-  }>;
+  models: Record<
+    string,
+    {
+      deployment_pattern: string;
+      input_per_million: number;
+      output_per_million: number;
+      thinking_tokens_per_million?: number;
+      cache_write_per_million?: number;
+      cache_read_per_million?: number;
+    }
+  >;
 }
 
 // Normalize pricing data to use Decimal
@@ -66,13 +69,13 @@ export function getPricingByPattern(deploymentPattern: string): ModelPricing | u
     const deplPattern = pricing.deploymentPattern.toLowerCase();
 
     // Check for wildcard patterns like "gpt-5.4*" or "*kimi*"
-    if (deplPattern.endsWith("*") && pattern.startsWith(deplPattern.slice(0, -1))) {
+    if (deplPattern.endsWith('*') && pattern.startsWith(deplPattern.slice(0, -1))) {
       return pricing;
     }
-    if (deplPattern.startsWith("*") && pattern.endsWith(deplPattern.slice(1))) {
+    if (deplPattern.startsWith('*') && pattern.endsWith(deplPattern.slice(1))) {
       return pricing;
     }
-    if (pattern.includes(deplPattern.replace(/\*/g, ""))) {
+    if (pattern.includes(deplPattern.replace(/\*/g, ''))) {
       return pricing;
     }
   }
@@ -87,9 +90,9 @@ export function calculateCost(
   modelAlias: string,
   inputTokens: number,
   outputTokens: number,
-  thinkingTokens: number = 0,
-  cacheWriteTokens: number = 0,
-  cacheReadTokens: number = 0
+  thinkingTokens = 0,
+  cacheWriteTokens = 0,
+  cacheReadTokens = 0
 ): Decimal {
   const pricing = getPricingByPattern(modelAlias);
   if (!pricing) {
@@ -122,9 +125,11 @@ export function getAllPricingKeys(): string[] {
  * Validate pricing data structure
  */
 export function validatePricingData(): boolean {
-  return pricingData.version !== undefined &&
-         pricingData.currency === "USD" &&
-         Object.keys(pricingData.models).length === 8;
+  return (
+    pricingData.version !== undefined &&
+    pricingData.currency === 'USD' &&
+    Object.keys(pricingData.models).length === 8
+  );
 }
 
 // Export raw pricing data for reference

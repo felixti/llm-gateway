@@ -1,9 +1,9 @@
-import { env } from "./env";
+import { env } from './env';
 
 // Type definitions
-export type ModelFamily = "gpt" | "claude" | "kimi" | "glm" | "minimax";
-export type ProtocolFamily = "chat-completions" | "anthropic-messages";
-export type AzureAuthType = "entra-id" | "api-key";
+export type ModelFamily = 'gpt' | 'claude' | 'kimi' | 'glm' | 'minimax';
+export type ProtocolFamily = 'chat-completions' | 'anthropic-messages';
+export type AzureAuthType = 'entra-id' | 'api-key';
 
 // Azure auth configuration
 export interface AzureAuthConfig {
@@ -13,7 +13,7 @@ export interface AzureAuthConfig {
   clientSecret?: string;
   scope?: string;
   apiKey?: string;
-  keyHeader?: "api-key" | "x-api-key" | "Authorization";
+  keyHeader?: 'api-key' | 'x-api-key' | 'Authorization';
 }
 
 // Deployment configuration
@@ -34,17 +34,17 @@ export interface DeploymentConfig {
 function buildAzureOpenAIAuth(): AzureAuthConfig {
   if (env.AZURE_ENTRA_TENANT_ID && env.AZURE_ENTRA_CLIENT_ID && env.AZURE_ENTRA_CLIENT_SECRET) {
     return {
-      type: "entra-id",
+      type: 'entra-id',
       tenantId: env.AZURE_ENTRA_TENANT_ID,
       clientId: env.AZURE_ENTRA_CLIENT_ID,
       clientSecret: env.AZURE_ENTRA_CLIENT_SECRET,
-      scope: "https://cognitiveservices.azure.com/.default",
+      scope: 'https://cognitiveservices.azure.com/.default',
     };
   }
   return {
-    type: "api-key",
+    type: 'api-key',
     apiKey: env.AZURE_OPENAI_KEY,
-    keyHeader: "api-key",
+    keyHeader: 'api-key',
   };
 }
 
@@ -52,17 +52,17 @@ function buildAzureOpenAIAuth(): AzureAuthConfig {
 function buildFoundryAuth(): AzureAuthConfig {
   if (env.AZURE_ENTRA_TENANT_ID && env.AZURE_ENTRA_CLIENT_ID && env.AZURE_ENTRA_CLIENT_SECRET) {
     return {
-      type: "entra-id",
+      type: 'entra-id',
       tenantId: env.AZURE_ENTRA_TENANT_ID,
       clientId: env.AZURE_ENTRA_CLIENT_ID,
       clientSecret: env.AZURE_ENTRA_CLIENT_SECRET,
-      scope: "https://ai.azure.com/.default",
+      scope: 'https://ai.azure.com/.default',
     };
   }
   return {
-    type: "api-key",
+    type: 'api-key',
     apiKey: env.AZURE_AI_FOUNDRY_KEY,
-    keyHeader: "x-api-key",
+    keyHeader: 'x-api-key',
   };
 }
 
@@ -70,96 +70,96 @@ function buildFoundryAuth(): AzureAuthConfig {
 const DEPLOYMENTS: DeploymentConfig[] = [
   // GPT models via Azure OpenAI
   {
-    name: "gpt-5.4-global",
-    modelAlias: "gpt-5.4",
-    modelFamily: "gpt",
-    protocolFamily: "chat-completions",
-    azureModelName: "gpt-5.4",
-    endpoint: env.AZURE_OPENAI_ENDPOINT || "https://example.openai.azure.com",
+    name: 'gpt-5.4-global',
+    modelAlias: 'gpt-5.4',
+    modelFamily: 'gpt',
+    protocolFamily: 'chat-completions',
+    azureModelName: 'gpt-5.4',
+    endpoint: env.AZURE_OPENAI_ENDPOINT || 'https://example.openai.azure.com',
     authConfig: buildAzureOpenAIAuth(),
-    apiVersion: "2024-06-01",
-    fallbackDeployment: "gpt-5.3-codex",
+    apiVersion: '2024-06-01',
+    fallbackDeployment: 'gpt-5.3-codex',
     enabled: true,
   },
   {
-    name: "gpt-5.3-codex",
-    modelAlias: "gpt-5.3-codex",
-    modelFamily: "gpt",
-    protocolFamily: "chat-completions",
-    azureModelName: "gpt-5.3-codex",
-    endpoint: env.AZURE_OPENAI_ENDPOINT || "https://example.openai.azure.com",
+    name: 'gpt-5.3-codex',
+    modelAlias: 'gpt-5.3-codex',
+    modelFamily: 'gpt',
+    protocolFamily: 'chat-completions',
+    azureModelName: 'gpt-5.3-codex',
+    endpoint: env.AZURE_OPENAI_ENDPOINT || 'https://example.openai.azure.com',
     authConfig: buildAzureOpenAIAuth(),
-    apiVersion: "2024-06-01",
+    apiVersion: '2024-06-01',
     enabled: true,
   },
   // Claude models via Azure AI Foundry (Anthropic Messages API)
   {
-    name: "claude-opus-4-6",
-    modelAlias: "claude-opus-4-6",
-    modelFamily: "claude",
-    protocolFamily: "anthropic-messages",
-    azureModelName: "claude-opus-4-6",
-    endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || "https://example.ai.azure.com",
+    name: 'claude-opus-4-6',
+    modelAlias: 'claude-opus-4-6',
+    modelFamily: 'claude',
+    protocolFamily: 'anthropic-messages',
+    azureModelName: 'claude-opus-4-6',
+    endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || 'https://example.ai.azure.com',
     authConfig: buildFoundryAuth(),
-    apiVersion: "2023-06-01",
-    fallbackDeployment: "claude-sonnet-4-6",
+    apiVersion: '2023-06-01',
+    fallbackDeployment: 'claude-sonnet-4-6',
     enabled: true,
   },
   {
-    name: "claude-sonnet-4-6",
-    modelAlias: "claude-sonnet-4-6",
-    modelFamily: "claude",
-    protocolFamily: "anthropic-messages",
-    azureModelName: "claude-sonnet-4-6",
-    endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || "https://example.ai.azure.com",
+    name: 'claude-sonnet-4-6',
+    modelAlias: 'claude-sonnet-4-6',
+    modelFamily: 'claude',
+    protocolFamily: 'anthropic-messages',
+    azureModelName: 'claude-sonnet-4-6',
+    endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || 'https://example.ai.azure.com',
     authConfig: buildFoundryAuth(),
-    apiVersion: "2023-06-01",
-    fallbackDeployment: "claude-haiku-4-5",
+    apiVersion: '2023-06-01',
+    fallbackDeployment: 'claude-haiku-4-5',
     enabled: true,
   },
   {
-    name: "claude-haiku-4-5",
-    modelAlias: "claude-haiku-4-5",
-    modelFamily: "claude",
-    protocolFamily: "anthropic-messages",
-    azureModelName: "claude-haiku-4-5",
-    endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || "https://example.ai.azure.com",
+    name: 'claude-haiku-4-5',
+    modelAlias: 'claude-haiku-4-5',
+    modelFamily: 'claude',
+    protocolFamily: 'anthropic-messages',
+    azureModelName: 'claude-haiku-4-5',
+    endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || 'https://example.ai.azure.com',
     authConfig: buildFoundryAuth(),
-    apiVersion: "2023-06-01",
+    apiVersion: '2023-06-01',
     enabled: true,
   },
   // Third-party models via Azure AI Foundry (OpenAI-compatible)
   {
-    name: "kimi-k2.5",
-    modelAlias: "kimi-k2.5",
-    modelFamily: "kimi",
-    protocolFamily: "chat-completions",
-    azureModelName: "FW-Kimi-K2.5",
-    endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || "https://example.ai.azure.com",
+    name: 'kimi-k2.5',
+    modelAlias: 'kimi-k2.5',
+    modelFamily: 'kimi',
+    protocolFamily: 'chat-completions',
+    azureModelName: 'FW-Kimi-K2.5',
+    endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || 'https://example.ai.azure.com',
     authConfig: buildFoundryAuth(),
-    apiVersion: "2024-06-01",
+    apiVersion: '2024-06-01',
     enabled: true,
   },
   {
-    name: "glm-5",
-    modelAlias: "glm-5",
-    modelFamily: "glm",
-    protocolFamily: "chat-completions",
-    azureModelName: "FW-GLM-5",
-    endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || "https://example.ai.azure.com",
+    name: 'glm-5',
+    modelAlias: 'glm-5',
+    modelFamily: 'glm',
+    protocolFamily: 'chat-completions',
+    azureModelName: 'FW-GLM-5',
+    endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || 'https://example.ai.azure.com',
     authConfig: buildFoundryAuth(),
-    apiVersion: "2024-06-01",
+    apiVersion: '2024-06-01',
     enabled: true,
   },
   {
-    name: "minimax-m2.5",
-    modelAlias: "minimax-m2.5",
-    modelFamily: "minimax",
-    protocolFamily: "chat-completions",
-    azureModelName: "FW-MiniMax-M2.5",
-    endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || "https://example.ai.azure.com",
+    name: 'minimax-m2.5',
+    modelAlias: 'minimax-m2.5',
+    modelFamily: 'minimax',
+    protocolFamily: 'chat-completions',
+    azureModelName: 'FW-MiniMax-M2.5',
+    endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || 'https://example.ai.azure.com',
     authConfig: buildFoundryAuth(),
-    apiVersion: "2024-06-01",
+    apiVersion: '2024-06-01',
     enabled: true,
   },
 ];
@@ -211,7 +211,7 @@ export function getDeploymentsByFamily(family: ModelFamily): DeploymentConfig[] 
  * Get all enabled deployments
  */
 export function getAllDeployments(): DeploymentConfig[] {
-  return DEPLOYMENTS.filter(d => d.enabled);
+  return DEPLOYMENTS.filter((d) => d.enabled);
 }
 
 /**
@@ -222,8 +222,8 @@ export function getFallbackChain(deployment: DeploymentConfig): DeploymentConfig
   let current: DeploymentConfig | undefined = deployment;
 
   while (current?.fallbackDeployment) {
-    const fallback = DEPLOYMENTS.find(d => d.name === current!.fallbackDeployment);
-    if (fallback && fallback.enabled && fallback.protocolFamily === current.protocolFamily) {
+    const fallback = DEPLOYMENTS.find((d) => d.name === current!.fallbackDeployment);
+    if (fallback?.enabled && fallback.protocolFamily === current.protocolFamily) {
       chain.push(fallback);
       current = fallback;
     } else {

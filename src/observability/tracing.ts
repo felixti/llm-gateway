@@ -1,38 +1,35 @@
 /**
  * OpenTelemetry Tracing
  * SDK init with OTLP gRPC exporter, custom span attributes, sampling
- * 
+ *
  * Note: Bun runtime uses @opentelemetry/api directly without NodeSDK
  */
 
-import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc";
-import { Resource } from "@opentelemetry/resources";
 import {
-  ATTR_SERVICE_NAME,
-  ATTR_SERVICE_VERSION,
-} from "@opentelemetry/semantic-conventions";
-import {
-  trace,
+  type Span,
   SpanStatusCode,
+  type Tracer,
   context,
   propagation,
-  type Span,
-  type Tracer,
-} from "@opentelemetry/api";
-import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
-import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
-import { env } from "../config/env";
+  trace,
+} from '@opentelemetry/api';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
+import { Resource } from '@opentelemetry/resources';
+import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
+import { env } from '../config/env';
 
 // Custom span attribute keys
-export const ATTR_LLM_USER_ID = "llm.user_id";
-export const ATTR_LLM_MODEL = "llm.model";
-export const ATTR_LLM_DEPLOYMENT = "llm.deployment";
-export const ATTR_LLM_TOKENS_PROMPT = "llm.tokens.prompt";
-export const ATTR_LLM_TOKENS_COMPLETION = "llm.tokens.completion";
-export const ATTR_LLM_TOKENS_TOTAL = "llm.tokens.total";
-export const ATTR_LLM_COST_USD = "llm.cost.usd";
-export const ATTR_LLM_PROTOCOL = "llm.protocol";
-export const ATTR_AZURE_AUTH_TYPE = "azure.auth_type";
+export const ATTR_LLM_USER_ID = 'llm.user_id';
+export const ATTR_LLM_MODEL = 'llm.model';
+export const ATTR_LLM_DEPLOYMENT = 'llm.deployment';
+export const ATTR_LLM_TOKENS_PROMPT = 'llm.tokens.prompt';
+export const ATTR_LLM_TOKENS_COMPLETION = 'llm.tokens.completion';
+export const ATTR_LLM_TOKENS_TOTAL = 'llm.tokens.total';
+export const ATTR_LLM_COST_USD = 'llm.cost.usd';
+export const ATTR_LLM_PROTOCOL = 'llm.protocol';
+export const ATTR_AZURE_AUTH_TYPE = 'azure.auth_type';
 
 // Provider instance
 let provider: NodeTracerProvider | null = null;
@@ -64,7 +61,7 @@ export function initTracing(): void {
 
   const resource = new Resource({
     [ATTR_SERVICE_NAME]: env.OTEL_SERVICE_NAME,
-    [ATTR_SERVICE_VERSION]: "1.0.0",
+    [ATTR_SERVICE_VERSION]: '1.0.0',
   });
 
   provider = new NodeTracerProvider({
@@ -72,6 +69,7 @@ export function initTracing(): void {
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry type incompatibility requires cast
   provider.addSpanProcessor(new BatchSpanProcessor(exporter) as any);
   provider.register();
 }
@@ -170,7 +168,7 @@ export function injectTraceContext(
 
   // Also set x-ms-client-request-id for Azure
   if (requestId) {
-    carrier["x-ms-client-request-id"] = requestId;
+    carrier['x-ms-client-request-id'] = requestId;
   }
 
   return carrier;
@@ -189,9 +187,9 @@ export async function withSpan<T>(
   return tracer.startActiveSpan(name, async (span) => {
     try {
       if (attributes) {
-        Object.entries(attributes).forEach(([key, value]) => {
+        for (const [key, value] of Object.entries(attributes)) {
           span.setAttribute(key, value);
-        });
+        }
       }
 
       const result = await operation(span);

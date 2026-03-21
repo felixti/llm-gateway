@@ -1,8 +1,8 @@
 import {
-  AzureAuthConfig,
-  DeploymentConfig,
+  type AzureAuthConfig,
+  type DeploymentConfig,
   getDeploymentByAlias,
-} from "../config/deployments";
+} from '../config/deployments';
 
 // Constants for token refresh
 const TOKEN_REFRESH_BUFFER_SECONDS = 300; // 5 minutes before expiry
@@ -18,11 +18,9 @@ interface JwtPayload {
  */
 function decodeJwtExp(token: string): number | null {
   try {
-    const parts = token.split(".");
+    const parts = token.split('.');
     if (parts.length !== 3) return null;
-    const payload = JSON.parse(
-      Buffer.from(parts[1], "base64url").toString("utf-8")
-    ) as JwtPayload;
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8')) as JwtPayload;
     return payload.exp ?? null;
   } catch {
     return null;
@@ -70,12 +68,10 @@ export class AzureAuthManager {
   /**
    * Get auth headers for a specific deployment config
    */
-  async getAuthHeadersForDeployment(
-    deployment: DeploymentConfig
-  ): Promise<Record<string, string>> {
+  async getAuthHeadersForDeployment(deployment: DeploymentConfig): Promise<Record<string, string>> {
     const { authConfig } = deployment;
 
-    if (authConfig.type === "api-key") {
+    if (authConfig.type === 'api-key') {
       return this.getApiKeyHeaders(authConfig);
     }
     return this.getEntraIdHeaders(authConfig);
@@ -87,33 +83,30 @@ export class AzureAuthManager {
   private getApiKeyHeaders(config: AzureAuthConfig): Record<string, string> {
     const { apiKey, keyHeader } = config;
     if (!apiKey) {
-      throw new Error("API key not configured for deployment");
+      throw new Error('API key not configured for deployment');
     }
 
     switch (keyHeader) {
-      case "Authorization":
+      case 'Authorization':
         return { Authorization: `Bearer ${apiKey}` };
-      case "x-api-key":
-        return { "x-api-key": apiKey };
-      case "api-key":
+      case 'x-api-key':
+        return { 'x-api-key': apiKey };
       default:
-        return { "api-key": apiKey };
+        return { 'api-key': apiKey };
     }
   }
 
   /**
    * Entra ID authentication - client credentials flow with caching
    */
-  private async getEntraIdHeaders(
-    config: AzureAuthConfig
-  ): Promise<Record<string, string>> {
+  private async getEntraIdHeaders(config: AzureAuthConfig): Promise<Record<string, string>> {
     const tenantId = config.tenantId;
     const clientId = config.clientId;
     const clientSecret = config.clientSecret;
     const scope = config.scope;
 
     if (!tenantId || !clientId || !clientSecret) {
-      throw new Error("Entra ID credentials not fully configured");
+      throw new Error('Entra ID credentials not fully configured');
     }
 
     const cacheKey = `${tenantId}:${clientId}:${scope}`;
@@ -125,17 +118,12 @@ export class AzureAuthManager {
     }
 
     // Fetch new token - clientSecret is string here due to check above
-    const token = await this.fetchEntraToken(
-      tenantId,
-      clientId,
-      clientSecret,
-      scope ?? ""
-    );
+    const token = await this.fetchEntraToken(tenantId, clientId, clientSecret, scope ?? '');
 
     // Decode expiry from JWT
     const exp = decodeJwtExp(token);
     if (exp === null) {
-      throw new Error("Failed to decode token expiry");
+      throw new Error('Failed to decode token expiry');
     }
 
     // Cache the token
@@ -159,15 +147,15 @@ export class AzureAuthManager {
     const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
 
     const body = new URLSearchParams({
-      grant_type: "client_credentials",
+      grant_type: 'client_credentials',
       client_id: clientId,
       client_secret: clientSecret,
       scope,
     });
 
     const response = await this.fetchFn(tokenUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
     });
 
@@ -192,7 +180,7 @@ export class AzureAuthManager {
    */
   clearToken(deploymentName: string): void {
     const deployment = getDeploymentByAlias(deploymentName);
-    if (!deployment || deployment.authConfig.type !== "entra-id") return;
+    if (!deployment || deployment.authConfig.type !== 'entra-id') return;
 
     const { tenantId, clientId, scope } = deployment.authConfig;
     if (tenantId && clientId && scope) {

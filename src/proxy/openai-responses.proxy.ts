@@ -4,15 +4,15 @@
  * Used for Codex CLI and other Responses API clients
  */
 
-import { Hono } from "hono";
-import type { DeploymentConfig } from "../config/deployments";
-import { reconcileUsage } from "../services/quota.service";
-import type { TokenUsage } from "../services/pricing.service";
-import { errorForProtocol } from "../utils/errors";
-import { extractOpenAIUsage } from "../utils/streaming";
-import { AzureAuthManager } from "../services/azure-auth";
-import { withRetry } from "../services/retry";
-import { isRequestAllowed, recordSuccess, recordFailure } from "../services/circuit-breaker";
+import { Hono } from 'hono';
+import type { DeploymentConfig } from '../config/deployments';
+import { AzureAuthManager } from '../services/azure-auth';
+import { isRequestAllowed, recordFailure, recordSuccess } from '../services/circuit-breaker';
+import type { TokenUsage } from '../services/pricing.service';
+import { reconcileUsage } from '../services/quota.service';
+import { withRetry } from '../services/retry';
+import { errorForProtocol } from '../utils/errors';
+import { extractOpenAIUsage } from '../utils/streaming';
 
 const responsesRoutes = new Hono();
 
@@ -20,7 +20,7 @@ const responsesRoutes = new Hono();
 export { responsesRoutes as responsesProxy };
 
 // Responses API built-in tool types that need transformation
-const BUILTIN_TOOL_TYPES = ["file_search", "file_read", "shell_exec"];
+const BUILTIN_TOOL_TYPES = ['file_search', 'file_read', 'shell_exec'];
 
 // =============================================================================
 // Request Transformation (Responses API → Chat Completions)
@@ -41,7 +41,7 @@ interface ResponsesRequest {
     parameters?: Record<string, unknown>;
   }>;
   reasoning?: {
-    effort: "high" | "medium" | "low";
+    effort: 'high' | 'medium' | 'low';
   };
   stream?: boolean;
   max_tokens?: number;
@@ -58,22 +58,25 @@ function transformInputToMessages(input: string | string[] | ResponsesInputItem[
 }> {
   const messages: Array<{ role: string; content: string }> = [];
 
-  if (typeof input === "string") {
+  if (typeof input === 'string') {
     // Single string input → user message
-    messages.push({ role: "user", content: input });
+    messages.push({ role: 'user', content: input });
   } else if (Array.isArray(input)) {
     // Array of strings or objects
     for (const item of input) {
-      if (typeof item === "string") {
-        messages.push({ role: "user", content: item });
-      } else if (typeof item === "object") {
+      if (typeof item === 'string') {
+        messages.push({ role: 'user', content: item });
+      } else if (typeof item === 'object') {
         const msg = item as ResponsesInputItem;
-        if (msg.role === "system") {
-          messages.push({ role: "system", content: String(msg.content) });
-        } else if (msg.role === "user" || msg.role === "assistant") {
-          const content = typeof msg.content === "string" 
-            ? msg.content 
-            : (msg.content as Array<{type: string; text?: string}>).map(c => c.text || "").join("\n");
+        if (msg.role === 'system') {
+          messages.push({ role: 'system', content: String(msg.content) });
+        } else if (msg.role === 'user' || msg.role === 'assistant') {
+          const content =
+            typeof msg.content === 'string'
+              ? msg.content
+              : (msg.content as Array<{ type: string; text?: string }>)
+                  .map((c) => c.text || '')
+                  .join('\n');
           messages.push({ role: msg.role, content });
         }
       }
@@ -86,24 +89,26 @@ function transformInputToMessages(input: string | string[] | ResponsesInputItem[
 /**
  * Transform Responses API tools to function_calling format
  */
-function transformTools(tools?: ResponsesRequest["tools"]): Array<{
-  type: string;
-  function: {
-    name: string;
-    description?: string;
-    parameters: Record<string, unknown>;
-  };
-}> | undefined {
+function transformTools(tools?: ResponsesRequest['tools']):
+  | Array<{
+      type: string;
+      function: {
+        name: string;
+        description?: string;
+        parameters: Record<string, unknown>;
+      };
+    }>
+  | undefined {
   if (!tools || tools.length === 0) return undefined;
 
   return tools
-    .filter(tool => !BUILTIN_TOOL_TYPES.includes(tool.type))
-    .map(tool => ({
-      type: "function",
+    .filter((tool) => !BUILTIN_TOOL_TYPES.includes(tool.type))
+    .map((tool) => ({
+      type: 'function',
       function: {
         name: tool.name || `${tool.type}_tool`,
-        description: tool.description || "",
-        parameters: tool.parameters || { type: "object", properties: {} },
+        description: tool.description || '',
+        parameters: tool.parameters || { type: 'object', properties: {} },
       },
     }));
 }
@@ -207,17 +212,17 @@ function transformToResponsesFormat(
   const outputItems: ResponsesOutputItem[] = [];
 
   for (const choice of response.choices) {
-    if (choice.finish_reason === "tool_calls" && choice.message.tool_calls) {
+    if (choice.finish_reason === 'tool_calls' && choice.message.tool_calls) {
       // Handle tool call responses
       for (const toolCall of choice.message.tool_calls) {
         outputItems.push({
           id: toolCall.id,
-          type: "function",
-          status: "completed",
-          role: "assistant",
+          type: 'function',
+          status: 'completed',
+          role: 'assistant',
           content: [
             {
-              type: "tool_input",
+              type: 'tool_input',
               name: toolCall.function.name,
               input: toolCall.function.arguments,
             },
@@ -228,12 +233,12 @@ function transformToResponsesFormat(
       // Regular text response
       outputItems.push({
         id: `msg_${choice.index}`,
-        type: "message",
-        status: "completed",
+        type: 'message',
+        status: 'completed',
         role: choice.message.role,
         content: [
           {
-            type: "output_text",
+            type: 'output_text',
             text: choice.message.content,
           },
         ],
@@ -243,8 +248,8 @@ function transformToResponsesFormat(
 
   return {
     id: response.id,
-    object: "response",
-    status: "completed",
+    object: 'response',
+    status: 'completed',
     model: response.model,
     created: response.created,
     output: outputItems,
@@ -282,9 +287,9 @@ async function proxyNonStreaming(
 ): Promise<Response> {
   const response = await withRetry(() =>
     fetch(upstreamUrl, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
         ...headers,
       },
       body: JSON.stringify(body),
@@ -295,41 +300,43 @@ async function proxyNonStreaming(
     recordFailure(deployment.name);
     const errorBody = await response.text();
     const error = errorForProtocol(
-      "/v1/responses",
+      '/v1/responses',
       response.status,
-      "bad_gateway",
+      'bad_gateway',
       `Azure OpenAI error: ${response.status} ${errorBody}`
     );
     return new Response(JSON.stringify(error), {
       status: response.status,
-      headers: { "Content-Type": "application/json" },
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
   recordSuccess(deployment.name);
 
   // Get Chat Completions response
-  const chatResponse = await response.json() as ChatCompletionResponse;
+  const chatResponse = (await response.json()) as ChatCompletionResponse;
 
   // Extract usage for quota reconciliation
-  const usage: TokenUsage | undefined = chatResponse.usage ? {
-    prompt_tokens: chatResponse.usage.prompt_tokens,
-    completion_tokens: chatResponse.usage.completion_tokens,
-    thinking_tokens: undefined,
-    cache_creation_input_tokens: undefined,
-    cache_read_input_tokens: undefined,
-  } : undefined;
+  const usage: TokenUsage | undefined = chatResponse.usage
+    ? {
+        prompt_tokens: chatResponse.usage.prompt_tokens,
+        completion_tokens: chatResponse.usage.completion_tokens,
+        thinking_tokens: undefined,
+        cache_creation_input_tokens: undefined,
+        cache_read_input_tokens: undefined,
+      }
+    : undefined;
 
   if (usage && reservationId) {
     await reconcileUsage(reservationId, usage, deployment.azureModelName);
   }
 
   // Transform to Responses API format
-  const responsesResponse = transformToResponsesFormat(chatResponse, "");
+  const responsesResponse = transformToResponsesFormat(chatResponse, '');
 
   return new Response(JSON.stringify(responsesResponse), {
     status: 200,
-    headers: { "Content-Type": "application/json" },
+    headers: { 'Content-Type': 'application/json' },
   });
 }
 
@@ -346,12 +353,12 @@ async function proxyStreaming(
 ): Promise<Response> {
   const response = await withRetry(() =>
     fetch(upstreamUrl, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
         ...headers,
-        Accept: "text/event-stream",
-        "x-ms-client-request-id": requestId,
+        Accept: 'text/event-stream',
+        'x-ms-client-request-id': requestId,
       },
       body: JSON.stringify({ ...body, stream: true }),
     })
@@ -361,21 +368,21 @@ async function proxyStreaming(
     recordFailure(deployment.name);
     const errorBody = await response.text();
     const error = errorForProtocol(
-      "/v1/responses",
+      '/v1/responses',
       response.status,
-      "bad_gateway",
+      'bad_gateway',
       `Azure OpenAI error: ${response.status} ${errorBody}`
     );
     return new Response(JSON.stringify(error), {
       status: response.status,
-      headers: { "Content-Type": "application/json" },
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
   recordSuccess(deployment.name);
 
   if (!response.body) {
-    return new Response("Internal Server Error: No response body", { status: 500 });
+    return new Response('Internal Server Error: No response body', { status: 500 });
   }
 
   let usageExtracted = false;
@@ -393,8 +400,8 @@ async function proxyStreaming(
           const usage = extractOpenAIUsage(text);
           if (usage) {
             usageExtracted = true;
-            reconcileUsage(reservationId, usage, deployment.azureModelName).catch(
-              (err) => console.error("Quota reconciliation error:", err)
+            reconcileUsage(reservationId, usage, deployment.azureModelName).catch((err) =>
+              console.error('Quota reconciliation error:', err)
             );
           }
         }
@@ -408,10 +415,10 @@ async function proxyStreaming(
   return new Response(stream, {
     status: 200,
     headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-      "X-Request-Id": requestId,
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Request-Id': requestId,
     },
   });
 }
@@ -419,18 +426,18 @@ async function proxyStreaming(
 /**
  * Main POST handler for /v1/responses
  */
-responsesRoutes.post("/", async (c) => {
-  const deployment = c.get("deployment");
-  const requestId = c.get("requestId");
-  const reservationId = c.get("reservationId");
+responsesRoutes.post('/', async (c) => {
+  const deployment = c.get('deployment');
+  const requestId = c.get('requestId');
+  const reservationId = c.get('reservationId');
 
   // Check circuit breaker
   if (!isRequestAllowed(deployment.name)) {
     const error = errorForProtocol(
-      "/v1/responses",
+      '/v1/responses',
       503,
-      "service_unavailable",
-      "Service temporarily unavailable, please retry"
+      'service_unavailable',
+      'Service temporarily unavailable, please retry'
     );
     return c.json(error, 503);
   }

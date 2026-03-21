@@ -3,8 +3,8 @@
  * HMAC-SHA256 based PAT verification - never stores raw tokens
  */
 
-import { createHmac, timingSafeEqual } from "crypto";
-import { env } from "../config/env";
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import { env } from '../config/env';
 
 /**
  * PAT token format: lg_{userId}_{header}.{payload}.{signature}
@@ -31,7 +31,7 @@ export interface PatBlocklistEntry {
  * Does NOT return the raw token - only parsed components
  */
 export function parsePatToken(rawToken: string): PatToken | null {
-  const parts = rawToken.split(".");
+  const parts = rawToken.split('.');
 
   if (parts.length !== 3) {
     return null;
@@ -52,7 +52,7 @@ export function parsePatToken(rawToken: string): PatToken | null {
     payload: payloadB64,
     signature: signatureB64,
     // SECURITY: Never store the raw token
-    raw: "", // Empty string - raw token is never retained
+    raw: '', // Empty string - raw token is never retained
   };
 }
 
@@ -61,9 +61,9 @@ export function parsePatToken(rawToken: string): PatToken | null {
  * This is what we STORE - never the raw token
  */
 export function hashPatToken(rawToken: string): string {
-  const hmac = createHmac("sha256", env.PAT_SECRET);
+  const hmac = createHmac('sha256', env.PAT_SECRET);
   hmac.update(rawToken);
-  return hmac.digest("hex");
+  return hmac.digest('hex');
 }
 
 /**
@@ -75,8 +75,8 @@ export function verifyPatHash(rawToken: string, storedHash: string): boolean {
 
   // Timing-safe comparison
   try {
-    const a = Buffer.from(computedHash, "hex");
-    const b = Buffer.from(storedHash, "hex");
+    const a = Buffer.from(computedHash, 'hex');
+    const b = Buffer.from(storedHash, 'hex');
 
     if (a.length !== b.length) {
       return false;
@@ -100,27 +100,27 @@ export function validatePatStructure(rawToken: string): {
   const token = parsePatToken(rawToken);
 
   if (!token) {
-    return { valid: false, error: "Invalid PAT format" };
+    return { valid: false, error: 'Invalid PAT format' };
   }
 
   // Verify signature
-  const expectedSignature = createHmac("sha256", env.PAT_SECRET)
+  const expectedSignature = createHmac('sha256', env.PAT_SECRET)
     .update(`${token.header}.${token.payload}`)
-    .digest("hex");
+    .digest('hex');
 
-  const signatureBuffer = Buffer.from(token.signature, "hex");
-  const expectedBuffer = Buffer.from(expectedSignature, "hex");
+  const signatureBuffer = Buffer.from(token.signature, 'hex');
+  const expectedBuffer = Buffer.from(expectedSignature, 'hex');
 
   if (signatureBuffer.length !== expectedBuffer.length) {
-    return { valid: false, error: "Invalid signature length" };
+    return { valid: false, error: 'Invalid signature length' };
   }
 
   try {
     if (!timingSafeEqual(signatureBuffer, expectedBuffer)) {
-      return { valid: false, error: "Invalid signature" };
+      return { valid: false, error: 'Invalid signature' };
     }
   } catch {
-    return { valid: false, error: "Signature comparison failed" };
+    return { valid: false, error: 'Signature comparison failed' };
   }
 
   // SECURITY: Return token without raw value
@@ -131,7 +131,7 @@ export function validatePatStructure(rawToken: string): {
       header: token.header,
       payload: token.payload,
       signature: token.signature,
-      raw: "", // Raw token is never returned
+      raw: '', // Raw token is never returned
     },
   };
 }
@@ -151,11 +151,11 @@ export async function isJtiBlocklisted(
   }
 
   // Compare hash of provided JTI with stored hash
-  const jtiHash = createHmac("sha256", env.PAT_SECRET).update(jti).digest("hex");
+  const jtiHash = createHmac('sha256', env.PAT_SECRET).update(jti).digest('hex');
 
   try {
-    const a = Buffer.from(jtiHash, "hex");
-    const b = Buffer.from(storedHash, "hex");
+    const a = Buffer.from(jtiHash, 'hex');
+    const b = Buffer.from(storedHash, 'hex');
     return a.length === b.length && timingSafeEqual(a, b);
   } catch {
     return false;
@@ -167,5 +167,5 @@ export async function isJtiBlocklisted(
  * This is what we STORE in Redis - never the raw JTI
  */
 export function hashJtiForBlocklist(jti: string): string {
-  return createHmac("sha256", env.PAT_SECRET).update(jti).digest("hex");
+  return createHmac('sha256', env.PAT_SECRET).update(jti).digest('hex');
 }

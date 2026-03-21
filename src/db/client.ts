@@ -2,10 +2,10 @@
  * PostgreSQL Database Client
  * Uses Bun's built-in SQL support from "bun" module
  */
-import { SQL } from "bun";
+import { SQL } from 'bun';
 
 // Create database connection
-const connectionString = process.env.DATABASE_URL || "postgres://localhost:5432/postgres";
+const connectionString = process.env.DATABASE_URL || 'postgres://localhost:5432/postgres';
 
 export const db = new SQL(connectionString);
 
@@ -30,7 +30,7 @@ export const database = {
         rowCount: Array.isArray(rows) ? rows.length : 0,
       };
     } catch (error) {
-      console.error("Database query failed:", error);
+      console.error('Database query failed:', error);
       throw error;
     }
   },

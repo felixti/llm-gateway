@@ -89,7 +89,8 @@ function loadSubtasks(feature: string): Subtask[] {
   const featureDir = path.join(TASKS_DIR, feature);
   if (!fs.existsSync(featureDir)) return [];
 
-  const files = fs.readdirSync(featureDir)
+  const files = fs
+    .readdirSync(featureDir)
     .filter((f: string) => f.match(/^subtask_\d{2}\.json$/))
     .sort();
 
@@ -125,19 +126,22 @@ function cmdStatus(feature?: string): void {
     }
 
     const counts = {
-      pending: subtasks.filter(s => s.status === 'pending').length,
-      in_progress: subtasks.filter(s => s.status === 'in_progress').length,
-      completed: subtasks.filter(s => s.status === 'completed').length,
-      blocked: subtasks.filter(s => s.status === 'blocked').length,
+      pending: subtasks.filter((s) => s.status === 'pending').length,
+      in_progress: subtasks.filter((s) => s.status === 'in_progress').length,
+      completed: subtasks.filter((s) => s.status === 'completed').length,
+      blocked: subtasks.filter((s) => s.status === 'blocked').length,
     };
 
-    const progress = subtasks.length > 0
-      ? Math.round((counts.completed / subtasks.length) * 100)
-      : 0;
+    const progress =
+      subtasks.length > 0 ? Math.round((counts.completed / subtasks.length) * 100) : 0;
 
     console.log(`\n[${f}] ${task.name}`);
-    console.log(`  Status: ${task.status} | Progress: ${progress}% (${counts.completed}/${subtasks.length})`);
-    console.log(`  Pending: ${counts.pending} | In Progress: ${counts.in_progress} | Completed: ${counts.completed} | Blocked: ${counts.blocked}`);
+    console.log(
+      `  Status: ${task.status} | Progress: ${progress}% (${counts.completed}/${subtasks.length})`
+    );
+    console.log(
+      `  Pending: ${counts.pending} | In Progress: ${counts.in_progress} | Completed: ${counts.completed} | Blocked: ${counts.blocked}`
+    );
   }
 }
 
@@ -148,11 +152,13 @@ function cmdNext(feature?: string): void {
 
   for (const f of features) {
     const subtasks = loadSubtasks(f);
-    const completedSeqs = new Set(subtasks.filter(s => s.status === 'completed').map(s => s.seq));
+    const completedSeqs = new Set(
+      subtasks.filter((s) => s.status === 'completed').map((s) => s.seq)
+    );
 
-    const ready = subtasks.filter(s => {
+    const ready = subtasks.filter((s) => {
       if (s.status !== 'pending') return false;
-      return s.depends_on.every(dep => completedSeqs.has(dep));
+      return s.depends_on.every((dep) => completedSeqs.has(dep));
     });
 
     if (ready.length > 0) {
@@ -173,12 +179,14 @@ function cmdParallel(feature?: string): void {
 
   for (const f of features) {
     const subtasks = loadSubtasks(f);
-    const completedSeqs = new Set(subtasks.filter(s => s.status === 'completed').map(s => s.seq));
+    const completedSeqs = new Set(
+      subtasks.filter((s) => s.status === 'completed').map((s) => s.seq)
+    );
 
-    const parallel = subtasks.filter(s => {
+    const parallel = subtasks.filter((s) => {
       if (s.status !== 'pending') return false;
       if (!s.parallel) return false;
-      return s.depends_on.every(dep => completedSeqs.has(dep));
+      return s.depends_on.every((dep) => completedSeqs.has(dep));
     });
 
     if (parallel.length > 0) {
@@ -193,7 +201,7 @@ function cmdParallel(feature?: string): void {
 
 function cmdDeps(feature: string, seq: string): void {
   const subtasks = loadSubtasks(feature);
-  const target = subtasks.find(s => s.seq === seq);
+  const target = subtasks.find((s) => s.seq === seq);
 
   if (!target) {
     console.log(`Task ${seq} not found in ${feature}`);
@@ -208,15 +216,16 @@ function cmdDeps(feature: string, seq: string): void {
     return;
   }
 
-  const printDeps = (seqs: string[], indent: string = '  '): void => {
+  const printDeps = (seqs: string[], indent = '  '): void => {
     for (let i = 0; i < seqs.length; i++) {
       const depSeq = seqs[i];
-      const dep = subtasks.find(s => s.seq === depSeq);
+      const dep = subtasks.find((s) => s.seq === depSeq);
       const isLast = i === seqs.length - 1;
       const branch = isLast ? '└──' : '├──';
 
       if (dep) {
-        const statusIcon = dep.status === 'completed' ? '✓' : dep.status === 'in_progress' ? '~' : '○';
+        const statusIcon =
+          dep.status === 'completed' ? '✓' : dep.status === 'in_progress' ? '~' : '○';
         console.log(`${indent}${branch} ${statusIcon} ${depSeq} - ${dep.title} [${dep.status}]`);
         if (dep.depends_on.length > 0) {
           const newIndent = indent + (isLast ? '    ' : '│   ');
@@ -238,21 +247,22 @@ function cmdBlocked(feature?: string): void {
 
   for (const f of features) {
     const subtasks = loadSubtasks(f);
-    const completedSeqs = new Set(subtasks.filter(s => s.status === 'completed').map(s => s.seq));
+    const completedSeqs = new Set(
+      subtasks.filter((s) => s.status === 'completed').map((s) => s.seq)
+    );
 
-    const blocked = subtasks.filter(s => {
+    const blocked = subtasks.filter((s) => {
       if (s.status === 'blocked') return true;
       if (s.status !== 'pending') return false;
-      return !s.depends_on.every(dep => completedSeqs.has(dep));
+      return !s.depends_on.every((dep) => completedSeqs.has(dep));
     });
 
     if (blocked.length > 0) {
       console.log(`[${f}]`);
       for (const s of blocked) {
-        const waitingFor = s.depends_on.filter(dep => !completedSeqs.has(dep));
-        const reason = s.status === 'blocked'
-          ? 'explicitly blocked'
-          : `waiting: ${waitingFor.join(', ')}`;
+        const waitingFor = s.depends_on.filter((dep) => !completedSeqs.has(dep));
+        const reason =
+          s.status === 'blocked' ? 'explicitly blocked' : `waiting: ${waitingFor.join(', ')}`;
         console.log(`  ${s.seq} - ${s.title} (${reason})`);
       }
       console.log();
@@ -267,7 +277,7 @@ function cmdComplete(feature: string, seq: string, summary: string): void {
   }
 
   const subtasks = loadSubtasks(feature);
-  const subtask = subtasks.find(s => s.seq === seq);
+  const subtask = subtasks.find((s) => s.seq === seq);
 
   if (!subtask) {
     console.log(`Task ${seq} not found in ${feature}`);
@@ -284,7 +294,7 @@ function cmdComplete(feature: string, seq: string, summary: string): void {
   const task = loadTask(feature);
   if (task) {
     const newSubtasks = loadSubtasks(feature);
-    task.completed_count = newSubtasks.filter(s => s.status === 'completed').length;
+    task.completed_count = newSubtasks.filter((s) => s.status === 'completed').length;
     saveTask(feature, task);
   }
 
@@ -332,8 +342,10 @@ function cmdValidate(feature?: string): void {
     'completion_summary',
   ];
 
-  const hasField = (obj: any, field: string): boolean => Object.prototype.hasOwnProperty.call(obj, field);
-  const isStringArray = (value: any): boolean => Array.isArray(value) && value.every(v => typeof v === 'string');
+  const hasField = (obj: any, field: string): boolean =>
+    Object.prototype.hasOwnProperty.call(obj, field);
+  const isStringArray = (value: any): boolean =>
+    Array.isArray(value) && value.every((v) => typeof v === 'string');
 
   console.log('\n=== Validation Results ===\n');
 
@@ -353,7 +365,7 @@ function cmdValidate(feature?: string): void {
       const seq = typeof s.seq === 'string' ? s.seq : '';
       seqCounts.set(seq, (seqCounts.get(seq) || 0) + 1);
     }
-    const seqs = new Set(subtasks.map(s => s.seq));
+    const seqs = new Set(subtasks.map((s) => s.seq));
 
     if (task) {
       // Required fields in task.json
@@ -377,7 +389,11 @@ function cmdValidate(feature?: string): void {
       if (!isStringArray(task.context_files)) {
         errors.push('task.json: context_files must be string[]');
       }
-      if (hasField(task, 'reference_files') && task.reference_files !== undefined && !isStringArray(task.reference_files)) {
+      if (
+        hasField(task, 'reference_files') &&
+        task.reference_files !== undefined &&
+        !isStringArray(task.reference_files)
+      ) {
         errors.push('task.json: reference_files must be string[] when present');
       }
       if (!isStringArray(task.exit_criteria)) {
@@ -427,7 +443,11 @@ function cmdValidate(feature?: string): void {
       if (!isStringArray(s.context_files)) {
         errors.push(`${s.seq}: context_files must be string[]`);
       }
-      if (hasField(s, 'reference_files') && s.reference_files !== undefined && !isStringArray(s.reference_files)) {
+      if (
+        hasField(s, 'reference_files') &&
+        s.reference_files !== undefined &&
+        !isStringArray(s.reference_files)
+      ) {
         errors.push(`${s.seq}: reference_files must be string[] when present`);
       }
       if (!isStringArray(s.acceptance_criteria)) {
@@ -447,7 +467,7 @@ function cmdValidate(feature?: string): void {
       }
 
       // Check for missing dependencies
-      for (const dep of (Array.isArray(s.depends_on) ? s.depends_on : [])) {
+      for (const dep of Array.isArray(s.depends_on) ? s.depends_on : []) {
         if (!seqs.has(dep)) {
           errors.push(`${s.seq}: depends on non-existent task ${dep}`);
         }
@@ -463,7 +483,7 @@ function cmdValidate(feature?: string): void {
         if (visited.has(seq)) return false;
         visited.add(seq);
 
-        const task = subtasks.find(t => t.seq === seq);
+        const task = subtasks.find((t) => t.seq === seq);
         if (task) {
           for (const dep of task.depends_on) {
             if (checkCircular(dep, [...path, seq])) return true;
@@ -476,7 +496,9 @@ function cmdValidate(feature?: string): void {
 
     // Check counts match
     if (task && task.subtask_count !== subtasks.length) {
-      errors.push(`task.json subtask_count (${task.subtask_count}) doesn't match actual count (${subtasks.length})`);
+      errors.push(
+        `task.json subtask_count (${task.subtask_count}) doesn't match actual count (${subtasks.length})`
+      );
     }
 
     // Print results
@@ -496,7 +518,7 @@ function cmdValidate(feature?: string): void {
 }
 
 // Main
-const [,, command, ...args] = process.argv;
+const [, , command, ...args] = process.argv;
 
 switch (command) {
   case 'status':

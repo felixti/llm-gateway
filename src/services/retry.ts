@@ -28,7 +28,7 @@ export function calculateBackoff(
   baseDelayMs: number = DEFAULT_BASE_DELAY_MS
 ): number {
   // Calculate exponential delay: baseDelay * 2^(attempt-1)
-  const exponentialDelay = baseDelayMs * Math.pow(2, attempt - 1);
+  const exponentialDelay = baseDelayMs * 2 ** (attempt - 1);
 
   // Cap at max backoff
   const cappedDelay = Math.min(exponentialDelay, maxBackoffMs);
@@ -51,18 +51,18 @@ export function isNonRetryable(status: number): boolean {
  * Extract Retry-After header value in seconds
  */
 export function parseRetryAfterHeader(headers: Headers): number | null {
-  const retryAfter = headers.get("Retry-After");
+  const retryAfter = headers.get('Retry-After');
   if (!retryAfter) return null;
 
   // Try parsing as seconds first
-  const seconds = parseInt(retryAfter, 10);
-  if (!isNaN(seconds)) {
+  const seconds = Number.parseInt(retryAfter, 10);
+  if (!Number.isNaN(seconds)) {
     return seconds * 1_000; // Convert to milliseconds
   }
 
   // Try parsing as HTTP date
   const date = Date.parse(retryAfter);
-  if (!isNaN(date)) {
+  if (!Number.isNaN(date)) {
     return Math.max(0, date - Date.now());
   }
 
@@ -83,7 +83,7 @@ function getStatusFromError(error: unknown): number {
   if (error instanceof Response) {
     return error.status;
   }
-  if (error && typeof error === "object" && "status" in error) {
+  if (error && typeof error === 'object' && 'status' in error) {
     return (error as { status: number }).status;
   }
   return 0;
@@ -92,10 +92,7 @@ function getStatusFromError(error: unknown): number {
 /**
  * Execute a function with retry logic
  */
-export async function withRetry<T>(
-  fn: () => Promise<T>,
-  options: RetryOptions = {}
-): Promise<T> {
+export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
   const maxBackoffMs = options.maxBackoffMs ?? DEFAULT_MAX_BACKOFF_MS;
   const baseDelayMs = options.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
@@ -148,8 +145,5 @@ export async function fetchWithRetry(
 ): Promise<Response> {
   const opts = retryOptions ?? options.retryOptions ?? {};
 
-  return withRetry(
-    () => fetch(url, options),
-    opts
-  );
+  return withRetry(() => fetch(url, options), opts);
 }

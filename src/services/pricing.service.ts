@@ -4,8 +4,8 @@
  * Hot-reloads pricing configuration from pricing.json
  */
 
-import { Decimal } from "decimal.js";
-import pricingData from "../config/pricing.json";
+import { Decimal } from 'decimal.js';
+import pricingData from '../config/pricing.json';
 
 export interface TokenUsage {
   prompt_tokens: number;
@@ -27,14 +27,17 @@ export interface ModelPricing {
 interface PricingData {
   version: string;
   currency: string;
-  models: Record<string, {
-    deployment_pattern: string;
-    input_per_million: number;
-    output_per_million: number;
-    thinking_tokens_per_million?: number;
-    cache_write_per_million?: number;
-    cache_read_per_million?: number;
-  }>;
+  models: Record<
+    string,
+    {
+      deployment_pattern: string;
+      input_per_million: number;
+      output_per_million: number;
+      thinking_tokens_per_million?: number;
+      cache_write_per_million?: number;
+      cache_read_per_million?: number;
+    }
+  >;
 }
 
 /**
@@ -72,7 +75,7 @@ let pricingCache: Map<string, ModelPricing> = normalizePricing(pricingData as Pr
 export function reloadPricing(): void {
   // Re-read the pricing data
   // In Bun, we can use import() to re-fetch the JSON module
-  import("../config/pricing.json").then((module) => {
+  import('../config/pricing.json').then((module) => {
     pricingCache = normalizePricing(module.default as PricingData);
   });
 }
@@ -93,13 +96,13 @@ export function getPricingByPattern(deploymentPattern: string): ModelPricing | u
     const deplPattern = pricing.deploymentPattern.toLowerCase();
 
     // Check for wildcard patterns
-    if (deplPattern.endsWith("*") && pattern.startsWith(deplPattern.slice(0, -1))) {
+    if (deplPattern.endsWith('*') && pattern.startsWith(deplPattern.slice(0, -1))) {
       return pricing;
     }
-    if (deplPattern.startsWith("*") && pattern.endsWith(deplPattern.slice(1))) {
+    if (deplPattern.startsWith('*') && pattern.endsWith(deplPattern.slice(1))) {
       return pricing;
     }
-    if (pattern.includes(deplPattern.replace(/\*/g, ""))) {
+    if (pattern.includes(deplPattern.replace(/\*/g, ''))) {
       return pricing;
     }
   }
@@ -118,31 +121,28 @@ export function calculateCost(usage: TokenUsage, model: string): Decimal {
   }
 
   // Calculate each component
-  const inputCost = new Decimal(usage.prompt_tokens)
-    .div(1_000_000)
-    .times(pricing.inputPerMillion);
+  const inputCost = new Decimal(usage.prompt_tokens).div(1_000_000).times(pricing.inputPerMillion);
 
   const outputCost = new Decimal(usage.completion_tokens)
     .div(1_000_000)
     .times(pricing.outputPerMillion);
 
-  const thinkingCost = pricing.thinkingPerMillion && usage.thinking_tokens
-    ? new Decimal(usage.thinking_tokens)
-        .div(1_000_000)
-        .times(pricing.thinkingPerMillion)
-    : new Decimal(0);
+  const thinkingCost =
+    pricing.thinkingPerMillion && usage.thinking_tokens
+      ? new Decimal(usage.thinking_tokens).div(1_000_000).times(pricing.thinkingPerMillion)
+      : new Decimal(0);
 
-  const cacheWriteCost = pricing.cacheWritePerMillion && usage.cache_creation_input_tokens
-    ? new Decimal(usage.cache_creation_input_tokens)
-        .div(1_000_000)
-        .times(pricing.cacheWritePerMillion)
-    : new Decimal(0);
+  const cacheWriteCost =
+    pricing.cacheWritePerMillion && usage.cache_creation_input_tokens
+      ? new Decimal(usage.cache_creation_input_tokens)
+          .div(1_000_000)
+          .times(pricing.cacheWritePerMillion)
+      : new Decimal(0);
 
-  const cacheReadCost = pricing.cacheReadPerMillion && usage.cache_read_input_tokens
-    ? new Decimal(usage.cache_read_input_tokens)
-        .div(1_000_000)
-        .times(pricing.cacheReadPerMillion)
-    : new Decimal(0);
+  const cacheReadCost =
+    pricing.cacheReadPerMillion && usage.cache_read_input_tokens
+      ? new Decimal(usage.cache_read_input_tokens).div(1_000_000).times(pricing.cacheReadPerMillion)
+      : new Decimal(0);
 
   // Sum all costs and return with 6 decimal precision
   return inputCost
@@ -160,7 +160,7 @@ export function calculateEstimatedCost(
   promptTokens: number,
   maxOutputTokens: number,
   model: string,
-  thinkingTokens: number = 0
+  thinkingTokens = 0
 ): Decimal {
   const usage: TokenUsage = {
     prompt_tokens: promptTokens,
@@ -186,7 +186,9 @@ export function getAllPricingKeys(): string[] {
  * Validate pricing data structure
  */
 export function validatePricingData(): boolean {
-  return (pricingData as PricingData).version !== undefined &&
-         (pricingData as PricingData).currency === "USD" &&
-         Object.keys((pricingData as PricingData).models).length === 8;
+  return (
+    (pricingData as PricingData).version !== undefined &&
+    (pricingData as PricingData).currency === 'USD' &&
+    Object.keys((pricingData as PricingData).models).length === 8
+  );
 }
