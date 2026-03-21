@@ -5,7 +5,6 @@
 
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { getDeploymentByAlias } from '../config/deployments';
 import { authMiddleware } from '../middleware/auth';
 import { protocolGuardMiddleware } from '../middleware/protocol-guard';
 import { quotaMiddleware } from '../middleware/quota';
@@ -15,9 +14,7 @@ import {
   proxyNonStreamingAnthropic,
   proxyStreamingAnthropic,
 } from '../proxy/anthropic.proxy';
-import { AzureAuthManager } from '../services/azure-auth';
-import { isRequestAllowed } from '../services/circuit-breaker';
-import { errorForProtocol } from '../utils/errors';
+import { createRequestHandler } from './factories/request-handler.factory';
 
 // Zod schema for Anthropic messages body validation
 const anthropicMessagesBodySchema = z.object({
@@ -79,6 +76,17 @@ const anthropicMessagesBodySchema = z.object({
 
 export type AnthropicMessagesBody = z.infer<typeof anthropicMessagesBodySchema>;
 
+// Create handler using factory
+const handleMessagesRequest = createRequestHandler({
+  schema: anthropicMessagesBodySchema,
+  protocol: 'anthropic',
+  path: '/v1/messages',
+  proxyStreaming: proxyStreamingAnthropic,
+  proxyNonStreaming: proxyNonStreamingAnthropic,
+  getModel: (body: Record<string, unknown>) => body.model as string,
+  buildUpstreamUrl: (deployment) => buildUpstreamUrlAnthropic(deployment),
+});
+
 // Create messages routes
 export const messagesRoutes = new Hono();
 
@@ -89,85 +97,4 @@ messagesRoutes.use('*', rateLimitMiddleware);
 messagesRoutes.use('*', quotaMiddleware);
 
 // POST /v1/messages
-messagesRoutes.post('/', async (c) => {
-  // Parse body
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    const error = errorForProtocol(c.req.path, 400, 'invalid_request', 'Invalid JSON body');
-    c.status(400);
-    return c.json(error);
-  }
-
-  // Validate body
-  const parsed = anthropicMessagesBodySchema.safeParse(body);
-  if (!parsed.success) {
-    const firstError = parsed.error.errors[0];
-    const error = errorForProtocol(
-      c.req.path,
-      400,
-      'invalid_request',
-      `${firstError.path.join('.')}: ${firstError.message}`
-    );
-    c.status(400);
-    return c.json(error);
-  }
-
-  const validatedBody = parsed.data;
-
-  // Get deployment
-  const deployment = getDeploymentByAlias(validatedBody.model);
-  if (!deployment) {
-    const error = errorForProtocol(
-      c.req.path,
-      400,
-      'model_not_supported',
-      `Unknown model: ${validatedBody.model}`
-    );
-    c.status(400);
-    return c.json(error);
-  }
-
-  // Check circuit breaker
-  if (!isRequestAllowed(deployment.name)) {
-    const error = errorForProtocol(
-      c.req.path,
-      503,
-      'overloaded_error',
-      'Service temporarily unavailable, please retry'
-    );
-    return c.json(error, 503);
-  }
-
-  // Get auth headers
-  const authManager = new AzureAuthManager();
-  const authHeaders = await authManager.getAuthHeaders(deployment.name);
-
-  // Build upstream request
-  const upstreamUrl = buildUpstreamUrlAnthropic(deployment);
-
-  // Get context values
-  const requestId = c.get('requestId') || '';
-  const reservationId = c.get('reservationId') || '';
-
-  // Determine streaming
-  if (validatedBody.stream) {
-    return proxyStreamingAnthropic(
-      upstreamUrl,
-      authHeaders,
-      validatedBody as Record<string, unknown>,
-      deployment,
-      reservationId,
-      requestId
-    );
-  }
-
-  return proxyNonStreamingAnthropic(
-    upstreamUrl,
-    authHeaders,
-    validatedBody as Record<string, unknown>,
-    deployment,
-    reservationId
-  );
-});
+messagesRoutes.post('/', handleMessagesRequest);
