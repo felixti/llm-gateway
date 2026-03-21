@@ -8,6 +8,7 @@ import type { Context, Next } from 'hono';
 import { redis } from '../db/redis';
 import { type PatToken, hashJtiForBlocklist, validatePatStructure } from '../utils/auth';
 import { errorForProtocol } from '../utils/errors';
+import { type Result, err, isOk, ok } from '../utils/result';
 
 const HEADER_AUTHORIZATION = 'Authorization';
 const BEARER_PREFIX = 'Bearer ';
@@ -19,39 +20,82 @@ export const JTI_KEY = 'jti';
 export const PAT_TOKEN_KEY = 'patToken';
 
 /**
+ * Result type for auth validation steps
+ */
+type AuthResult<T> = Result<T, { code: string; message: string }>;
+
+/**
  * Extract Bearer token from Authorization header
  */
-function extractBearerToken(authHeader: string | undefined): string | null {
+function extractBearerToken(authHeader: string | undefined): AuthResult<string> {
   if (!authHeader || !authHeader.startsWith(BEARER_PREFIX)) {
-    return null;
+    return err({
+      code: 'authentication_error',
+      message: 'Missing or invalid Authorization header',
+    });
   }
-  return authHeader.slice(BEARER_PREFIX.length);
+  return ok(authHeader.slice(BEARER_PREFIX.length)) as AuthResult<string>;
+}
+
+/**
+ * Validate PAT token structure
+ */
+function validateToken(rawToken: string): AuthResult<PatToken> {
+  const validation = validatePatStructure(rawToken);
+  if (!validation.valid || !validation.token) {
+    return err({ code: 'authentication_error', message: validation.error || 'Invalid PAT token' });
+  }
+  return ok(validation.token) as AuthResult<PatToken>;
+}
+
+/**
+ * JWT payload structure
+ */
+interface JwtPayload {
+  jti: string;
+  exp: number;
 }
 
 /**
  * Parse JWT payload to extract jti and exp
  */
-function parseJwtPayload(payloadB64: string): { jti: string; exp: number } | null {
+function parseJwtPayload(payloadB64: string): AuthResult<JwtPayload> {
   try {
-    // Add padding if needed
     const padded = payloadB64.padEnd(payloadB64.length + ((4 - (payloadB64.length % 4)) % 4), '=');
-    const decoded = JSON.parse(atob(padded));
-    return {
-      jti: decoded.jti || '',
-      exp: decoded.exp || 0,
-    };
+    const decoded = JSON.parse(atob(padded)) as { jti?: string; exp?: number };
+    const jti = decoded.jti || '';
+    const exp = decoded.exp || 0;
+
+    if (!jti) {
+      return err({ code: 'authentication_error', message: 'Invalid token payload' });
+    }
+    return ok({ jti, exp }) as AuthResult<JwtPayload>;
   } catch {
-    return null;
+    return err({ code: 'authentication_error', message: 'Invalid token payload' });
   }
 }
 
 /**
- * Get blocklist entry from Redis
+ * Check if token is expired
  */
-async function getBlocklistEntry(jti: string): Promise<string | null> {
+function checkExpiry(exp: number): AuthResult<void> {
+  const now = Math.floor(Date.now() / 1000);
+  if (exp && exp < now) {
+    return err({ code: 'authentication_error', message: 'Token has expired' });
+  }
+  return ok(undefined) as AuthResult<void>;
+}
+
+/**
+ * Check blocklist in Redis
+ */
+async function checkBlocklist(jti: string): Promise<AuthResult<void>> {
   const key = `blocklist:pat:${hashJtiForBlocklist(jti)}`;
   const result = await redis.get(key);
-  return result ?? null;
+  if (result) {
+    return err({ code: 'authentication_error', message: 'Token has been revoked' });
+  }
+  return ok(undefined) as AuthResult<void>;
 }
 
 /**
@@ -59,74 +103,44 @@ async function getBlocklistEntry(jti: string): Promise<string | null> {
  * Validates token, checks blocklist, sets context variables
  */
 export async function authMiddleware(c: Context, next: Next): Promise<void> {
+  const path = c.req.path;
   const authHeader = c.req.header(HEADER_AUTHORIZATION);
-  const rawToken = extractBearerToken(authHeader);
 
-  if (!rawToken) {
-    const error = errorForProtocol(
-      c.req.path,
-      401,
-      'authentication_error',
-      'Missing or invalid Authorization header'
-    );
+  // Pipeline of validation steps using Result
+  const tokenResult = extractBearerToken(authHeader);
+  if (!isOk(tokenResult)) {
     c.status(401);
-    c.json(error);
+    c.json(errorForProtocol(path, 401, tokenResult.error.code, tokenResult.error.message));
     return;
   }
 
-  // Validate token structure and signature
-  const validation = validatePatStructure(rawToken);
-
-  if (!validation.valid || !validation.token) {
-    const error = errorForProtocol(
-      c.req.path,
-      401,
-      'authentication_error',
-      validation.error || 'Invalid PAT token'
-    );
+  const patResult = validateToken(tokenResult.value);
+  if (!isOk(patResult)) {
     c.status(401);
-    c.json(error);
+    c.json(errorForProtocol(path, 401, patResult.error.code, patResult.error.message));
     return;
   }
 
-  const token: PatToken = validation.token;
-
-  // Parse JWT payload for jti and exp
-  const payload = parseJwtPayload(token.payload);
-
-  if (!payload || !payload.jti) {
-    const error = errorForProtocol(
-      c.req.path,
-      401,
-      'authentication_error',
-      'Invalid token payload'
-    );
+  const token = patResult.value;
+  const payloadResult = parseJwtPayload(token.payload);
+  if (!isOk(payloadResult)) {
     c.status(401);
-    c.json(error);
+    c.json(errorForProtocol(path, 401, payloadResult.error.code, payloadResult.error.message));
     return;
   }
 
-  // Check expiry
-  const now = Math.floor(Date.now() / 1000);
-  if (payload.exp && payload.exp < now) {
-    const error = errorForProtocol(c.req.path, 401, 'authentication_error', 'Token has expired');
+  const payload = payloadResult.value;
+  const expiryResult = checkExpiry(payload.exp);
+  if (!isOk(expiryResult)) {
     c.status(401);
-    c.json(error);
+    c.json(errorForProtocol(path, 401, expiryResult.error.code, expiryResult.error.message));
     return;
   }
 
-  // Check blocklist
-  const isBlocklisted = await getBlocklistEntry(payload.jti);
-
-  if (isBlocklisted) {
-    const error = errorForProtocol(
-      c.req.path,
-      401,
-      'authentication_error',
-      'Token has been revoked'
-    );
+  const blocklistResult = await checkBlocklist(payload.jti);
+  if (!isOk(blocklistResult)) {
     c.status(401);
-    c.json(error);
+    c.json(errorForProtocol(path, 401, blocklistResult.error.code, blocklistResult.error.message));
     return;
   }
 

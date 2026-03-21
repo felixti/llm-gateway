@@ -49,12 +49,16 @@ export const getOrElse = <T, E>(result: Result<T, E>, defaultValue: T): T =>
 /**
  * Check if Result is ok
  */
-export const isOk = <T, E>(result: Result<T, E>): result is Result<T, never> => result.ok;
+export const isOk = <T, E>(
+  result: Result<T, E>
+): result is { readonly ok: true; readonly value: T } => result.ok;
 
 /**
  * Check if Result is error
  */
-export const isErr = <T, E>(result: Result<T, E>): result is Result<never, E> => !result.ok;
+export const isErr = <T, E>(
+  result: Result<T, E>
+): result is { readonly ok: false; readonly error: E } => !result.ok;
 
 /**
  * Option type for representing optional values (Maybe monad)
