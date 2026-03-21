@@ -1,0 +1,100 @@
+### GPT Streaming Request - Chat Completions
+### Expected: SSE stream with chat completion chunks
+
+POST {{host}}/v1/chat/completions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "model": "gpt-4o",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Explain quantum computing in 2 sentences"
+    }
+  ],
+  "stream": true,
+  "max_tokens": 100
+}
+
+### GPT Non-Streaming Request - Chat Completions
+### Expected: JSON response with complete completion
+
+POST {{host}}/v1/chat/completions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "model": "gpt-4o",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is the capital of France?"
+    }
+  ],
+  "stream": false,
+  "max_tokens": 50
+}
+
+### Kimi Request - Chat Completions via Azure AI Foundry
+### Expected: JSON completion response
+
+POST {{host}}/v1/chat/completions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "model": "kimi",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello, how are you?"
+    }
+  ],
+  "stream": false,
+  "max_tokens": 50
+}
+
+### Claude Rejection - Wrong Protocol
+### Expected: 400 error - Claude models only available via /v1/messages
+### Claude is routed to anthropic-messages protocol, not chat-completions
+
+POST {{host}}/v1/chat/completions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-6",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello Claude"
+    }
+  ],
+  "stream": false,
+  "max_tokens": 50
+}
+
+### max_tokens Deprecation Warning Scenario
+### Expected: Request should still work but max_tokens may be deprecated
+### Some API versions return warnings for max_tokens usage
+
+POST {{host}}/v1/chat/completions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant."
+    },
+    {
+      "role": "user",
+      "content": "Give me a list of 3 colors"
+    }
+  ],
+  "stream": false,
+  "max_tokens": 30
+}

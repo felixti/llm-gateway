@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+coverage/
+
+# Temp
+.tmp/
+*.tmp
+
+# Bun
+.bun/
+
+# Redis data (if local)
+*.rdb
+
+# PostgreSQL data (if local)
+*.sql.gz
+
+# Misc
+*.tgz

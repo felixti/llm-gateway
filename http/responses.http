@@ -1,0 +1,84 @@
+### Codex CLI Request with Reasoning - Responses API
+### Expected: JSON response with reasoning and completion
+### Responses API transforms input to chat completions format
+
+POST {{host}}/v1/responses
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "model": "gpt-5.3-codex",
+  "input": "Write a function that calculates fibonacci numbers",
+  "stream": false,
+  "reasoning": {
+    "effort": "medium"
+  }
+}
+
+### Responses API with Tools
+### Expected: Tool result in response
+
+POST {{host}}/v1/responses
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "model": "gpt-4o",
+  "input": "What is 15 * 23? Use the calculator tool.",
+  "stream": false,
+  "tools": [
+    {
+      "type": "function",
+      "name": "calculator",
+      "description": "A simple calculator for math expressions",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "expression": {
+            "type": "string",
+            "description": "Mathematical expression to evaluate"
+          }
+        },
+        "required": ["expression"]
+      }
+    }
+  ]
+}
+
+### Responses API Streaming with Reasoning
+### Expected: SSE stream with reasoning and completion
+
+POST {{host}}/v1/responses
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "model": "gpt-5.3-codex",
+  "input": "Explain why the sky is blue",
+  "stream": true,
+  "reasoning": {
+    "effort": "low"
+  }
+}
+
+### Responses API - Input as Array of Messages
+### Expected: JSON response with completion
+
+POST {{host}}/v1/responses
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "model": "gpt-4o",
+  "input": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant."
+    },
+    {
+      "role": "user",
+      "content": "What is 2 + 2?"
+    }
+  ],
+  "stream": false
+}

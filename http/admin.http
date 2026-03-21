@@ -1,0 +1,43 @@
+### PAT Revocation - Admin Operation
+### Revokes a Personal Access Token by pat_id
+### Requires admin authentication
+
+POST {{host}}/admin/pat/revoke
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "pat_id": "550e8400-e29b-41d4-a716-446655440000",
+  "reason": "User requested token revocation"
+}
+
+### Expected Response:
+### {
+###   "success": true,
+###   "message": "PAT token revoked successfully",
+###   "pat_id": "550e8400-e29b-41d4-a716-446655440000"
+### }
+
+
+### PAT Revocation - Without Reason
+### Optional reason field can be omitted
+
+POST {{host}}/admin/pat/revoke
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "pat_id": "550e8400-e29b-41d4-a716-446655440001"
+}
+
+
+### PAT Revocation - Invalid pat_id Format
+### Expected: 400 error for malformed UUID
+
+POST {{host}}/admin/pat/revoke
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "pat_id": "not-a-valid-uuid"
+}

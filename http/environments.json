@@ -1,0 +1,14 @@
+{
+  "dev": {
+    "host": "http://localhost:3000",
+    "token": "lg_testuser_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0dXNlciIsImlzcyI6ImxnLWdhdGV3YXkiLCJqdGkiOiJ0ZXN0X2p0aV9pZCIsImV4cCI6OTk5OTk5OTk5OX0.test_signature",
+    "admin_token": "lg_admin_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImlzcyI6ImxnLWdhdGV3YXkiLCJqdGkiOiJhZG1pbl9qdGlfaWQiLCJleHAiOjk5OTk5OTk5OTl9.admin_signature",
+    "user_id": "testuser"
+  },
+  "staging": {
+    "host": "https://gateway-staging.example.com",
+    "token": "lg_staging_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzdGFnaW5ndXNlciIsImlzcyI6ImxnLWdhdGV3YXkiLCJqdGkiOiJzdGFnaW5nX2p0aV9pZCIsImV4cCI6OTk5OTk5OTk5OX0.staging_signature",
+    "admin_token": "lg_staging_admin_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzdGFnaW5nX2FkbWluIiwiaXNzIjoibC1nYXRld2F5IiwianRpIjoic3RhZ2luZ19hZG1pbl9qdGlfaWQiLCJleHAiOjk5OTk5OTk5OTl9.staging_admin_signature",
+    "user_id": "staginguser"
+  }
+}

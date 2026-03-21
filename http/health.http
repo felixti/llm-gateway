@@ -1,0 +1,39 @@
+### Health Check
+### Returns version and timestamp - always 200 if server is running
+### No authentication required
+
+GET {{host}}/health
+
+### Expected Response:
+### {
+###   "version": "1.0.0",
+###   "timestamp": "2026-03-20T00:00:00.000Z"
+### }
+
+
+### Readiness Check
+### Checks Redis and Azure deployment connectivity
+### Returns 503 if dependencies are unavailable
+### No authentication required
+
+GET {{host}}/ready
+
+### Expected Response (when ready):
+### {
+###   "status": "ready",
+###   "checks": {
+###     "redis": true,
+###     "deployments": true
+###   },
+###   "timestamp": "2026-03-20T00:00:00.000Z"
+### }
+
+### Expected Response (when not ready - 503):
+### {
+###   "status": "not_ready",
+###   "checks": {
+###     "redis": false,
+###     "deployments": true
+###   },
+###   "timestamp": "2026-03-20T00:00:00.000Z"
+### }

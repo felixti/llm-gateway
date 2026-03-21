@@ -1,0 +1,15 @@
+### Get Quota Status
+### Returns user's monthly budget, spent, reserved, and remaining quota
+### Requires authentication
+
+GET {{host}}/quota
+Authorization: Bearer {{token}}
+
+### Expected Response:
+### {
+###   "monthly_budget_usd": 50.000000,
+###   "spent_usd": 12.345678,
+###   "reserved_usd": 0.123456,
+###   "remaining_usd": 37.530866,
+###   "reset_date": "2026-04-01T00:00:00.000Z"
+### }

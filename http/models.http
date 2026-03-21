@@ -1,0 +1,29 @@
+### List All Models with Metadata
+### Expected: JSON list of all available deployments with gateway metadata
+
+GET {{host}}/v1/models
+Authorization: Bearer {{token}}
+
+### Response Format:
+### {
+###   "object": "list",
+###   "data": [
+###     {
+###       "id": "gpt-4o",
+###       "object": "model",
+###       "created": 1700000000,
+###       "owned_by": "gpt",
+###       "permission": [],
+###       "root": "gpt-4o",
+###       "parent": null,
+###       "gateway": {
+###         "deployment_name": "gpt-4o-global",
+###         "model_family": "gpt",
+###         "protocol_family": "chat-completions",
+###         "azure_model_name": "gpt-4o",
+###         "endpoint": "...",
+###         "fallback": "gpt-4o-mini" | null
+###       }
+###     }
+###   ]
+### }

@@ -1,0 +1,130 @@
+### Claude Non-Streaming Request - Anthropic Messages API
+### Expected: JSON response with completion
+
+POST {{host}}/v1/messages
+Authorization: Bearer {{token}}
+Content-Type: application/json
+anthropic-version: 2023-06-01
+
+{
+  "model": "claude-sonnet-4-6",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is the speed of light?"
+    }
+  ],
+  "stream": false,
+  "max_tokens": 100
+}
+
+### Claude Streaming Request - Anthropic Messages API
+### Expected: SSE stream with Claude event format
+
+POST {{host}}/v1/messages
+Authorization: Bearer {{token}}
+Content-Type: application/json
+anthropic-version: 2023-06-01
+
+{
+  "model": "claude-sonnet-4-6",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Tell me a short joke"
+    }
+  ],
+  "stream": true,
+  "max_tokens": 100
+}
+
+### Claude with Thinking Mode Enabled
+### Expected: Response includes thinking tokens in usage
+### Thinking mode adds reasoning tokens to output
+
+POST {{host}}/v1/messages
+Authorization: Bearer {{token}}
+Content-Type: application/json
+anthropic-version: 2023-06-01
+
+{
+  "model": "claude-opus-4-6",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Solve this problem: What is 15 * 23? Show your work."
+    }
+  ],
+  "stream": false,
+  "max_tokens": 500,
+  "thinking": {
+    "type": "enabled",
+    "budget_tokens": 400
+  }
+}
+
+### GPT Rejection - Wrong Protocol
+### Expected: 400 error - Non-Claude models only available via /v1/chat/completions
+### GPT is routed to chat-completions protocol, not anthropic-messages
+
+POST {{host}}/v1/messages
+Authorization: Bearer {{token}}
+Content-Type: application/json
+anthropic-version: 2023-06-01
+
+{
+  "model": "gpt-4o",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello GPT"
+    }
+  ],
+  "stream": false,
+  "max_tokens": 50
+}
+
+### Claude Tool Use - Function Calling
+### Expected: Tool result returned in subsequent message
+
+POST {{host}}/v1/messages
+Authorization: Bearer {{token}}
+Content-Type: application/json
+anthropic-version: 2023-06-01
+
+{
+  "model": "claude-sonnet-4-6",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is the weather in Tokyo?"
+    }
+  ],
+  "stream": false,
+  "max_tokens": 200,
+  "tools": [
+    {
+      "type": "function",
+      "name": "get_weather",
+      "description": "Get current weather for a city",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "description": "The city name"
+          },
+          "unit": {
+            "type": "string",
+            "enum": ["celsius", "fahrenheit"],
+            "description": "Temperature unit"
+          }
+        },
+        "required": ["city"]
+      }
+    }
+  ],
+  "tool_choice": {
+    "type": "auto"
+  }
+}

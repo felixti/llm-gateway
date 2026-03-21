@@ -1,0 +1,45 @@
+{
+  "name": "llm-gateway",
+  "version": "1.0.0",
+  "description": "LLM Gateway API proxy server for Azure OpenAI and Azure AI Foundry",
+  "type": "module",
+  "runtime": "bun",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "start": "bun run src/index.ts",
+    "test": "bun test",
+    "test:unit": "bun test tests/unit",
+    "test:integration": "bun test tests/integration",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "zod": "^3.22.4",
+    "decimal.js": "^10.4.3",
+    "ioredis": "^5.3.2",
+    "tiktoken": "^1.0.13",
+    "jose": "^5.2.0",
+    "pino": "^8.18.0",
+    "pino-pretty": "^10.3.1",
+    "uuid": "^9.0.1",
+    "@opentelemetry/api": "^1.7.0",
+    "@opentelemetry/sdk-trace-node": "^1.21.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.46.0",
+    "@opentelemetry/resources": "^1.21.0",
+    "@opentelemetry/semantic-conventions": "^1.21.0",
+    "@opentelemetry/instrumentation-http": "^0.46.0",
+    "@opentelemetry/instrumentation-express": "^0.35.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.0.0",
+    "@types/uuid": "^9.0.7",
+    "typescript": "^5.3.3",
+    "eslint": "^8.56.0",
+    "@typescript-eslint/parser": "^6.19.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.0"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}

@@ -1,0 +1,116 @@
+### Bad Token - 401 Authentication Error
+### Invalid or expired PAT token
+### Expected: 401 with authentication_error
+
+GET {{host}}/v1/models
+Authorization: Bearer invalid_token_or_expired
+
+### Expected Response (OpenAI format):
+### {
+###   "error": {
+###     "type": "authentication_error",
+###     "message": "Invalid or expired token",
+###     "param": null,
+###     "code": "invalid_token"
+###   }
+### }
+
+
+### Malformed Body - 400 Invalid Request
+### Invalid JSON or missing required fields
+### Expected: 400 with invalid_request_error
+
+POST {{host}}/v1/chat/completions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "model": "gpt-4o"
+  "messages": [
+    {
+      "role": "user"
+      "content": "Hello"
+    }
+  ]
+}
+
+### Alternative: Missing model field
+
+POST {{host}}/v1/chat/completions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello"
+    }
+  ]
+}
+
+
+### Rate Limit Scenario - 429 Too Many Requests
+### Exceeded RPM/TPM limits
+### Expected: 429 with rate_limit_exceeded
+
+POST {{host}}/v1/chat/completions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "model": "gpt-4o",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Test rate limit"
+    }
+  ],
+  "stream": false,
+  "max_tokens": 10
+}
+
+### Note: This may require running many requests to trigger actual rate limiting
+
+
+### Quota Exceeded - 429 Quota Exceeded
+### Monthly budget exhausted
+### Expected: 429 with quota_exceeded
+
+POST {{host}}/v1/chat/completions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "model": "gpt-4o",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Generate a very long response that will use significant quota"
+    }
+  ],
+  "stream": false,
+  "max_tokens": 4000
+}
+
+
+### Service Unavailable - 503 No Fallback
+### Circuit breaker open and no fallback available
+### Expected: 503 with service_unavailable
+
+POST {{host}}/v1/messages
+Authorization: Bearer {{token}}
+Content-Type: application/json
+anthropic-version: 2023-06-01
+
+{
+  "model": "claude-haiku-4-5",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello"
+    }
+  ],
+  "stream": false,
+  "max_tokens": 10
+}
