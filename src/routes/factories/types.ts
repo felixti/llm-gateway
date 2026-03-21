@@ -1,0 +1,68 @@
+/**
+ * Type definitions for request handler factory
+ * Provides common types for route handler refactoring
+ */
+
+import type { Context } from 'hono';
+import type { ZodSchema } from 'zod';
+import type { DeploymentConfig } from '@/config/deployments';
+
+/**
+ * Protocol types for routing
+ */
+export type ProtocolType = 'openai' | 'anthropic';
+
+/**
+ * Validated request with resolved dependencies
+ */
+export interface ValidatedRequest<T> {
+  readonly body: T;
+  readonly deployment: DeploymentConfig;
+  readonly requestId: string;
+  readonly reservationId: string;
+}
+
+/**
+ * Dependencies for request handler factory
+ */
+export interface RequestHandlerDeps {
+  /** Zod schema for body validation */
+  schema: ZodSchema;
+  /** Protocol type for error formatting */
+  protocol: ProtocolType;
+  /** Route path for error context */
+  path: string;
+  /** Streaming proxy function */
+  proxyStreaming: ProxyStreamingFn;
+  /** Non-streaming proxy function */
+  proxyNonStreaming: ProxyNonStreamingFn;
+  /** Extract model from validated body */
+  getModel: (body: unknown) => string;
+  /** Build upstream URL for deployment */
+  buildUpstreamUrl: (deployment: DeploymentConfig) => string;
+  /** Transform body for upstream (optional) */
+  transformBody?: (body: unknown, deployment: DeploymentConfig) => Record<string, unknown>;
+}
+
+/**
+ * Streaming proxy function signature
+ */
+export type ProxyStreamingFn = (
+  upstreamUrl: string,
+  headers: Record<string, string>,
+  body: Record<string, unknown>,
+  deployment: DeploymentConfig,
+  reservationId: string,
+  requestId: string
+) => Promise<Response>;
+
+/**
+ * Non-streaming proxy function signature
+ */
+export type ProxyNonStreamingFn = (
+  upstreamUrl: string,
+  headers: Record<string, string>,
+  body: Record<string, unknown>,
+  deployment: DeploymentConfig,
+  reservationId: string
+) => Promise<Response>;
