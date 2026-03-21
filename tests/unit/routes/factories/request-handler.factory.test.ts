@@ -58,7 +58,7 @@ describe('Request Handler Factory', () => {
       });
 
       expect(res.status).toBe(400);
-      const body = await res.json();
+      const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe('invalid_request');
     });
 
@@ -76,7 +76,7 @@ describe('Request Handler Factory', () => {
       });
 
       expect(res.status).toBe(400);
-      const body = await res.json();
+      const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe('invalid_request');
     });
 
@@ -96,7 +96,7 @@ describe('Request Handler Factory', () => {
       });
 
       expect(res.status).toBe(400);
-      const body = await res.json();
+      const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe('model_not_supported');
     });
 
@@ -116,7 +116,7 @@ describe('Request Handler Factory', () => {
       });
 
       expect(res.status).toBe(503);
-      const body = await res.json();
+      const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe('service_unavailable');
     });
 

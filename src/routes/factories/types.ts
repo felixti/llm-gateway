@@ -3,9 +3,9 @@
  * Provides common types for route handler refactoring
  */
 
+import type { DeploymentConfig } from '@/config/deployments';
 import type { Context } from 'hono';
 import type { ZodSchema } from 'zod';
-import type { DeploymentConfig } from '@/config/deployments';
 
 /**
  * Protocol types for routing
@@ -37,11 +37,14 @@ export interface RequestHandlerDeps {
   /** Non-streaming proxy function */
   proxyNonStreaming: ProxyNonStreamingFn;
   /** Extract model from validated body */
-  getModel: (body: unknown) => string;
+  getModel: (body: Record<string, unknown>) => string;
   /** Build upstream URL for deployment */
   buildUpstreamUrl: (deployment: DeploymentConfig) => string;
   /** Transform body for upstream (optional) */
-  transformBody?: (body: unknown, deployment: DeploymentConfig) => Record<string, unknown>;
+  transformBody?: (
+    body: Record<string, unknown>,
+    deployment: DeploymentConfig
+  ) => Record<string, unknown>;
 }
 
 /**

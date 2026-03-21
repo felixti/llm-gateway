@@ -7,7 +7,8 @@ describe('Result types', () => {
       const result = ok(42);
       expect(isOk(result)).toBe(true);
       expect(isErr(result)).toBe(false);
-      expect(result.value).toBe(42);
+      // TypeScript narrowing issue with never type, use type assertion
+      expect((result as { ok: true; value: number }).value).toBe(42);
     });
   });
 
@@ -16,7 +17,7 @@ describe('Result types', () => {
       const result = err(new Error('fail'));
       expect(isErr(result)).toBe(true);
       expect(isOk(result)).toBe(false);
-      expect(result.error.message).toBe('fail');
+      expect((result as { ok: false; error: Error }).error.message).toBe('fail');
     });
   });
 
@@ -24,7 +25,8 @@ describe('Result types', () => {
     it('should transform value in ok result', () => {
       const result = map(ok(21), (x) => x * 2);
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) expect(result.value).toBe(42);
+      const r = result as { ok: true; value: number };
+      expect(r.value).toBe(42);
     });
 
     it('should pass through error in err result', () => {
@@ -38,7 +40,8 @@ describe('Result types', () => {
     it('should chain successful results', () => {
       const result = flatMap(ok(21), (x) => ok(x * 2));
       expect(isOk(result)).toBe(true);
-      if (isOk(result)) expect(result.value).toBe(42);
+      const r = result as { ok: true; value: number };
+      expect(r.value).toBe(42);
     });
 
     it('should short-circuit on error', () => {

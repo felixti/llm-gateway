@@ -2,9 +2,9 @@
  * Test utilities for request handler factory tests
  */
 
-import { z } from 'zod';
-import type { RequestHandlerDeps } from '@/routes/factories/types';
 import type { DeploymentConfig } from '@/config/deployments';
+import type { RequestHandlerDeps } from '@/routes/factories/types';
+import { z } from 'zod';
 
 // Test schema for chat completions
 export const testSchema = z.object({
@@ -39,8 +39,8 @@ export function createRequestHandlerDeps(): RequestHandlerDeps {
     schema: testSchema,
     protocol: 'openai',
     path: '/v1/chat/completions',
-    proxyStreaming: vi.fn().mockResolvedValue(new Response()),
-    proxyNonStreaming: vi.fn().mockResolvedValue(new Response()),
+    proxyStreaming: async () => new Response(),
+    proxyNonStreaming: async () => new Response(),
     getModel: (body) => (body as { model: string }).model,
     buildUpstreamUrl: () => 'http://test/upstream',
     transformBody: (body) => body as Record<string, unknown>,

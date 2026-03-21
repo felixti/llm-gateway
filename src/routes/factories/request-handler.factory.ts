@@ -14,12 +14,12 @@
  * 7. Streaming vs non-streaming routing
  */
 
-import type { Context } from 'hono';
 import { getDeploymentByAlias } from '@/config/deployments';
 import { getAzureAuthManager } from '@/services/azure-auth';
 import { isRequestAllowed } from '@/services/circuit-breaker';
-import { err, ok, type Result } from '@/utils/result';
-import { createRequestErrorResponse, validateBody, type RequestError } from './errors';
+import { type Result, err, ok } from '@/utils/result';
+import type { Context } from 'hono';
+import { type RequestError, createRequestErrorResponse, validateBody } from './errors';
 import type { RequestHandlerDeps } from './types';
 
 /**
@@ -68,7 +68,7 @@ function checkCircuitBreaker(
  * Create a unified request handler factory
  * Replaces ~170 lines of duplicated handler code per route
  */
-export function createRequestHandler<T>(deps: RequestHandlerDeps) {
+export function createRequestHandler(deps: RequestHandlerDeps) {
   return async function handleRequest(c: Context): Promise<Response> {
     const path = c.req.path;
     const { requestId, reservationId } = extractRequestContext(c);
@@ -90,8 +90,11 @@ export function createRequestHandler<T>(deps: RequestHandlerDeps) {
       return createRequestErrorResponse(c, path, validatedBody.error);
     }
 
+    // Cast to record for downstream use
+    const bodyRecord = validatedBody.value as Record<string, unknown>;
+
     // 3. Get deployment
-    const model = deps.getModel(validatedBody.value);
+    const model = deps.getModel(bodyRecord);
     const deployment = getDeployment(model);
     if (!deployment.ok) {
       return createRequestErrorResponse(c, path, deployment.error);
@@ -118,11 +121,11 @@ export function createRequestHandler<T>(deps: RequestHandlerDeps) {
     // 6. Build upstream URL and body
     const upstreamUrl = deps.buildUpstreamUrl(deployment.value);
     const upstreamBody = deps.transformBody
-      ? deps.transformBody(validatedBody.value, deployment.value)
-      : (validatedBody.value as Record<string, unknown>);
+      ? deps.transformBody(bodyRecord, deployment.value)
+      : bodyRecord;
 
     // 7. Route to streaming or non-streaming proxy
-    if (validatedBody.value.stream === true) {
+    if (bodyRecord.stream === true) {
       return deps.proxyStreaming(
         upstreamUrl,
         authHeaders,

@@ -5,7 +5,6 @@
 
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { getDeploymentByAlias } from '../config/deployments';
 import { authMiddleware } from '../middleware/auth';
 import { protocolGuardMiddleware } from '../middleware/protocol-guard';
 import { quotaMiddleware } from '../middleware/quota';
@@ -16,9 +15,7 @@ import {
   proxyNonStreamingChat,
   proxyStreamingChat,
 } from '../proxy/openai-chat.proxy';
-import { AzureAuthManager } from '../services/azure-auth';
-import { isRequestAllowed } from '../services/circuit-breaker';
-import { errorForProtocol } from '../utils/errors';
+import { createRequestHandler } from './factories/request-handler.factory';
 
 // Zod schema for chat completions body validation
 const chatCompletionsBodySchema = z.object({
@@ -65,6 +62,19 @@ const chatCompletionsBodySchema = z.object({
 
 export type ChatCompletionsBody = z.infer<typeof chatCompletionsBodySchema>;
 
+// Create handler using factory
+const handleChatRequest = createRequestHandler({
+  schema: chatCompletionsBodySchema,
+  protocol: 'openai',
+  path: '/v1/chat/completions',
+  proxyStreaming: proxyStreamingChat,
+  proxyNonStreaming: proxyNonStreamingChat,
+  getModel: (body: Record<string, unknown>) => body.model as string,
+  buildUpstreamUrl: (deployment) => buildUpstreamUrl(deployment, deployment.modelFamily),
+  transformBody: (body: Record<string, unknown>, deployment) =>
+    buildRequestBody(body, deployment.modelFamily),
+});
+
 // Create chat routes
 export const chatRoutes = new Hono();
 
@@ -75,83 +85,4 @@ chatRoutes.use('*', rateLimitMiddleware);
 chatRoutes.use('*', quotaMiddleware);
 
 // POST /v1/chat/completions
-chatRoutes.post('/', async (c) => {
-  // Parse body
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    const error = errorForProtocol(c.req.path, 400, 'invalid_request', 'Invalid JSON body');
-    c.status(400);
-    return c.json(error);
-  }
-
-  // Validate body
-  const parsed = chatCompletionsBodySchema.safeParse(body);
-  if (!parsed.success) {
-    const firstError = parsed.error.errors[0];
-    const error = errorForProtocol(
-      c.req.path,
-      400,
-      'invalid_request',
-      `${firstError.path.join('.')}: ${firstError.message}`
-    );
-    c.status(400);
-    return c.json(error);
-  }
-
-  const validatedBody = parsed.data;
-
-  // Get deployment
-  const deployment = getDeploymentByAlias(validatedBody.model);
-  if (!deployment) {
-    const error = errorForProtocol(
-      c.req.path,
-      400,
-      'model_not_supported',
-      `Unknown model: ${validatedBody.model}`
-    );
-    c.status(400);
-    return c.json(error);
-  }
-
-  // Check circuit breaker
-  if (!isRequestAllowed(deployment.name)) {
-    const error = errorForProtocol(
-      c.req.path,
-      503,
-      'service_unavailable',
-      'Service temporarily unavailable, please retry'
-    );
-    return c.json(error, 503);
-  }
-
-  // Get auth headers
-  const authManager = new AzureAuthManager();
-  const authHeaders = await authManager.getAuthHeaders(deployment.name);
-
-  // Build upstream request
-  const upstreamUrl = buildUpstreamUrl(deployment, deployment.modelFamily);
-  const upstreamBody = buildRequestBody(
-    validatedBody as Record<string, unknown>,
-    deployment.modelFamily
-  );
-
-  // Get context values
-  const requestId = c.get('requestId') || '';
-  const reservationId = c.get('reservationId') || '';
-
-  // Determine streaming
-  if (validatedBody.stream) {
-    return proxyStreamingChat(
-      upstreamUrl,
-      authHeaders,
-      upstreamBody,
-      deployment,
-      reservationId,
-      requestId
-    );
-  }
-
-  return proxyNonStreamingChat(upstreamUrl, authHeaders, upstreamBody, deployment, reservationId);
-});
+chatRoutes.post('/', handleChatRequest);

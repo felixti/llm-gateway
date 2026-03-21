@@ -3,9 +3,10 @@
  * Provides consistent error formatting across protocols
  */
 
-import type { Context } from 'hono';
 import { errorForProtocol } from '@/utils/errors';
-import { err, ok, type Result } from '@/utils/result';
+import { type Result, err, ok } from '@/utils/result';
+import type { Context } from 'hono';
+import type { ZodSchema } from 'zod';
 
 /**
  * Error types for request handling
@@ -27,7 +28,7 @@ export function createRequestErrorResponse(
 ): Response {
   const { status, code, message } = errorToStatusCode(error, path);
   const body = errorForProtocol(path, status, code, message);
-  return c.json(body, status);
+  return c.json(body, status as 400 | 401 | 403 | 429 | 502 | 503);
 }
 
 /**
@@ -35,7 +36,7 @@ export function createRequestErrorResponse(
  */
 function errorToStatusCode(
   error: RequestError,
-  path: string
+  _path: string
 ): { status: number; code: string; message: string } {
   switch (error.type) {
     case 'invalid_json':
@@ -45,7 +46,11 @@ function errorToStatusCode(
     case 'deployment_not_found':
       return { status: 400, code: 'model_not_supported', message: `Unknown model: ${error.model}` };
     case 'circuit_open':
-      return { status: 503, code: 'service_unavailable', message: 'Service temporarily unavailable, please retry' };
+      return {
+        status: 503,
+        code: 'service_unavailable',
+        message: 'Service temporarily unavailable, please retry',
+      };
     case 'authentication_error':
       return { status: 401, code: 'authentication_error', message: error.message };
   }
@@ -54,10 +59,7 @@ function errorToStatusCode(
 /**
  * Wrap Zod validation result in Result type
  */
-export function validateBody<T>(
-  body: unknown,
-  schema: ZodSchema
-): Result<T, RequestError> {
+export function validateBody<T>(body: unknown, schema: ZodSchema): Result<T, RequestError> {
   const parsed = schema.safeParse(body);
 
   if (!parsed.success) {

@@ -29,10 +29,7 @@ export const err = <E>(error: E): Result<never, E> => ({
 /**
  * Map over the value inside a Result (functor)
  */
-export const map = <T, U, E>(
-  result: Result<T, E>,
-  fn: (value: T) => U
-): Result<U, E> =>
+export const map = <T, U, E>(result: Result<T, E>, fn: (value: T) => U): Result<U, E> =>
   result.ok ? ok(fn(result.value)) : result;
 
 /**
@@ -41,48 +38,52 @@ export const map = <T, U, E>(
 export const flatMap = <T, U, E>(
   result: Result<T, E>,
   fn: (value: T) => Result<U, E>
-): Result<U, E> =>
-  result.ok ? fn(result.value) : result;
+): Result<U, E> => (result.ok ? fn(result.value) : result);
 
 /**
  * Get value or default if error
  */
-export const getOrElse = <T, E>(
-  result: Result<T, E>,
-  defaultValue: T
-): T =>
+export const getOrElse = <T, E>(result: Result<T, E>, defaultValue: T): T =>
   result.ok ? result.value : defaultValue;
 
 /**
  * Check if Result is ok
  */
-export const isOk = <T, E>(result: Result<T, E>): result is Result<T, never> =>
-  result.ok;
+export const isOk = <T, E>(result: Result<T, E>): result is Result<T, never> => result.ok;
 
 /**
  * Check if Result is error
  */
-export const isErr = <T, E>(result: Result<T, E>): result is Result<never, E> =>
-  !result.ok;
+export const isErr = <T, E>(result: Result<T, E>): result is Result<never, E> => !result.ok;
 
 /**
  * Option type for representing optional values (Maybe monad)
  */
-export type Option<T> =
-  | { readonly isSome: true; readonly value: T }
-  | { readonly isNone: true };
+export type Option<T> = { readonly isSome: true; readonly value: T } | { readonly isNone: true };
 
 export const some = <T>(value: T): Option<T> => ({ isSome: true, value });
 export const none: Option<never> = { isNone: true };
 
+/**
+ * Type guard for Option - returns true if option has a value
+ */
+export const isSome = <T>(opt: Option<T>): opt is { isSome: true; value: T } =>
+  'isSome' in opt && opt.isSome === true;
+
+/**
+ * Type guard for Option - returns true if option is None
+ */
+export const isNone = <T>(opt: Option<T>): opt is { isNone: true } =>
+  'isNone' in opt && opt.isNone === true;
+
 export const mapOption = <T, U>(opt: Option<T>, fn: (value: T) => U): Option<U> =>
-  opt.isSome ? some(fn(opt.value)) : none;
+  isSome(opt) ? some(fn(opt.value)) : none;
 
 export const flatMapOption = <T, U>(opt: Option<T>, fn: (value: T) => Option<U>): Option<U> =>
-  opt.isSome ? fn(opt.value) : none;
+  isSome(opt) ? fn(opt.value) : none;
 
 export const getOrElseOption = <T>(opt: Option<T>, defaultValue: T): T =>
-  opt.isSome ? opt.value : defaultValue;
+  isSome(opt) ? opt.value : defaultValue;
 
 /**
  * Tuple types and helpers for common patterns
