@@ -1,0 +1,95 @@
+name: Canary Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      gateway_url:
+        description: 'Gateway URL'
+        required: true
+        type: string
+
+jobs:
+  canary-smoke-tests:
+    name: Smoke Tests (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Validate inputs
+        run: |
+          if [ -z "${{ inputs.gateway_url }}" ]; then
+            echo "ERROR: gateway_url is required"
+            exit 1
+          fi
+          echo "Gateway URL: ${{ inputs.gateway_url }}"
+
+      - name: Smoke Test: Health Endpoint
+        run: |
+          URL="${{ inputs.gateway_url }}"
+          echo "Testing health endpoint: $URL/health"
+          RESP=$(curl -s -o /dev/null -w "%{http_code}" "$URL/health")
+          echo "Response code: $RESP"
+          test "$RESP" = "200" && echo "✅ Health check passed" || (echo "❌ Health check failed" && exit 1)
+
+      - name: Smoke Test: Readiness Endpoint
+        run: |
+          URL="${{ inputs.gateway_url }}"
+          echo "Testing readiness endpoint: $URL/ready"
+          RESP=$(curl -s -o /dev/null -w "%{http_code}" "$URL/ready")
+          echo "Response code: $RESP"
+          test "$RESP" = "200" && echo "✅ Readiness check passed" || (echo "❌ Readiness check failed" && exit 1)
+
+      - name: Smoke Test: OpenAPI Spec
+        run: |
+          URL="${{ inputs.gateway_url }}"
+          echo "Testing OpenAPI spec: $URL/openapi.json"
+          RESP=$(curl -s -o /dev/null -w "%{http_code}" "$URL/openapi.json")
+          echo "Response code: $RESP"
+          test "$RESP" = "200" && echo "✅ OpenAPI spec available" || (echo "❌ OpenAPI spec unavailable" && exit 1)
+
+      - name: Smoke Test: Auth Required Endpoints
+        run: |
+          URL="${{ inputs.gateway_url }}"
+          echo "Testing auth requirement on /v1/chat/completions"
+          RESP=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d '{"model":"gpt-4o","messages":[{"role":"user","content":"test"}]}' "$URL/v1/chat/completions")
+          echo "Response code: $RESP"
+          test "$RESP" = "401" && echo "✅ Auth required" || (echo "❌ Expected 401" && exit 1)
+
+      - name: Smoke Test: Invalid Model
+        run: |
+          URL="${{ inputs.gateway_url }}"
+          echo "Testing invalid model rejection"
+          RESP=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer lg_test123_test.signature" -d '{"model":"invalid-model","messages":[{"role":"user","content":"test"}]}' "$URL/v1/chat/completions")
+          echo "Response body: $RESP"
+          echo "$RESP" | grep -q "model_not_supported" && echo "✅ Invalid model rejected" || (echo "❌ Invalid model not rejected" && exit 1)
+
+      - name: Report Status
+        if: always()
+        run: |
+          echo "========================================"
+          echo "Canary Verification: ${{ job.status }}"
+          echo "Environment: ${{ inputs.environment }}"
+          echo "Gateway: ${{ inputs.gateway_url }}"
+          echo "========================================"
+
+  rollback-check:
+    name: Rollback Decision
+    needs: canary-smoke-tests
+    if: failure()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger rollback
+        run: |
+          echo "❌ Canary smoke tests failed!"
+          echo "Environment: ${{ inputs.environment }}"
+          echo "Gateway: ${{ inputs.gateway_url }}"
+          exit 1

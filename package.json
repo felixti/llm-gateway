@@ -10,9 +10,12 @@
     "test": "bun test",
     "test:unit": "bun test tests/unit",
     "test:integration": "bun test tests/integration",
+    "test:coverage": "bun test --coverage",
+    "test:coverage:check": "bun test --coverage --coverage-threshold=85",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "ci": "bun run lint && bun run typecheck && bun run test:coverage:check"
   },
   "dependencies": {
     "hono": "^4.0.0",

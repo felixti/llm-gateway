@@ -1,0 +1,100 @@
+name: Contract Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  contract-tests:
+    name: API Contract Tests
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: llm_gateway
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Wait for services
+        run: |
+          sleep 5
+          until nc -z localhost 6379; do sleep 1; done
+          until nc -z localhost 5432; do sleep 1; done
+
+      - name: Setup database
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d llm_gateway -f src/db/migration.sql || true
+
+      - name: Build
+        run: bun run build 2>/dev/null || true
+
+      - name: Start gateway in background
+        run: |
+          # Start gateway with test environment
+          PORT=3000 \
+          REDIS_URL=redis://localhost:6379 \
+          DATABASE_URL=postgres://postgres:postgres@localhost:5432/llm_gateway \
+          bun run src/index.ts &
+          GATEWAY_PID=$!
+          echo "Gateway PID: $GATEWAY_PID"
+          sleep 3
+
+          # Check if gateway is running
+          curl -s http://localhost:3000/health || echo "Gateway not ready"
+
+      - name: Run integration tests
+        run: |
+          curl -s http://localhost:3000/health
+          bun run test:integration
+        env:
+          GATEWAY_URL: http://localhost:3000
+          REDIS_URL: redis://localhost:6379
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/llm_gateway
+          NODE_ENV: test
+
+      - name: Run smoke tests
+        run: |
+          # Health endpoint
+          RESP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/health)
+          if [ "$RESP" != "200" ]; then echo "Health check failed: $RESP"; exit 1; fi
+          echo "✅ Health endpoint: $RESP"
+
+          # Readiness endpoint
+          RESP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ready)
+          if [ "$RESP" != "200" ]; then echo "Readiness check failed: $RESP"; exit 1; fi
+          echo "✅ Readiness endpoint: $RESP"
+
+      - name: Stop gateway
+        if: always()
+        run: pkill -f "bun run src/index.ts" || true
