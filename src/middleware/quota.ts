@@ -23,16 +23,14 @@ const HEADER_WARNING = 'X-Warning';
 /**
  * Extract token estimate from request based on protocol
  */
-async function estimateRequestTokens(
-  c: Context,
+function estimateRequestTokens(
+  body: Record<string, unknown>,
+  path: string,
   model: string
-): Promise<{
+): {
   promptTokens: number;
   thinkingEnabled: boolean;
-}> {
-  const body = await c.req.json().catch(() => ({}));
-  const path = c.req.path;
-
+} {
   let promptTokens = 0;
   let thinkingEnabled = false;
 
@@ -76,7 +74,10 @@ function setQuotaHeaders(c: Context, reservation: QuotaReservation, remaining: n
 export async function quotaMiddleware(c: Context, next: Next): Promise<void> {
   const userId = c.get('userId');
   const model = c.get('model');
-  const body = await c.req.json().catch(() => ({}));
+  const path = c.req.path;
+
+  // Read body ONCE and reuse - avoid double-read bug
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
 
   // Skip if no userId (auth middleware hasn't run)
   if (!userId) {
@@ -94,8 +95,8 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<void> {
   const quotaStatus = await getQuotaStatus(userId);
   const isHardLimit = true; // Default to hard limit
 
-  // Estimate tokens from request
-  const { promptTokens, thinkingEnabled } = await estimateRequestTokens(c, model);
+  // Estimate tokens from request (synchronous, uses pre-read body)
+  const { promptTokens, thinkingEnabled } = estimateRequestTokens(body, path, model);
 
   // Estimate max output tokens (from request)
   const maxOutputTokens =
@@ -119,7 +120,7 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<void> {
   if (wouldExceedBudget && isHardLimit) {
     // Hard limit: reject with 429
     const error = errorForProtocol(
-      c.req.path,
+      path,
       429,
       'quota_exceeded',
       'Monthly quota exceeded. Please upgrade your plan or wait for reset.'
@@ -141,7 +142,7 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<void> {
   if (!reservation.allowed) {
     // Quota exceeded
     const error = errorForProtocol(
-      c.req.path,
+      path,
       429,
       'quota_exceeded',
       reservation.reason || 'Quota reservation failed'
