@@ -5,8 +5,10 @@
  */
 
 import type { DeploymentConfig } from '../config/deployments';
+import { logRequestAudit } from '../db/data-access';
 import { recordFailure, recordSuccess } from '../services/circuit-breaker';
 import type { TokenUsage } from '../services/pricing.service';
+import { calculateCost } from '../services/pricing.service';
 import { reconcileUsage, releaseReservation } from '../services/quota.service';
 import { withRetry } from '../services/retry';
 import { errorForProtocol } from '../utils/errors';
@@ -50,8 +52,10 @@ export async function proxyNonStreamingAnthropic(
   headers: Record<string, string>,
   body: Record<string, unknown>,
   deployment: DeploymentConfig,
-  reservationId: string
+  reservationId: string,
+  requestId: string
 ): Promise<Response> {
+  const startTime = Date.now();
   const response = await withRetry(() =>
     fetch(upstreamUrl, {
       method: 'POST',
@@ -90,7 +94,22 @@ export async function proxyNonStreamingAnthropic(
   const usage = responseBody?.usage;
 
   if (usage && reservationId) {
-    await reconcileUsage(reservationId, usage, deployment.azureModelName);
+    const actualCost = await reconcileUsage(reservationId, usage, deployment.azureModelName);
+    logRequestAudit({
+      userId: deployment.name,
+      requestId,
+      model: deployment.azureModelName,
+      deployment: deployment.name,
+      protocolFamily: deployment.protocolFamily,
+      tokensInput: usage.prompt_tokens,
+      tokensOutput: usage.completion_tokens,
+      tokensThinking: usage.thinking_tokens || 0,
+      costUsd: actualCost.toString(),
+      thinkingEnabled: false,
+      azureAuthType: 'entra_id',
+      durationMs: Date.now() - startTime,
+      statusCode: 200,
+    }).catch(() => {});
   } else if (reservationId) {
     await releaseReservation(reservationId);
   }
@@ -149,6 +168,7 @@ export async function proxyStreamingAnthropic(
   }
 
   let usageExtracted = false;
+  const startTime = Date.now();
   const cleanup = handleStreamAbort(reservationId, releaseReservation);
 
   const stream = response.body.pipeThrough(
@@ -163,9 +183,25 @@ export async function proxyStreamingAnthropic(
 
           if (usage) {
             usageExtracted = true;
-            reconcileUsage(reservationId, usage, deployment.azureModelName).catch((err) =>
-              console.error('Quota reconciliation error:', err)
-            );
+            reconcileUsage(reservationId, usage, deployment.azureModelName)
+              .then((actualCost) => {
+                logRequestAudit({
+                  userId: deployment.name,
+                  requestId,
+                  model: deployment.azureModelName,
+                  deployment: deployment.name,
+                  protocolFamily: deployment.protocolFamily,
+                  tokensInput: usage.prompt_tokens,
+                  tokensOutput: usage.completion_tokens,
+                  tokensThinking: usage.thinking_tokens || 0,
+                  costUsd: actualCost.toString(),
+                  thinkingEnabled: false,
+                  azureAuthType: 'entra_id',
+                  durationMs: Date.now() - startTime,
+                  statusCode: 200,
+                }).catch(() => {});
+              })
+              .catch((err) => console.error('Quota reconciliation error:', err));
           }
         }
       },

@@ -6,6 +6,7 @@
 
 import { Hono } from 'hono';
 import { isRedisHealthy } from '../db/redis';
+import { getPrometheusMetrics } from '../observability/metrics';
 import { getAllDeploymentHealth } from '../services/health.service';
 
 export const healthRoutes = new Hono();
@@ -68,5 +69,11 @@ healthRoutes.get('/ready', async (c) => {
     status: 'ready',
     checks,
     timestamp: new Date().toISOString(),
+  });
+});
+
+healthRoutes.get('/metrics', (c) => {
+  return c.text(getPrometheusMetrics(), 200, {
+    'Content-Type': 'text/plain; charset=utf-8',
   });
 });

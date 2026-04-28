@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { sql } from "bun";
+import { sql } from "../../../src/db/client";
 import {
   logRequestAudit,
   archiveMonthlyUsage,
   logPatRevocation,
-} from "../../src/db/data-access";
+} from "../../../src/db/data-access";
 
 describe("Data Access Layer", () => {
   beforeAll(async () => {
     // Create test tables
-    await sql.query(`
+    await sql.unsafe(`
       CREATE TABLE IF NOT EXISTS users (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         email VARCHAR(255) UNIQUE NOT NULL,
@@ -76,7 +76,7 @@ describe("Data Access Layer", () => {
     `);
 
     // Create test user
-    await sql.query(`
+    await sql.unsafe(`
       INSERT INTO users (id, email)
       VALUES ('11111111-1111-1111-1111-111111111111', 'test@example.com')
       ON CONFLICT (id) DO NOTHING
@@ -85,11 +85,11 @@ describe("Data Access Layer", () => {
 
   afterAll(async () => {
     // Clean up test tables
-    await sql.query(`DROP TABLE IF EXISTS pat_revocation_log CASCADE`);
-    await sql.query(`DROP TABLE IF EXISTS request_audit CASCADE`);
-    await sql.query(`DROP TABLE IF EXISTS usage_history CASCADE`);
-    await sql.query(`DROP TABLE IF EXISTS api_keys CASCADE`);
-    await sql.query(`DROP TABLE IF EXISTS users CASCADE`);
+    await sql.unsafe(`DROP TABLE IF EXISTS pat_revocation_log CASCADE`);
+    await sql.unsafe(`DROP TABLE IF EXISTS request_audit CASCADE`);
+    await sql.unsafe(`DROP TABLE IF EXISTS usage_history CASCADE`);
+    await sql.unsafe(`DROP TABLE IF EXISTS api_keys CASCADE`);
+    await sql.unsafe(`DROP TABLE IF EXISTS users CASCADE`);
   });
 
   describe("logRequestAudit", () => {
@@ -114,17 +114,17 @@ describe("Data Access Layer", () => {
       await logRequestAudit(record);
 
       // Verify the record was inserted
-      const result = await sql.query(
+      const result = await sql.unsafe(
         `SELECT * FROM request_audit WHERE request_id = $1`,
         ["test-request-001"]
       );
 
-      expect(result.rows).toBeDefined();
-      expect(result.rows.length).toBeGreaterThan(0);
-      expect(result.rows[0].model).toBe("gpt-5.4");
-      expect(result.rows[0].tokens_input).toBe(100);
-      expect(result.rows[0].tokens_output).toBe(200);
-      expect(result.rows[0].status_code).toBe(200);
+      expect(result).toBeDefined();
+      expect(result.length).toBeGreaterThan(0);
+      expect(result[0].model).toBe("gpt-5.4");
+      expect(result[0].tokens_input).toBe(100);
+      expect(result[0].tokens_output).toBe(200);
+      expect(result[0].status_code).toBe(200);
     });
 
     it("should handle error message field", async () => {
@@ -147,13 +147,13 @@ describe("Data Access Layer", () => {
 
       await logRequestAudit(record);
 
-      const result = await sql.query(
+      const result = await sql.unsafe(
         `SELECT * FROM request_audit WHERE request_id = $1`,
         ["test-request-002"]
       );
 
-      expect(result.rows[0].error_message).toBe("Invalid request parameters");
-      expect(result.rows[0].status_code).toBe(400);
+      expect(result[0].error_message).toBe("Invalid request parameters");
+      expect(result[0].status_code).toBe(400);
     });
   });
 
@@ -171,17 +171,17 @@ describe("Data Access Layer", () => {
 
       await archiveMonthlyUsage(record);
 
-      const result = await sql.query(
+      const result = await sql.unsafe(
         `SELECT * FROM usage_history WHERE user_id = $1 AND month = $2`,
         ["11111111-1111-1111-1111-111111111111", "2026-03"]
       );
 
-      expect(result.rows).toBeDefined();
-      expect(result.rows.length).toBeGreaterThan(0);
-      expect(result.rows[0].total_requests).toBe(100);
-      expect(result.rows[0].total_tokens_input.toString()).toBe("50000");
-      expect(result.rows[0].total_tokens_output.toString()).toBe("75000");
-      expect(result.rows[0].total_cost_usd).toBe("15.500000");
+      expect(result).toBeDefined();
+      expect(result.length).toBeGreaterThan(0);
+      expect(result[0].total_requests).toBe(100);
+      expect(result[0].total_tokens_input.toString()).toBe("50000");
+      expect(result[0].total_tokens_output.toString()).toBe("75000");
+      expect(result[0].total_cost_usd).toBe("15.500000");
     });
 
     it("should upsert on re-archive with updated values", async () => {
@@ -209,26 +209,26 @@ describe("Data Access Layer", () => {
 
       await archiveMonthlyUsage(record2);
 
-      const result = await sql.query(
+      const result = await sql.unsafe(
         `SELECT * FROM usage_history WHERE user_id = $1 AND month = $2`,
         ["11111111-1111-1111-1111-111111111111", "2026-04"]
       );
 
-      expect(result.rows.length).toBe(1);
-      expect(result.rows[0].total_requests).toBe(100);
-      expect(result.rows[0].total_cost_usd).toBe("15.500000");
+      expect(result.length).toBe(1);
+      expect(result[0].total_requests).toBe(100);
+      expect(result[0].total_cost_usd).toBe("15.500000");
     });
   });
 
   describe("logPatRevocation", () => {
     it("should insert PAT revocation log record", async () => {
       // First create an API key
-      const apiKeyResult = await sql.query(
+      const apiKeyResult = await sql.unsafe(
         `INSERT INTO api_keys (user_id, key_hash, prefix, jti)
          VALUES ('11111111-1111-1111-1111-111111111111', 'hash123', 'lg_test_', 'jti-123')
          RETURNING id`
       );
-      const patId = apiKeyResult.rows[0].id;
+      const patId = apiKeyResult[0].id;
 
       await logPatRevocation({
         patId,
@@ -236,14 +236,14 @@ describe("Data Access Layer", () => {
         reason: "Security incident - suspected compromise",
       });
 
-      const result = await sql.query(
+      const result = await sql.unsafe(
         `SELECT * FROM pat_revocation_log WHERE pat_id = $1`,
         [patId]
       );
 
-      expect(result.rows).toBeDefined();
-      expect(result.rows.length).toBeGreaterThan(0);
-      expect(result.rows[0].reason).toContain("Security incident");
+      expect(result).toBeDefined();
+      expect(result.length).toBeGreaterThan(0);
+      expect(result[0].reason).toContain("Security incident");
     });
   });
 });

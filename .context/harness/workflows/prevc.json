@@ -1,0 +1,66 @@
+{
+  "version": 2,
+  "workflowType": "prevc",
+  "updatedAt": "2026-04-28T03:06:29.080Z",
+  "status": {
+    "project": {
+      "name": "llm-gateway-10x",
+      "scale": 3,
+      "started": "2026-04-28T03:06:22.187Z",
+      "current_phase": "P",
+      "settings": {
+        "autonomous_mode": false,
+        "require_plan": true,
+        "require_approval": true
+      },
+      "plan": "llm-gateway-10x"
+    },
+    "phases": {
+      "P": {
+        "status": "in_progress",
+        "started_at": "2026-04-28T03:06:22.187Z"
+      },
+      "R": {
+        "status": "pending"
+      },
+      "E": {
+        "status": "pending"
+      },
+      "V": {
+        "status": "pending"
+      },
+      "C": {
+        "status": "pending"
+      }
+    },
+    "agents": {},
+    "roles": {},
+    "approval": {
+      "plan_created": true,
+      "plan_approved": false
+    },
+    "execution": {
+      "history": [
+        {
+          "timestamp": "2026-04-28T03:06:22.187Z",
+          "phase": "P",
+          "action": "started"
+        },
+        {
+          "timestamp": "2026-04-28T03:06:29.078Z",
+          "phase": "P",
+          "action": "plan_linked",
+          "plan": "llm-gateway-10x"
+        }
+      ],
+      "last_activity": "2026-04-28T03:06:29.078Z",
+      "resume_context": "Plano vinculado - aguardando revisão"
+    }
+  },
+  "binding": {
+    "workflowName": "llm-gateway-10x",
+    "sessionId": "a66d3c43-1164-429f-a6c2-39851401f7be",
+    "createdAt": "2026-04-28T03:06:22.194Z",
+    "updatedAt": "2026-04-28T03:06:22.193Z"
+  }
+}

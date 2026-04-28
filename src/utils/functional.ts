@@ -79,7 +79,7 @@ export const constant =
 /**
  * Throttle a function - ensures it runs at most once per interval
  */
-export const throttle = <T extends (...args: any[]) => any>(
+export const throttle = <T extends (...args: unknown[]) => unknown>(
   fn: T,
   delay: number
 ): ((...args: Parameters<T>) => void) => {

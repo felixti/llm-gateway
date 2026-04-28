@@ -54,6 +54,7 @@ function validateToken(rawToken: string): AuthResult<PatToken> {
 interface JwtPayload {
   jti: string;
   exp: number;
+  scope?: string;
 }
 
 /**
@@ -144,10 +145,9 @@ export async function authMiddleware(c: Context, next: Next): Promise<void> {
     return;
   }
 
-  // Set context variables for downstream middleware/handlers
   c.set(USER_ID_KEY, token.userId);
   c.set(JTI_KEY, payload.jti);
-  c.set(SCOPE_KEY, 'all'); // TODO: Extract scope from token payload
+  c.set(SCOPE_KEY, payload.scope || 'all');
   c.set(PAT_TOKEN_KEY, token);
 
   await next();

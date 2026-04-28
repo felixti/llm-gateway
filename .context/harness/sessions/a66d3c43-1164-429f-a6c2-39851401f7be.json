@@ -1,0 +1,18 @@
+{
+  "id": "a66d3c43-1164-429f-a6c2-39851401f7be",
+  "name": "llm-gateway-10x",
+  "status": "active",
+  "repoPath": "/var/home/felix-powerhouse/Sources/github/llm-gateway",
+  "createdAt": "2026-04-28T03:06:22.193Z",
+  "updatedAt": "2026-04-28T03:06:29.081Z",
+  "startedAt": "2026-04-28T03:06:22.193Z",
+  "traceCount": 3,
+  "artifactCount": 0,
+  "checkpointCount": 0,
+  "checkpoints": [],
+  "metadata": {
+    "workflow": true,
+    "description": "Comprehensive improvement plan to fix CI pipeline, remove dead code, make all tests pass, achieve 85%+ coverage, harden security, and operationalize the LLM Gateway for production."
+  },
+  "lastTraceAt": "2026-04-28T03:06:29.081Z"
+}

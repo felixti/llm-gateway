@@ -4,12 +4,13 @@
  * Handles streaming with usage extraction and quota reconciliation
  */
 
-import { Hono } from 'hono';
 import type { DeploymentConfig } from '../config/deployments';
 import { getDeploymentByAlias } from '../config/deployments';
+import { logRequestAudit } from '../db/data-access';
 import { AzureAuthManager } from '../services/azure-auth';
 import { isRequestAllowed, recordFailure, recordSuccess } from '../services/circuit-breaker';
 import type { TokenUsage } from '../services/pricing.service';
+import { calculateCost } from '../services/pricing.service';
 import { reconcileUsage, releaseReservation } from '../services/quota.service';
 import { withRetry } from '../services/retry';
 import { errorForProtocol } from '../utils/errors';
@@ -64,8 +65,10 @@ export async function proxyNonStreamingChat(
   headers: Record<string, string>,
   body: Record<string, unknown>,
   deployment: DeploymentConfig,
-  reservationId: string
+  reservationId: string,
+  requestId: string
 ): Promise<Response> {
+  const startTime = Date.now();
   const response = await withRetry(() =>
     fetch(upstreamUrl, {
       method: 'POST',
@@ -108,9 +111,25 @@ export async function proxyNonStreamingChat(
     error?: { message: string; type: string; code?: string };
   };
   const usage = responseBody?.usage;
+  const userId = deployment.name;
 
   if (usage && reservationId) {
-    await reconcileUsage(reservationId, usage, deployment.azureModelName);
+    const actualCost = await reconcileUsage(reservationId, usage, deployment.azureModelName);
+    logRequestAudit({
+      userId,
+      requestId,
+      model: deployment.azureModelName,
+      deployment: deployment.name,
+      protocolFamily: deployment.protocolFamily,
+      tokensInput: usage.prompt_tokens,
+      tokensOutput: usage.completion_tokens,
+      tokensThinking: usage.thinking_tokens || 0,
+      costUsd: actualCost.toString(),
+      thinkingEnabled: false,
+      azureAuthType: 'api_key',
+      durationMs: Date.now() - startTime,
+      statusCode: 200,
+    }).catch(() => {});
   } else if (reservationId) {
     await releaseReservation(reservationId);
   }
@@ -168,6 +187,7 @@ export async function proxyStreamingChat(
 
   const transformer = createOpenAIStreamTransformer();
   let usageExtracted = false;
+  const startTime = Date.now();
   handleStreamAbort(reservationId, releaseReservation);
 
   const stream = response.body.pipeThrough(new TransformStream(transformer)).pipeThrough(
@@ -179,9 +199,25 @@ export async function proxyStreamingChat(
           if (usage) {
             usageExtracted = true;
             if (reservationId) {
-              reconcileUsage(reservationId, usage, deployment.azureModelName).catch((err) =>
-                console.error('Quota reconciliation error:', err)
-              );
+              reconcileUsage(reservationId, usage, deployment.azureModelName)
+                .then((actualCost) => {
+                  logRequestAudit({
+                    userId: deployment.name,
+                    requestId,
+                    model: deployment.azureModelName,
+                    deployment: deployment.name,
+                    protocolFamily: deployment.protocolFamily,
+                    tokensInput: usage.prompt_tokens,
+                    tokensOutput: usage.completion_tokens,
+                    tokensThinking: usage.thinking_tokens || 0,
+                    costUsd: actualCost.toString(),
+                    thinkingEnabled: false,
+                    azureAuthType: 'api_key',
+                    durationMs: Date.now() - startTime,
+                    statusCode: 200,
+                  }).catch(() => {});
+                })
+                .catch((err) => console.error('Quota reconciliation error:', err));
             }
           }
         }
@@ -203,51 +239,3 @@ export async function proxyStreamingChat(
     },
   });
 }
-
-// Create Hono app for mounting
-const openaiChatProxy = new Hono();
-
-openaiChatProxy.post('/', async (c) => {
-  const deployment = c.get('deployment');
-  const requestId = c.get('requestId') || '';
-  const reservationId = c.get('reservationId') || '';
-
-  // Check circuit breaker
-  if (!isRequestAllowed(deployment.name)) {
-    const error = errorForProtocol(
-      '/v1/chat/completions',
-      503,
-      'service_unavailable',
-      'Service temporarily unavailable, please retry'
-    );
-    return c.json(error, 503);
-  }
-
-  // Get auth headers
-  const authManager = new AzureAuthManager();
-  const authHeaders = await authManager.getAuthHeaders(deployment.name);
-
-  // Parse body
-  const body = await c.req.json<Record<string, unknown>>();
-
-  // Build upstream request
-  const upstreamUrl = buildUpstreamUrl(deployment, deployment.modelFamily);
-  const upstreamBody = buildRequestBody(body, deployment.modelFamily);
-
-  // Determine streaming
-  if (body.stream === true) {
-    return proxyStreamingChat(
-      upstreamUrl,
-      authHeaders,
-      upstreamBody,
-      deployment,
-      reservationId,
-      requestId
-    );
-  }
-
-  return proxyNonStreamingChat(upstreamUrl, authHeaders, upstreamBody, deployment, reservationId);
-});
-
-// Export for testing and mounting
-export { openaiChatProxy };

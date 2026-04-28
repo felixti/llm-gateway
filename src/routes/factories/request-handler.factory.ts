@@ -141,7 +141,8 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       authHeaders,
       upstreamBody,
       deployment.value,
-      reservationId
+      reservationId,
+      requestId
     );
   };
 }

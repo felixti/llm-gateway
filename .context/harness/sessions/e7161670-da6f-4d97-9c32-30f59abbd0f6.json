@@ -1,0 +1,18 @@
+{
+  "id": "e7161670-da6f-4d97-9c32-30f59abbd0f6",
+  "name": "mcp-activity",
+  "status": "active",
+  "repoPath": "/var/home/felix-powerhouse/Sources/github/llm-gateway",
+  "createdAt": "2026-04-28T03:04:56.921Z",
+  "updatedAt": "2026-04-28T03:05:10.504Z",
+  "startedAt": "2026-04-28T03:04:56.921Z",
+  "traceCount": 4,
+  "artifactCount": 0,
+  "checkpointCount": 0,
+  "checkpoints": [],
+  "metadata": {
+    "transport": "mcp",
+    "purpose": "tool-audit"
+  },
+  "lastTraceAt": "2026-04-28T03:05:10.504Z"
+}

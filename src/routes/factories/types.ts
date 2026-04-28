@@ -59,13 +59,11 @@ export type ProxyStreamingFn = (
   requestId: string
 ) => Promise<Response>;
 
-/**
- * Non-streaming proxy function signature
- */
 export type ProxyNonStreamingFn = (
   upstreamUrl: string,
   headers: Record<string, string>,
   body: Record<string, unknown>,
   deployment: DeploymentConfig,
-  reservationId: string
+  reservationId: string,
+  requestId: string
 ) => Promise<Response>;
