@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { logPatRevocation } from '../db/data-access';
 import { redis } from '../db/redis';
 import { authMiddleware } from '../middleware/auth';
+import { scopeMiddleware } from '../middleware/scope';
 import { hashJtiForBlocklist } from '../utils/auth';
 import { errorForProtocol } from '../utils/errors';
 
@@ -21,6 +22,7 @@ export const adminRoutes = new Hono();
 
 // Apply auth middleware - requires authentication
 adminRoutes.use('*', authMiddleware);
+adminRoutes.use('*', scopeMiddleware);
 
 // POST /admin/pat/revoke
 adminRoutes.post('/pat/revoke', async (c) => {

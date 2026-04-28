@@ -9,6 +9,7 @@ import { authMiddleware } from '../middleware/auth';
 import { protocolGuardMiddleware } from '../middleware/protocol-guard';
 import { quotaMiddleware } from '../middleware/quota';
 import { rateLimitMiddleware } from '../middleware/rate-limit';
+import { scopeMiddleware } from '../middleware/scope';
 import {
   buildUpstreamUrlAnthropic,
   proxyNonStreamingAnthropic,
@@ -92,6 +93,7 @@ export const messagesRoutes = new Hono();
 
 // Apply middleware chain
 messagesRoutes.use('*', authMiddleware);
+messagesRoutes.use('*', scopeMiddleware);
 messagesRoutes.use('*', protocolGuardMiddleware);
 messagesRoutes.use('*', rateLimitMiddleware);
 messagesRoutes.use('*', quotaMiddleware);

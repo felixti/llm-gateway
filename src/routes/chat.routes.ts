@@ -9,6 +9,7 @@ import { authMiddleware } from '../middleware/auth';
 import { protocolGuardMiddleware } from '../middleware/protocol-guard';
 import { quotaMiddleware } from '../middleware/quota';
 import { rateLimitMiddleware } from '../middleware/rate-limit';
+import { scopeMiddleware } from '../middleware/scope';
 import {
   buildRequestBody,
   buildUpstreamUrl,
@@ -80,6 +81,7 @@ export const chatRoutes = new Hono();
 
 // Apply middleware chain
 chatRoutes.use('*', authMiddleware);
+chatRoutes.use('*', scopeMiddleware);
 chatRoutes.use('*', protocolGuardMiddleware);
 chatRoutes.use('*', rateLimitMiddleware);
 chatRoutes.use('*', quotaMiddleware);

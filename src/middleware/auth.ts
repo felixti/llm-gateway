@@ -103,46 +103,48 @@ async function checkBlocklist(jti: string): Promise<AuthResult<void>> {
  * PAT Authentication Middleware
  * Validates token, checks blocklist, sets context variables
  */
-export async function authMiddleware(c: Context, next: Next): Promise<void> {
+export async function authMiddleware(c: Context, next: Next): Promise<Response | undefined> {
   const path = c.req.path;
   const authHeader = c.req.header(HEADER_AUTHORIZATION);
 
   // Pipeline of validation steps using Result
   const tokenResult = extractBearerToken(authHeader);
   if (!isOk(tokenResult)) {
-    c.status(401);
-    c.json(errorForProtocol(path, 401, tokenResult.error.code, tokenResult.error.message));
-    return;
+    return c.json(
+      errorForProtocol(path, 401, tokenResult.error.code, tokenResult.error.message),
+      401
+    );
   }
 
   const patResult = validateToken(tokenResult.value);
   if (!isOk(patResult)) {
-    c.status(401);
-    c.json(errorForProtocol(path, 401, patResult.error.code, patResult.error.message));
-    return;
+    return c.json(errorForProtocol(path, 401, patResult.error.code, patResult.error.message), 401);
   }
 
   const token = patResult.value;
   const payloadResult = parseJwtPayload(token.payload);
   if (!isOk(payloadResult)) {
-    c.status(401);
-    c.json(errorForProtocol(path, 401, payloadResult.error.code, payloadResult.error.message));
-    return;
+    return c.json(
+      errorForProtocol(path, 401, payloadResult.error.code, payloadResult.error.message),
+      401
+    );
   }
 
   const payload = payloadResult.value;
   const expiryResult = checkExpiry(payload.exp);
   if (!isOk(expiryResult)) {
-    c.status(401);
-    c.json(errorForProtocol(path, 401, expiryResult.error.code, expiryResult.error.message));
-    return;
+    return c.json(
+      errorForProtocol(path, 401, expiryResult.error.code, expiryResult.error.message),
+      401
+    );
   }
 
   const blocklistResult = await checkBlocklist(payload.jti);
   if (!isOk(blocklistResult)) {
-    c.status(401);
-    c.json(errorForProtocol(path, 401, blocklistResult.error.code, blocklistResult.error.message));
-    return;
+    return c.json(
+      errorForProtocol(path, 401, blocklistResult.error.code, blocklistResult.error.message),
+      401
+    );
   }
 
   c.set(USER_ID_KEY, token.userId);

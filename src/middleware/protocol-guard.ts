@@ -33,7 +33,10 @@ function getModelFromBody(body: unknown): string | null {
  * Protocol Guard Middleware
  * Validates model matches the endpoint protocol
  */
-export async function protocolGuardMiddleware(c: Context, next: Next): Promise<void> {
+export async function protocolGuardMiddleware(
+  c: Context,
+  next: Next
+): Promise<Response | undefined> {
   const path = c.req.path;
   const allowedFamilies = ALLOWED_FAMILIES_PER_PATH[path];
 
@@ -64,10 +67,10 @@ export async function protocolGuardMiddleware(c: Context, next: Next): Promise<v
   const modelFamily = getModelFamily(model);
 
   if (!modelFamily) {
-    const error = errorForProtocol(path, 400, 'model_not_supported', `Unknown model: ${model}`);
-    c.status(400);
-    c.json(error);
-    return;
+    return c.json(
+      errorForProtocol(path, 400, 'model_not_supported', `Unknown model: ${model}`),
+      400
+    );
   }
 
   // Check if model family is allowed for this path
@@ -86,10 +89,7 @@ export async function protocolGuardMiddleware(c: Context, next: Next): Promise<v
       errorMessage = `Model ${model} is not supported on this endpoint`;
     }
 
-    const error = errorForProtocol(path, 400, 'model_not_supported', errorMessage);
-    c.status(400);
-    c.json(error);
-    return;
+    return c.json(errorForProtocol(path, 400, 'model_not_supported', errorMessage), 400);
   }
 
   // Set model in context for downstream use

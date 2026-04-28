@@ -32,7 +32,7 @@ const envSchema = z.object({
     .default('postgresql://postgres:postgres@localhost:5432/llm_gateway'),
 
   // PAT Secret (for HMAC-SHA256 signing)
-  PAT_SECRET: z.string().min(32).default('dev-secret-change-in-production'),
+  PAT_SECRET: z.string().min(32),
 
   // OpenTelemetry
   OTEL_EXPORTER_OTLP_GRPC_ENDPOINT: z.string().url().optional(),
