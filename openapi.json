@@ -1,0 +1,322 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "LLM Gateway",
+    "description": "Unified model hub for developer CLI tools. Supports OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages APIs.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Platform Engineering"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Local development"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Health check",
+        "description": "Returns gateway version and timestamp. Always returns 200 if the server is running.",
+        "responses": {
+          "200": {
+            "description": "Gateway is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "version": { "type": "string" },
+                    "timestamp": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Readiness probe",
+        "description": "Checks critical dependencies (Redis, Azure deployments). Returns 503 if any dependency is unavailable.",
+        "responses": {
+          "200": {
+            "description": "All dependencies are ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "enum": ["ready"] },
+                    "checks": {
+                      "type": "object",
+                      "properties": {
+                        "redis": { "type": "boolean" },
+                        "deployments": { "type": "boolean" }
+                      }
+                    },
+                    "timestamp": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "One or more dependencies are not ready"
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": ["Observability"],
+        "summary": "Prometheus metrics",
+        "description": "Returns Prometheus-formatted metrics for scraping.",
+        "responses": {
+          "200": {
+            "description": "Metrics in Prometheus text format",
+            "content": {
+              "text/plain": {
+                "schema": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "tags": ["Models"],
+        "summary": "List available models",
+        "description": "Returns all available models with their deployment metadata.",
+        "responses": {
+          "200": {
+            "description": "List of models",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": { "type": "string", "enum": ["list"] },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "object": { "type": "string", "enum": ["model"] },
+                          "created": { "type": "integer" },
+                          "owned_by": { "type": "string" },
+                          "gateway": { "type": "object" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid PAT"
+          }
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "tags": ["Chat"],
+        "summary": "OpenAI Chat Completions",
+        "description": "Proxy to Azure OpenAI or Azure AI Foundry for GPT, Kimi, GLM, and MiniMax models.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["model", "messages"],
+                "properties": {
+                  "model": { "type": "string" },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "role": { "type": "string" },
+                        "content": { "type": "string" }
+                      }
+                    }
+                  },
+                  "stream": { "type": "boolean", "default": false },
+                  "max_tokens": { "type": "integer" },
+                  "max_completion_tokens": { "type": "integer" },
+                  "temperature": { "type": "number", "minimum": 0, "maximum": 2 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Chat completion response"
+          },
+          "400": {
+            "description": "Invalid request (e.g., Claude model on wrong endpoint)"
+          },
+          "401": {
+            "description": "Invalid or expired PAT"
+          },
+          "429": {
+            "description": "Rate limit or quota exceeded"
+          },
+          "503": {
+            "description": "Circuit breaker open"
+          }
+        }
+      }
+    },
+    "/v1/messages": {
+      "post": {
+        "tags": ["Messages"],
+        "summary": "Anthropic Messages API",
+        "description": "Native proxy to Claude models on Azure AI Foundry.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["model", "messages", "max_tokens"],
+                "properties": {
+                  "model": { "type": "string" },
+                  "messages": { "type": "array" },
+                  "max_tokens": { "type": "integer" },
+                  "system": { "type": "string" },
+                  "stream": { "type": "boolean", "default": false },
+                  "thinking": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Messages response"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Invalid PAT"
+          }
+        }
+      }
+    },
+    "/v1/responses": {
+      "post": {
+        "tags": ["Responses"],
+        "summary": "OpenAI Responses API",
+        "description": "Translates Responses API requests to Chat Completions for GPT models.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["model", "input"],
+                "properties": {
+                  "model": { "type": "string" },
+                  "input": {
+                    "oneOf": [{ "type": "string" }, { "type": "array" }]
+                  },
+                  "stream": { "type": "boolean", "default": false },
+                  "tools": { "type": "array" },
+                  "max_tokens": { "type": "integer" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Responses API response"
+          }
+        }
+      }
+    },
+    "/quota": {
+      "get": {
+        "tags": ["Quota"],
+        "summary": "Get quota status",
+        "description": "Returns the authenticated user's current quota usage.",
+        "responses": {
+          "200": {
+            "description": "Quota status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "monthly_budget_usd": { "type": "number" },
+                    "spent_usd": { "type": "number" },
+                    "reserved_usd": { "type": "number" },
+                    "remaining_usd": { "type": "number" },
+                    "reset_date": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/pat/revoke": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "Revoke a PAT",
+        "description": "Adds a PAT to the Redis blocklist and logs the revocation.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["pat_id"],
+                "properties": {
+                  "pat_id": { "type": "string", "format": "uuid" },
+                  "reason": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "PAT revoked successfully"
+          },
+          "400": {
+            "description": "Invalid request body"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "PAT",
+        "description": "Personal Access Token (PAT) with format: lg_{userId}_{header}.{payload}.{signature}"
+      }
+    }
+  }
+}

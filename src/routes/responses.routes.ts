@@ -3,19 +3,19 @@
  * OpenAI Responses API endpoint with full middleware chain
  */
 
-import { Hono } from 'hono';
-import { z } from 'zod';
-import { authMiddleware } from '../middleware/auth';
-import { protocolGuardMiddleware } from '../middleware/protocol-guard';
-import { quotaMiddleware } from '../middleware/quota';
-import { rateLimitMiddleware } from '../middleware/rate-limit';
-import { scopeMiddleware } from '../middleware/scope';
+import { authMiddleware } from '@/middleware/auth';
+import { protocolGuardMiddleware } from '@/middleware/protocol-guard';
+import { quotaMiddleware } from '@/middleware/quota';
+import { rateLimitMiddleware } from '@/middleware/rate-limit';
+import { scopeMiddleware } from '@/middleware/scope';
 import {
   buildRequestBody,
   buildUpstreamUrl,
   proxyNonStreamingChat,
   proxyStreamingChat,
-} from '../proxy/openai-chat.proxy';
+} from '@/proxy/openai-chat.proxy';
+import { Hono } from 'hono';
+import { z } from 'zod';
 import { createRequestHandler } from './factories/request-handler.factory';
 
 // Zod schema for Responses API body validation

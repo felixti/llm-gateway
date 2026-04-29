@@ -4,7 +4,7 @@
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { env } from '../config/env';
+import { env } from '@/config/env';
 
 /**
  * PAT token format: lg_{userId}_{header}.{payload}.{signature}

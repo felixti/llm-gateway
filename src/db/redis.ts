@@ -1,6 +1,6 @@
+import { env } from '@/config/env';
 import Redis from 'ioredis';
 import type { RedisOptions } from 'ioredis';
-import { env } from '../config/env';
 
 const redisOptions: RedisOptions = {
   host: env.REDIS_HOST || 'localhost',

@@ -22,6 +22,7 @@ vi.mock('@/config/deployments', () => ({
 vi.mock('@/services/azure-auth', () => ({
   getAzureAuthManager: () => ({
     getAuthHeaders: (...args: unknown[]) => mockGetAuthHeaders(...args),
+    getAuthHeadersForDeployment: () => mockGetAuthHeaders(),
   }),
 }));
 

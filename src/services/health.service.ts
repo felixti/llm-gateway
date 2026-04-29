@@ -7,15 +7,10 @@ import {
   type DeploymentConfig,
   getAllDeployments,
   getDeploymentByAlias,
-} from '../config/deployments';
+} from '@/config/deployments';
+import { env } from '@/config/env';
 import { getAzureAuthManager } from './azure-auth';
 import { recordFailure } from './circuit-breaker';
-
-// Health check interval in milliseconds
-const HEALTH_CHECK_INTERVAL_MS = 30_000;
-
-// Lightweight health check timeout
-const HEALTH_CHECK_TIMEOUT_MS = 5_000;
 
 // Deployment health state
 export interface DeploymentHealth {
@@ -52,7 +47,7 @@ async function checkChatCompletionsHealth(
       messages: [{ role: 'user', content: 'ping' }],
       max_tokens: 1,
     }),
-    signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS),
+    signal: AbortSignal.timeout(env.HEALTH_CHECK_TIMEOUT_MS),
   });
 
   const latencyMs = Date.now() - startTime;
@@ -93,7 +88,7 @@ async function checkAnthropicMessagesHealth(
       messages: [{ role: 'user', content: 'ping' }],
       max_tokens: 1,
     }),
-    signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS),
+    signal: AbortSignal.timeout(env.HEALTH_CHECK_TIMEOUT_MS),
   });
 
   const latencyMs = Date.now() - startTime;
@@ -188,13 +183,13 @@ let healthCheckInterval: ReturnType<typeof setInterval> | null = null;
  * Start periodic health checks for all deployments
  */
 export function startHealthChecks(): void {
-  if (healthCheckInterval !== null) {
-    return; // Already running
+  if (healthCheckInterval !== null || !env.HEALTH_CHECK_ENABLED) {
+    return; // Already running or disabled
   }
 
   healthCheckInterval = setInterval(async () => {
     await getAllDeploymentHealth();
-  }, HEALTH_CHECK_INTERVAL_MS);
+  }, env.HEALTH_CHECK_INTERVAL_MS);
 
   // Don't keep process alive just for health checks
   if (healthCheckInterval.unref) {

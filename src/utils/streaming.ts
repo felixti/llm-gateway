@@ -4,7 +4,7 @@
  * Handles usage extraction for quota reconciliation
  */
 
-import type { TokenUsage } from '../services/pricing.service';
+import type { TokenUsage } from '@/services/pricing.service';
 
 // =============================================================================
 // SSE Parser TransformStream

@@ -3,18 +3,18 @@
  * Anthropic Messages API endpoint with full middleware chain
  */
 
-import { Hono } from 'hono';
-import { z } from 'zod';
-import { authMiddleware } from '../middleware/auth';
-import { protocolGuardMiddleware } from '../middleware/protocol-guard';
-import { quotaMiddleware } from '../middleware/quota';
-import { rateLimitMiddleware } from '../middleware/rate-limit';
-import { scopeMiddleware } from '../middleware/scope';
+import { authMiddleware } from '@/middleware/auth';
+import { protocolGuardMiddleware } from '@/middleware/protocol-guard';
+import { quotaMiddleware } from '@/middleware/quota';
+import { rateLimitMiddleware } from '@/middleware/rate-limit';
+import { scopeMiddleware } from '@/middleware/scope';
 import {
   buildUpstreamUrlAnthropic,
   proxyNonStreamingAnthropic,
   proxyStreamingAnthropic,
-} from '../proxy/anthropic.proxy';
+} from '@/proxy/anthropic.proxy';
+import { Hono } from 'hono';
+import { z } from 'zod';
 import { createRequestHandler } from './factories/request-handler.factory';
 
 // Zod schema for Anthropic messages body validation
@@ -72,7 +72,7 @@ const anthropicMessagesBodySchema = z.object({
       name: z.string().optional(),
     })
     .optional(),
-  max_tokens: z.number().int().positive().min(1).default(4096),
+  max_tokens: z.number().int().positive().min(1),
 });
 
 export type AnthropicMessagesBody = z.infer<typeof anthropicMessagesBodySchema>;

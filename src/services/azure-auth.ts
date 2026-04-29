@@ -2,7 +2,7 @@ import {
   type AzureAuthConfig,
   type DeploymentConfig,
   getDeploymentByAlias,
-} from '../config/deployments';
+} from '@/config/deployments';
 
 // Constants for token refresh
 const TOKEN_REFRESH_BUFFER_SECONDS = 300; // 5 minutes before expiry

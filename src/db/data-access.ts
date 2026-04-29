@@ -3,7 +3,7 @@
  * Provides async, fire-and-forget audit logging and usage archival
  */
 
-import { logger } from '../observability/logger';
+import { logger } from '@/observability/logger';
 import { database } from './client';
 
 // Types for audit records

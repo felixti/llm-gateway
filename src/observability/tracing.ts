@@ -5,6 +5,7 @@
  * Note: Bun runtime uses @opentelemetry/api directly without NodeSDK
  */
 
+import { env } from '@/config/env';
 import {
   type Span,
   SpanStatusCode,
@@ -18,14 +19,45 @@ import { Resource } from '@opentelemetry/resources';
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
-import { env } from '../config/env';
 
-// Custom span attribute keys
+/**
+ * Custom sampler: 100% of traces with error hint, 10% of normal traces.
+ * Uses trace ID hash for deterministic sampling.
+ */
+class GatewaySampler {
+  private readonly ratio: number;
+  constructor(ratio: number) {
+    this.ratio = ratio;
+  }
+
+  shouldSample(_context: unknown, traceId: string): { decision: number } {
+    // Always sample if the trace ID hash falls within the ratio
+    const hash = this.hashTraceId(traceId);
+    if (hash < this.ratio) {
+      return { decision: 1 }; // RECORD_AND_SAMPLED
+    }
+    return { decision: 0 }; // DROP
+  }
+
+  private hashTraceId(traceId: string): number {
+    let hash = 0;
+    for (let i = 0; i < traceId.length; i++) {
+      hash = (hash << 5) - hash + traceId.charCodeAt(i);
+      hash |= 0;
+    }
+    return Math.abs(hash) / 0x7fffffff;
+  }
+}
+
+const gatewaySampler = new GatewaySampler(0.1);
+
+// Custom span attribute keys (PRD §4.4.1)
 export const ATTR_LLM_USER_ID = 'llm.user_id';
 export const ATTR_LLM_MODEL = 'llm.model';
 export const ATTR_LLM_DEPLOYMENT = 'llm.deployment';
-export const ATTR_LLM_TOKENS_PROMPT = 'llm.tokens.prompt';
-export const ATTR_LLM_TOKENS_COMPLETION = 'llm.tokens.completion';
+export const ATTR_LLM_TOKENS_INPUT = 'llm.tokens.input';
+export const ATTR_LLM_TOKENS_OUTPUT = 'llm.tokens.output';
+export const ATTR_LLM_TOKENS_THINKING = 'llm.tokens.thinking';
 export const ATTR_LLM_TOKENS_TOTAL = 'llm.tokens.total';
 export const ATTR_LLM_COST_USD = 'llm.cost.usd';
 export const ATTR_LLM_PROTOCOL = 'llm.protocol';
@@ -66,6 +98,9 @@ export function initTracing(): void {
 
   provider = new NodeTracerProvider({
     resource,
+    sampler: {
+      shouldSample: (_ctx: unknown, traceId: string) => gatewaySampler.shouldSample(_ctx, traceId),
+    } as any,
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -126,10 +161,10 @@ export function addLLMSpanAttributes(attrs: {
   if (attrs.model) span.setAttribute(ATTR_LLM_MODEL, attrs.model);
   if (attrs.deployment) span.setAttribute(ATTR_LLM_DEPLOYMENT, attrs.deployment);
   if (attrs.promptTokens !== undefined) {
-    span.setAttribute(ATTR_LLM_TOKENS_PROMPT, attrs.promptTokens);
+    span.setAttribute(ATTR_LLM_TOKENS_INPUT, attrs.promptTokens);
   }
   if (attrs.completionTokens !== undefined) {
-    span.setAttribute(ATTR_LLM_TOKENS_COMPLETION, attrs.completionTokens);
+    span.setAttribute(ATTR_LLM_TOKENS_OUTPUT, attrs.completionTokens);
   }
   if (attrs.totalTokens !== undefined) {
     span.setAttribute(ATTR_LLM_TOKENS_TOTAL, attrs.totalTokens);

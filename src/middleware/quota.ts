@@ -4,16 +4,16 @@
  * Supports hard limit (reject with 429) vs soft limit (warn and allow)
  */
 
-import type { Context, Next } from 'hono';
-import { calculateEstimatedCost } from '../services/pricing.service';
+import { calculateEstimatedCost } from '@/services/pricing.service';
 import {
   type QuotaReservation,
   checkAndReserve,
   getQuotaStatus,
   releaseReservation,
-} from '../services/quota.service';
-import { errorForProtocol } from '../utils/errors';
-import { estimateAnthropicTokens, estimateMessagesTokens } from '../utils/tokens';
+} from '@/services/quota.service';
+import { errorForProtocol } from '@/utils/errors';
+import { estimateAnthropicTokens, estimateMessagesTokens } from '@/utils/tokens';
+import type { Context, Next } from 'hono';
 
 // Header constants
 const HEADER_QUOTA_REMAINING = 'X-Quota-Remaining';

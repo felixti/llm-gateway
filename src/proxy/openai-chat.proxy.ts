@@ -4,21 +4,22 @@
  * Handles streaming with usage extraction and quota reconciliation
  */
 
-import type { DeploymentConfig } from '../config/deployments';
-import { getDeploymentByAlias } from '../config/deployments';
-import { logRequestAudit } from '../db/data-access';
-import { AzureAuthManager } from '../services/azure-auth';
-import { isRequestAllowed, recordFailure, recordSuccess } from '../services/circuit-breaker';
-import type { TokenUsage } from '../services/pricing.service';
-import { calculateCost } from '../services/pricing.service';
-import { reconcileUsage, releaseReservation } from '../services/quota.service';
-import { withRetry } from '../services/retry';
-import { errorForProtocol } from '../utils/errors';
+import type { DeploymentConfig } from '@/config/deployments';
+import { getDeploymentByAlias } from '@/config/deployments';
+import { logRequestAudit } from '@/db/data-access';
+import { addLLMSpanAttributes, injectTraceContext } from '@/observability/tracing';
+import { AzureAuthManager } from '@/services/azure-auth';
+import { isRequestAllowed, recordFailure, recordSuccess } from '@/services/circuit-breaker';
+import type { TokenUsage } from '@/services/pricing.service';
+import { calculateCost } from '@/services/pricing.service';
+import { reconcileUsage, releaseReservation } from '@/services/quota.service';
+import { withRetry } from '@/services/retry';
+import { errorForProtocol } from '@/utils/errors';
 import {
   createOpenAIStreamTransformer,
   extractOpenAIUsage,
   handleStreamAbort,
-} from '../utils/streaming';
+} from '@/utils/streaming';
 
 // Model families that use Foundry OpenAI-compatible endpoint
 const FOUNDRY_FAMILIES = ['kimi', 'glm', 'minimax'];
@@ -69,12 +70,13 @@ export async function proxyNonStreamingChat(
   requestId: string
 ): Promise<Response> {
   const startTime = Date.now();
+  const traceHeaders = injectTraceContext(headers, requestId);
   const response = await withRetry(() =>
     fetch(upstreamUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...headers,
+        ...traceHeaders,
       },
       body: JSON.stringify(body),
     })
@@ -115,6 +117,12 @@ export async function proxyNonStreamingChat(
 
   if (usage && reservationId) {
     const actualCost = await reconcileUsage(reservationId, usage, deployment.azureModelName);
+    addLLMSpanAttributes({
+      promptTokens: usage.prompt_tokens,
+      completionTokens: usage.completion_tokens,
+      totalTokens: usage.prompt_tokens + usage.completion_tokens,
+      costUsd: actualCost.toNumber(),
+    });
     logRequestAudit({
       userId,
       requestId,
@@ -201,6 +209,12 @@ export async function proxyStreamingChat(
             if (reservationId) {
               reconcileUsage(reservationId, usage, deployment.azureModelName)
                 .then((actualCost) => {
+                  addLLMSpanAttributes({
+                    promptTokens: usage.prompt_tokens,
+                    completionTokens: usage.completion_tokens,
+                    totalTokens: usage.prompt_tokens + usage.completion_tokens,
+                    costUsd: actualCost.toNumber(),
+                  });
                   logRequestAudit({
                     userId: deployment.name,
                     requestId,

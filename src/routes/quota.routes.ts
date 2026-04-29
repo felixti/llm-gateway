@@ -3,11 +3,11 @@
  * Returns user's budget/spent/reserved/remaining quota information
  */
 
+import { authMiddleware } from '@/middleware/auth';
+import { scopeMiddleware } from '@/middleware/scope';
+import { getQuotaStatus } from '@/services/quota.service';
+import { errorForProtocol } from '@/utils/errors';
 import { Hono } from 'hono';
-import { authMiddleware } from '../middleware/auth';
-import { scopeMiddleware } from '../middleware/scope';
-import { getQuotaStatus } from '../services/quota.service';
-import { errorForProtocol } from '../utils/errors';
 
 export const quotaRoutes = new Hono();
 

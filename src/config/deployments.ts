@@ -43,7 +43,9 @@ function buildAzureOpenAIAuth(): AzureAuthConfig {
   }
   return {
     type: 'api-key',
-    apiKey: env.AZURE_OPENAI_KEY,
+    apiKey:
+      env.AZURE_OPENAI_KEY ||
+      (process.env.NODE_ENV === 'test' ? 'test-azure-openai-key' : undefined),
     keyHeader: 'api-key',
   };
 }
@@ -61,7 +63,9 @@ function buildFoundryAuth(): AzureAuthConfig {
   }
   return {
     type: 'api-key',
-    apiKey: env.AZURE_AI_FOUNDRY_KEY,
+    apiKey:
+      env.AZURE_AI_FOUNDRY_KEY ||
+      (process.env.NODE_ENV === 'test' ? 'test-foundry-key' : undefined),
     keyHeader: 'x-api-key',
   };
 }

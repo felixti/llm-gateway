@@ -4,11 +4,11 @@
  * Checks Redis blocklist and token expiry
  */
 
+import { redis } from '@/db/redis';
+import { type PatToken, hashJtiForBlocklist, validatePatStructure } from '@/utils/auth';
+import { errorForProtocol } from '@/utils/errors';
+import { type Result, err, isOk, ok } from '@/utils/result';
 import type { Context, Next } from 'hono';
-import { redis } from '../db/redis';
-import { type PatToken, hashJtiForBlocklist, validatePatStructure } from '../utils/auth';
-import { errorForProtocol } from '../utils/errors';
-import { type Result, err, isOk, ok } from '../utils/result';
 
 const HEADER_AUTHORIZATION = 'Authorization';
 const BEARER_PREFIX = 'Bearer ';
@@ -63,14 +63,15 @@ interface JwtPayload {
 function parseJwtPayload(payloadB64: string): AuthResult<JwtPayload> {
   try {
     const padded = payloadB64.padEnd(payloadB64.length + ((4 - (payloadB64.length % 4)) % 4), '=');
-    const decoded = JSON.parse(atob(padded)) as { jti?: string; exp?: number };
+    const decoded = JSON.parse(atob(padded)) as { jti?: string; exp?: number; scope?: string };
     const jti = decoded.jti || '';
     const exp = decoded.exp || 0;
+    const scope = decoded.scope;
 
     if (!jti) {
       return err({ code: 'authentication_error', message: 'Invalid token payload' });
     }
-    return ok({ jti, exp }) as AuthResult<JwtPayload>;
+    return ok({ jti, exp, scope }) as AuthResult<JwtPayload>;
   } catch {
     return err({ code: 'authentication_error', message: 'Invalid token payload' });
   }

@@ -1,6 +1,6 @@
+import { env } from '@/config/env';
+import { logger } from '@/observability/logger';
 import postgres from 'postgres';
-import { env } from '../config/env';
-import { logger } from '../observability/logger';
 
 const connectionString = env.DATABASE_URL || 'postgres://localhost:5432/postgres';
 

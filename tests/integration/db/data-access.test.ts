@@ -6,7 +6,17 @@ import {
   logPatRevocation,
 } from "../../../src/db/data-access";
 
-describe("Data Access Layer", () => {
+let hasPostgres = false;
+try {
+  await sql`SELECT 1`;
+  hasPostgres = true;
+} catch {
+  hasPostgres = false;
+}
+
+const describeOrSkip = hasPostgres ? describe : describe.skip;
+
+describeOrSkip("Data Access Layer", () => {
   beforeAll(async () => {
     // Create test tables
     await sql.unsafe(`

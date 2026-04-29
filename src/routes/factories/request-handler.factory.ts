@@ -15,6 +15,13 @@
  */
 
 import { getDeploymentByAlias } from '@/config/deployments';
+import { logDebugBody } from '@/observability/logger';
+import {
+  addLLMSpanAttributes,
+  getCurrentTraceId,
+  recordError,
+  withSpan,
+} from '@/observability/tracing';
 import { getAzureAuthManager } from '@/services/azure-auth';
 import { isRequestAllowed } from '@/services/circuit-breaker';
 import { type Result, err, ok } from '@/utils/result';
@@ -71,78 +78,117 @@ function checkCircuitBreaker(
 export function createRequestHandler(deps: RequestHandlerDeps) {
   return async function handleRequest(c: Context): Promise<Response> {
     const path = c.req.path;
-    const { requestId, reservationId } = extractRequestContext(c);
+    const { requestId, reservationId, userId } = extractRequestContext(c);
+    const startTime = Date.now();
 
-    // 1. Parse JSON body
-    let body: unknown;
-    try {
-      body = await c.req.json();
-    } catch {
-      return createRequestErrorResponse(c, path, {
-        type: 'invalid_json',
-        message: 'Invalid JSON body',
-      });
-    }
+    return withSpan(
+      'gateway.request',
+      async (span) => {
+        // 1. Parse JSON body
+        let body: unknown;
+        try {
+          body = await c.req.json();
+        } catch {
+          return createRequestErrorResponse(c, path, {
+            type: 'invalid_json',
+            message: 'Invalid JSON body',
+          });
+        }
 
-    // 2. Validate body with Zod schema
-    const validatedBody = validateBody(body, deps.schema);
-    if (!validatedBody.ok) {
-      return createRequestErrorResponse(c, path, validatedBody.error);
-    }
+        // 2. Validate body with Zod schema
+        const validatedBody = validateBody(body, deps.schema);
+        if (!validatedBody.ok) {
+          return createRequestErrorResponse(c, path, validatedBody.error);
+        }
 
-    // Cast to record for downstream use
-    const bodyRecord = validatedBody.value as Record<string, unknown>;
+        // Cast to record for downstream use
+        const bodyRecord = validatedBody.value as Record<string, unknown>;
 
-    // 3. Get deployment
-    const model = deps.getModel(bodyRecord);
-    const deployment = getDeployment(model);
-    if (!deployment.ok) {
-      return createRequestErrorResponse(c, path, deployment.error);
-    }
+        logDebugBody('request', bodyRecord, { traceId: getCurrentTraceId(), userId });
 
-    // 4. Check circuit breaker
-    const circuitCheck = checkCircuitBreaker(deployment.value);
-    if (!circuitCheck.ok) {
-      return createRequestErrorResponse(c, path, circuitCheck.error);
-    }
+        // 3. Get deployment
+        const model = deps.getModel(bodyRecord);
+        const deployment = getDeployment(model);
+        if (!deployment.ok) {
+          return createRequestErrorResponse(c, path, deployment.error);
+        }
 
-    // 5. Get auth headers (reuse singleton manager)
-    const authManager = getAzureAuthManager();
-    let authHeaders: Record<string, string>;
-    try {
-      authHeaders = await authManager.getAuthHeaders(deployment.value.name);
-    } catch {
-      return createRequestErrorResponse(c, path, {
-        type: 'authentication_error',
-        message: 'Failed to get authentication credentials',
-      });
-    }
+        // Set LLM span attributes early
+        addLLMSpanAttributes({
+          userId,
+          model,
+          deployment: deployment.value.name,
+          protocol: deps.protocol,
+          authType: deployment.value.authConfig.type,
+        });
 
-    // 6. Build upstream URL and body
-    const upstreamUrl = deps.buildUpstreamUrl(deployment.value);
-    const upstreamBody = deps.transformBody
-      ? deps.transformBody(bodyRecord, deployment.value)
-      : bodyRecord;
+        // 4. Check circuit breaker
+        const circuitCheck = checkCircuitBreaker(deployment.value);
+        if (!circuitCheck.ok) {
+          return createRequestErrorResponse(c, path, circuitCheck.error);
+        }
 
-    // 7. Route to streaming or non-streaming proxy
-    if (bodyRecord.stream === true) {
-      return deps.proxyStreaming(
-        upstreamUrl,
-        authHeaders,
-        upstreamBody,
-        deployment.value,
-        reservationId,
-        requestId
-      );
-    }
+        // 5. Get auth headers (reuse singleton manager)
+        const authManager = getAzureAuthManager();
+        let authHeaders: Record<string, string>;
+        try {
+          authHeaders = await authManager.getAuthHeadersForDeployment(deployment.value);
+        } catch {
+          return createRequestErrorResponse(c, path, {
+            type: 'authentication_error',
+            message: 'Failed to get authentication credentials',
+          });
+        }
 
-    return deps.proxyNonStreaming(
-      upstreamUrl,
-      authHeaders,
-      upstreamBody,
-      deployment.value,
-      reservationId,
-      requestId
+        // 6. Build upstream URL and body
+        const upstreamUrl = deps.buildUpstreamUrl(deployment.value);
+        const upstreamBody = deps.transformBody
+          ? deps.transformBody(bodyRecord, deployment.value)
+          : bodyRecord;
+
+        // 7. Route to streaming or non-streaming proxy
+        let response: Response;
+        if (bodyRecord.stream === true) {
+          response = await deps.proxyStreaming(
+            upstreamUrl,
+            authHeaders,
+            upstreamBody,
+            deployment.value,
+            reservationId,
+            requestId
+          );
+        } else {
+          response = await deps.proxyNonStreaming(
+            upstreamUrl,
+            authHeaders,
+            upstreamBody,
+            deployment.value,
+            reservationId,
+            requestId
+          );
+        }
+
+        // Record duration and status on span
+        span.setAttribute('http.status_code', response.status);
+        span.setAttribute('duration_ms', Date.now() - startTime);
+
+        logDebugBody(
+          'response',
+          { status: response.status },
+          { traceId: getCurrentTraceId(), userId }
+        );
+
+        if (!response.ok) {
+          recordError(new Error(`Upstream returned ${response.status}`));
+        }
+
+        return response;
+      },
+      {
+        'http.method': c.req.method,
+        'http.route': path,
+        'http.target': c.req.url,
+      }
     );
   };
 }

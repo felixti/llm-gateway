@@ -5,9 +5,9 @@
  * Rejects non-Claude models on /v1/messages
  */
 
+import { type ModelFamily, getModelFamily } from '@/config/deployments';
+import { errorForProtocol } from '@/utils/errors';
 import type { Context, Next } from 'hono';
-import { type ModelFamily, getModelFamily } from '../config/deployments';
-import { errorForProtocol } from '../utils/errors';
 
 // Model families allowed per endpoint
 const ALLOWED_FAMILIES_PER_PATH: Record<string, ModelFamily[]> = {

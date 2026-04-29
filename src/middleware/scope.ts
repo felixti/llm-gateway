@@ -4,8 +4,8 @@
  * Scopes: 'all' (full access), 'read' (GET/HEAD/OPTIONS only)
  */
 
+import { errorForProtocol } from '@/utils/errors';
 import type { Context, Next } from 'hono';
-import { errorForProtocol } from '../utils/errors';
 
 const READ_ONLY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 

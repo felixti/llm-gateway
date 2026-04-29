@@ -46,6 +46,11 @@ const envSchema = z.object({
   // Quota defaults
   QUOTA_RESERVATION_TTL_SECONDS: z.coerce.number().int().positive().default(300),
   QUOTA_MULTIPLIER: z.coerce.number().positive().default(1.2),
+
+  // Health checks
+  HEALTH_CHECK_ENABLED: z.boolean().default(true),
+  HEALTH_CHECK_INTERVAL_MS: z.coerce.number().int().positive().default(30000),
+  HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
 });
 
 // Validate and parse environment variables lazily with fallback for tests

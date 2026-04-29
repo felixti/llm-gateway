@@ -3,14 +3,14 @@
  * PAT revocation and administrative operations
  */
 
+import { logPatRevocation } from '@/db/data-access';
+import { redis } from '@/db/redis';
+import { authMiddleware } from '@/middleware/auth';
+import { scopeMiddleware } from '@/middleware/scope';
+import { hashJtiForBlocklist } from '@/utils/auth';
+import { errorForProtocol } from '@/utils/errors';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { logPatRevocation } from '../db/data-access';
-import { redis } from '../db/redis';
-import { authMiddleware } from '../middleware/auth';
-import { scopeMiddleware } from '../middleware/scope';
-import { hashJtiForBlocklist } from '../utils/auth';
-import { errorForProtocol } from '../utils/errors';
 
 // Zod schema for PAT revocation request
 const revokePatBodySchema = z.object({

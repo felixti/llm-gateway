@@ -1,12 +1,12 @@
 /**
  * Observability Synthetic Tests
  * Tests to verify that tracing, logging, and metrics are properly configured
- * These tests run against a live gateway and check for proper observability signals
+ * These tests run against an in-memory gateway and check for proper observability signals
  */
 
 import { describe, expect, it } from 'bun:test';
-
-const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:3000';
+import { createTestApp } from '../helpers/test-app';
+import { createTestPat, INVALID_PAT } from '../helpers/test-pat';
 
 interface ErrorResponse {
   error: {
@@ -30,13 +30,16 @@ interface ReadyResponse {
   timestamp: string;
 }
 
+const VALID_PAT = createTestPat('user1');
+
 describe('Observability - Synthetic Tests', () => {
   describe('Tracing', () => {
     it('should include X-Request-Id header in responses', async () => {
-      const response = await fetch(`${GATEWAY_URL}/health`);
+      const app = await createTestApp();
+      const res = await app.request('/health');
 
       // Gateway should either set X-Request-Id or we generate one
-      const requestId = response.headers.get('X-Request-Id');
+      const requestId = res.headers.get('X-Request-Id');
       // Request ID is optional but good practice
       if (requestId) {
         expect(requestId).toBeTruthy();
@@ -46,29 +49,32 @@ describe('Observability - Synthetic Tests', () => {
 
     it('should propagate trace context when configured', async () => {
       // Make request with trace context
-      const response = await fetch(`${GATEWAY_URL}/health`, {
+      const app = await createTestApp();
+      const res = await app.request('/health', {
         headers: {
           traceparent:
             '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
         },
       });
 
-      expect(response.status).toBe(200);
+      expect(res.status).toBe(200);
     });
 
     it('should handle requests without trace context gracefully', async () => {
-      const response = await fetch(`${GATEWAY_URL}/health`);
+      const app = await createTestApp();
+      const res = await app.request('/health');
 
-      expect(response.status).toBe(200);
+      expect(res.status).toBe(200);
     });
   });
 
   describe('Logging', () => {
     it('should emit structured JSON logs', async () => {
       // Make a request that will generate logs
-      const response = await fetch(`${GATEWAY_URL}/health`);
+      const app = await createTestApp();
+      const res = await app.request('/health');
 
-      expect(response.status).toBe(200);
+      expect(res.status).toBe(200);
 
       // The gateway should emit JSON logs to stdout
       // In test environment, we verify the endpoint works
@@ -76,17 +82,21 @@ describe('Observability - Synthetic Tests', () => {
     });
 
     it('should log errors with proper structure', async () => {
-      // Trigger an error condition
-      const response = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
+      // Trigger an error condition with valid auth
+      const app = await createTestApp();
+      const res = await app.request('/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: createTestPat('test-user'),
+        },
         body: 'invalid-json',
       });
 
       // Should return 400 with error structure
-      expect(response.status).toBe(400);
+      expect(res.status).toBe(400);
 
-      const body = (await response.json()) as ErrorResponse;
+      const body = (await res.json()) as ErrorResponse;
       expect(body.error).toBeDefined();
       expect(body.error.code).toBe('invalid_request');
     });
@@ -111,18 +121,19 @@ describe('Observability - Synthetic Tests', () => {
         },
       ];
 
+      const app = await createTestApp();
+
       for (const tc of testCases) {
-        const response = await fetch(`${GATEWAY_URL}${tc.path}`, {
+        const res = await app.request(tc.path, {
           method: tc.method,
           headers: {
             'Content-Type': 'application/json',
-            Authorization:
-              'Bearer lg_user1_header.payload.signature',
+            Authorization: VALID_PAT,
           },
           body: tc.body,
         });
 
-        const body = (await response.json()) as ErrorResponse;
+        const body = (await res.json()) as ErrorResponse;
 
         // Error response should have consistent structure
         expect(body).toHaveProperty('error');
@@ -135,7 +146,8 @@ describe('Observability - Synthetic Tests', () => {
 
     it('should sanitize PII from logs (verifiable by error messages)', async () => {
       // Make request with a token that looks like it has PII
-      const response = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
+      const app = await createTestApp();
+      const res = await app.request('/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -149,31 +161,33 @@ describe('Observability - Synthetic Tests', () => {
       });
 
       // Error should not contain the raw token in the message
-      const body = (await response.json()) as ErrorResponse;
+      const body = (await res.json()) as ErrorResponse;
 
       // The error message should not expose sensitive data
       // (implementation should sanitize email-like patterns in tokens)
-      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(res.status).toBeGreaterThanOrEqual(400);
     });
   });
 
   describe('Health Checks', () => {
     it('should expose health endpoint for monitoring', async () => {
-      const response = await fetch(`${GATEWAY_URL}/health`);
-      expect(response.status).toBe(200);
+      const app = await createTestApp();
+      const res = await app.request('/health');
+      expect(res.status).toBe(200);
 
-      const body = (await response.json()) as HealthResponse;
+      const body = (await res.json()) as HealthResponse;
       expect(body).toHaveProperty('timestamp');
       expect(body).toHaveProperty('version');
     });
 
     it('should expose readiness probe for orchestrators', async () => {
-      const response = await fetch(`${GATEWAY_URL}/ready`);
+      const app = await createTestApp();
+      const res = await app.request('/ready');
 
       // Should return either 200 (ready) or 503 (not ready)
-      expect([200, 503]).toContain(response.status);
+      expect([200, 503]).toContain(res.status);
 
-      const body = (await response.json()) as ReadyResponse;
+      const body = (await res.json()) as ReadyResponse;
       expect(body).toHaveProperty('status');
       expect(body).toHaveProperty('checks');
     });
@@ -181,7 +195,8 @@ describe('Observability - Synthetic Tests', () => {
 
   describe('Metrics Attributes', () => {
     it('should include protocol in error responses', async () => {
-      const response = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
+      const app = await createTestApp();
+      const res = await app.request('/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -192,7 +207,7 @@ describe('Observability - Synthetic Tests', () => {
         }),
       });
 
-      const body = (await response.json()) as ErrorResponse;
+      const body = (await res.json()) as ErrorResponse;
 
       // Error responses should include protocol field
       // This helps with metric attribution
@@ -206,13 +221,13 @@ describe('Observability - Span Verification', () => {
     // When OTEL collector is configured, verify spans are created
     // This is a smoke test - actual span verification requires Jaeger query
 
-    const response = await fetch(`${GATEWAY_URL}/health`);
-    expect(response.status).toBe(200);
+    const app = await createTestApp();
+    const res = await app.request('/health');
+    expect(res.status).toBe(200);
 
     // If we have a trace ID header, the span was created
     const traceId =
-      response.headers.get('X-Trace-Id') ||
-      response.headers.get('X-Request-Id');
+      res.headers.get('X-Trace-Id') || res.headers.get('X-Request-Id');
 
     if (traceId) {
       expect(traceId).toMatch(/^[a-f0-9-]+$/);
@@ -223,15 +238,16 @@ describe('Observability - Span Verification', () => {
     const traceparent =
       '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01';
 
-    const response = await fetch(`${GATEWAY_URL}/health`, {
+    const app = await createTestApp();
+    const res = await app.request('/health', {
       headers: { traceparent },
     });
 
-    expect(response.status).toBe(200);
+    expect(res.status).toBe(200);
 
     // If the gateway supports trace context propagation,
     // it should return the trace ID in headers
-    const traceId = response.headers.get('X-Trace-Id');
+    const traceId = res.headers.get('X-Trace-Id');
     if (traceId) {
       expect(traceId).toBe('0af7651916cd43dd8448eb211c80319c');
     }

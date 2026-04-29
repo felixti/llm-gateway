@@ -3,8 +3,8 @@
  * Uses pino for production-grade logging with PII sanitization
  */
 
+import { env } from '@/config/env';
 import pino from 'pino';
-import { env } from '../config/env';
 
 // PII patterns for sanitization
 const EMAIL_PATTERN = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
@@ -12,6 +12,7 @@ const TOKEN_PREFIX_PATTERN = /lg_[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+/g;
 const API_KEY_PREFIX_PATTERN = /sk-[a-zA-Z0-9_]{20,}/g;
 const CREDIT_CARD_PATTERN = /\b(?:\d{4}[-\s]?){3}\d{4}\b/g;
 const PHONE_PATTERN = /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g;
+const SSN_PATTERN = /\b\d{3}-\d{2}-\d{4}\b/g;
 
 // Sanitization replacements
 const EMAIL_REPLACEMENT = 'u***@***.com';
@@ -19,6 +20,7 @@ const TOKEN_REPLACEMENT = 'lg_***_***.***';
 const API_KEY_REPLACEMENT = 'sk-***';
 const CREDIT_CARD_REPLACEMENT = '****-****-****-****';
 const PHONE_REPLACEMENT = '***-***-****';
+const SSN_REPLACEMENT = '***-**-****';
 
 /**
  * Sanitize PII from string values
@@ -31,7 +33,8 @@ export function sanitizePII(obj: unknown): unknown {
       .replace(TOKEN_PREFIX_PATTERN, TOKEN_REPLACEMENT)
       .replace(API_KEY_PREFIX_PATTERN, API_KEY_REPLACEMENT)
       .replace(CREDIT_CARD_PATTERN, CREDIT_CARD_REPLACEMENT)
-      .replace(PHONE_PATTERN, PHONE_REPLACEMENT);
+      .replace(PHONE_PATTERN, PHONE_REPLACEMENT)
+      .replace(SSN_PATTERN, SSN_REPLACEMENT);
   }
 
   if (Array.isArray(obj)) {
@@ -138,4 +141,24 @@ export function logWarning(ctx: RequestLogContext, message: string): void {
   const sanitizedCtx = sanitizePII(ctx) as RequestLogContext;
   const logEntry = formatRequestLog(sanitizedCtx);
   logger.warn(logEntry, message);
+}
+
+/**
+ * Log request/response body at DEBUG level (sanitized)
+ */
+export function logDebugBody(
+  direction: 'request' | 'response',
+  body: unknown,
+  ctx?: RequestLogContext
+): void {
+  if (env.LOG_LEVEL !== 'debug') {
+    return;
+  }
+  const sanitized = sanitizePII(body);
+  const logEntry = {
+    ...formatRequestLog(ctx ?? {}),
+    direction,
+    body: sanitized,
+  };
+  logger.debug(logEntry, `${direction} body`);
 }

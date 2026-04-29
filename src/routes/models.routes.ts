@@ -4,10 +4,10 @@
  * Lists all available models with their deployment info
  */
 
+import { type DeploymentConfig, getAllDeployments } from '@/config/deployments';
+import { authMiddleware } from '@/middleware/auth';
+import { scopeMiddleware } from '@/middleware/scope';
 import { Hono } from 'hono';
-import { type DeploymentConfig, getAllDeployments } from '../config/deployments';
-import { authMiddleware } from '../middleware/auth';
-import { scopeMiddleware } from '../middleware/scope';
 
 // Create models routes
 export const modelsRoutes = new Hono();

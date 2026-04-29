@@ -1,18 +1,19 @@
-import { archiveMonthlyUsage } from '../db/data-access';
-import { redis } from '../db/redis';
-import { logger } from '../observability/logger';
-import { cleanupOrphanedReservations } from '../services/quota.service';
+import { archiveMonthlyUsage } from '@/db/data-access';
+import { redis } from '@/db/redis';
+import { logger } from '@/observability/logger';
+import { cleanupOrphanedReservations } from '@/services/quota.service';
 
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const ARCHIVE_INTERVAL_MS = 60 * 60 * 1000;
 
 let cleanupInterval: ReturnType<typeof setInterval> | null = null;
 let archiveInterval: ReturnType<typeof setInterval> | null = null;
-let isRunning = false;
+let cleanupRunning = false;
+let archiveRunning = false;
 
 async function runCleanupJob(): Promise<void> {
-  if (isRunning) return;
-  isRunning = true;
+  if (cleanupRunning) return;
+  cleanupRunning = true;
 
   try {
     const cleaned = await cleanupOrphanedReservations();
@@ -22,11 +23,14 @@ async function runCleanupJob(): Promise<void> {
   } catch (error) {
     logger.error('Cleanup job failed', { error });
   } finally {
-    isRunning = false;
+    cleanupRunning = false;
   }
 }
 
 async function runArchiveJob(): Promise<void> {
+  if (archiveRunning) return;
+  archiveRunning = true;
+
   try {
     const pattern = 'quota:*';
     let cursor = '0';
@@ -67,6 +71,8 @@ async function runArchiveJob(): Promise<void> {
     }
   } catch (error) {
     logger.error('Archive job failed', { error });
+  } finally {
+    archiveRunning = false;
   }
 }
 

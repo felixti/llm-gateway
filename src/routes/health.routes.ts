@@ -4,10 +4,20 @@
  * GET /ready - critical dependencies check (Redis + Azure connectivity)
  */
 
+import { isRedisHealthy } from '@/db/redis';
+import { getPrometheusMetrics } from '@/observability/metrics';
+import { getAllDeploymentHealth } from '@/services/health.service';
 import { Hono } from 'hono';
-import { isRedisHealthy } from '../db/redis';
-import { getPrometheusMetrics } from '../observability/metrics';
-import { getAllDeploymentHealth } from '../services/health.service';
+
+// Lazy-load OpenAPI spec to avoid bundling it into hot paths
+let openApiSpec: Record<string, unknown> | null = null;
+async function getOpenApiSpec(): Promise<Record<string, unknown>> {
+  if (!openApiSpec) {
+    const spec = await import('../../openapi.json', { with: { type: 'json' } });
+    openApiSpec = spec.default;
+  }
+  return openApiSpec;
+}
 
 export const healthRoutes = new Hono();
 
@@ -76,4 +86,13 @@ healthRoutes.get('/metrics', (c) => {
   return c.text(getPrometheusMetrics(), 200, {
     'Content-Type': 'text/plain; charset=utf-8',
   });
+});
+
+/**
+ * GET /openapi.json
+ * Returns the OpenAPI 3.1 specification
+ */
+healthRoutes.get('/openapi.json', async (c) => {
+  const spec = await getOpenApiSpec();
+  return c.json(spec);
 });

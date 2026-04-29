@@ -4,19 +4,20 @@
  * Native passthrough - no transformation of request/response
  */
 
-import type { DeploymentConfig } from '../config/deployments';
-import { logRequestAudit } from '../db/data-access';
-import { recordFailure, recordSuccess } from '../services/circuit-breaker';
-import type { TokenUsage } from '../services/pricing.service';
-import { calculateCost } from '../services/pricing.service';
-import { reconcileUsage, releaseReservation } from '../services/quota.service';
-import { withRetry } from '../services/retry';
-import { errorForProtocol } from '../utils/errors';
+import type { DeploymentConfig } from '@/config/deployments';
+import { logRequestAudit } from '@/db/data-access';
+import { addLLMSpanAttributes } from '@/observability/tracing';
+import { recordFailure, recordSuccess } from '@/services/circuit-breaker';
+import type { TokenUsage } from '@/services/pricing.service';
+import { calculateCost } from '@/services/pricing.service';
+import { reconcileUsage, releaseReservation } from '@/services/quota.service';
+import { withRetry } from '@/services/retry';
+import { errorForProtocol } from '@/utils/errors';
 import {
   type AnthropicStreamEvent,
   handleStreamAbort,
   parseAnthropicEvents,
-} from '../utils/streaming';
+} from '@/utils/streaming';
 
 /**
  * Build upstream URL for Anthropic Messages API
@@ -95,6 +96,12 @@ export async function proxyNonStreamingAnthropic(
 
   if (usage && reservationId) {
     const actualCost = await reconcileUsage(reservationId, usage, deployment.azureModelName);
+    addLLMSpanAttributes({
+      promptTokens: usage.prompt_tokens,
+      completionTokens: usage.completion_tokens,
+      totalTokens: usage.prompt_tokens + usage.completion_tokens,
+      costUsd: actualCost.toNumber(),
+    });
     logRequestAudit({
       userId: deployment.name,
       requestId,
@@ -185,6 +192,12 @@ export async function proxyStreamingAnthropic(
             usageExtracted = true;
             reconcileUsage(reservationId, usage, deployment.azureModelName)
               .then((actualCost) => {
+                addLLMSpanAttributes({
+                  promptTokens: usage.prompt_tokens,
+                  completionTokens: usage.completion_tokens,
+                  totalTokens: usage.prompt_tokens + usage.completion_tokens,
+                  costUsd: actualCost.toNumber(),
+                });
                 logRequestAudit({
                   userId: deployment.name,
                   requestId,
