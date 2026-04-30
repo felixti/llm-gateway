@@ -34,6 +34,9 @@ const envSchema = z.object({
   // PAT Secret (for HMAC-SHA256 signing)
   PAT_SECRET: z.string().min(32),
 
+  /** Optional shared secret for /admin when set (header X-Operator-Secret); defense in depth with admin PAT */
+  ADMIN_OPERATOR_SECRET: z.string().min(16).optional(),
+
   // OpenTelemetry
   OTEL_EXPORTER_OTLP_GRPC_ENDPOINT: z.string().url().optional(),
   OTEL_SERVICE_NAME: z.string().default('llm-gateway'),
@@ -46,6 +49,12 @@ const envSchema = z.object({
   // Quota defaults
   QUOTA_RESERVATION_TTL_SECONDS: z.coerce.number().int().positive().default(300),
   QUOTA_MULTIPLIER: z.coerce.number().positive().default(1.2),
+  /** When true, pre-check budget overage adds X-Warning instead of 429 (reservation may still fail) */
+  QUOTA_SOFT_LIMIT_ENABLED: z
+    .enum(['true', 'false'])
+    .optional()
+    .default('false')
+    .transform((v) => v === 'true'),
 
   // Health checks
   HEALTH_CHECK_ENABLED: z.boolean().default(true),

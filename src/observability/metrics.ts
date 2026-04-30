@@ -8,6 +8,10 @@ let httpRequestsTotal = 0;
 let llmTokensTotal = 0;
 let llmCostUsdTotal = 0;
 let azureRateLimitHitsTotal = 0;
+let quotaHydrationFailuresTotal = 0;
+let quotaExceeded429Total = 0;
+let rateLimit429Total = 0;
+let patRevocationsTotal = 0;
 
 // Gauges
 let llmQuotaRemainingRatio = 1.0;
@@ -32,6 +36,22 @@ export function addLlmTokens(promptTokens: number, completionTokens: number): vo
  */
 export function addLlmCost(costUsd: number): void {
   llmCostUsdTotal += costUsd;
+}
+
+export function incrementQuotaHydrationFailures(): void {
+  quotaHydrationFailuresTotal++;
+}
+
+export function incrementQuotaExceeded429(): void {
+  quotaExceeded429Total++;
+}
+
+export function incrementRateLimit429(): void {
+  rateLimit429Total++;
+}
+
+export function incrementPatRevocationsTotal(): void {
+  patRevocationsTotal++;
 }
 
 /**
@@ -74,6 +94,10 @@ export function getMetrics(): {
   llm_tokens_total: number;
   llm_cost_usd_total: number;
   azure_rate_limit_hits_total: number;
+  quota_hydration_failures_total: number;
+  quota_exceeded_429_total: number;
+  rate_limit_429_total: number;
+  pat_revocations_total: number;
   llm_quota_remaining_ratio: number;
   circuit_breaker_state: number;
 } {
@@ -82,6 +106,10 @@ export function getMetrics(): {
     llm_tokens_total: llmTokensTotal,
     llm_cost_usd_total: llmCostUsdTotal,
     azure_rate_limit_hits_total: azureRateLimitHitsTotal,
+    quota_hydration_failures_total: quotaHydrationFailuresTotal,
+    quota_exceeded_429_total: quotaExceeded429Total,
+    rate_limit_429_total: rateLimit429Total,
+    pat_revocations_total: patRevocationsTotal,
     llm_quota_remaining_ratio: llmQuotaRemainingRatio,
     circuit_breaker_state: circuitBreakerState,
   };
@@ -95,6 +123,10 @@ export function resetMetrics(): void {
   llmTokensTotal = 0;
   llmCostUsdTotal = 0;
   azureRateLimitHitsTotal = 0;
+  quotaHydrationFailuresTotal = 0;
+  quotaExceeded429Total = 0;
+  rateLimit429Total = 0;
+  patRevocationsTotal = 0;
   llmQuotaRemainingRatio = 1.0;
   circuitBreakerState = 0;
 }
@@ -140,6 +172,22 @@ llm_cost_usd_total ${m.llm_cost_usd_total}
 # HELP azure_rate_limit_hits_total Total Azure rate limit hits
 # TYPE azure_rate_limit_hits_total counter
 azure_rate_limit_hits_total ${m.azure_rate_limit_hits_total}
+
+# HELP quota_hydration_failures_total Postgres quota policy sync failures
+# TYPE quota_hydration_failures_total counter
+quota_hydration_failures_total ${m.quota_hydration_failures_total}
+
+# HELP quota_exceeded_429_total Gateway quota rejections (HTTP 429)
+# TYPE quota_exceeded_429_total counter
+quota_exceeded_429_total ${m.quota_exceeded_429_total}
+
+# HELP rate_limit_429_total Rate limit rejections (HTTP 429)
+# TYPE rate_limit_429_total counter
+rate_limit_429_total ${m.rate_limit_429_total}
+
+# HELP pat_revocations_total PAT revocation requests recorded
+# TYPE pat_revocations_total counter
+pat_revocations_total ${m.pat_revocations_total}
 
 # HELP llm_quota_remaining_ratio Remaining quota ratio (0-1)
 # TYPE llm_quota_remaining_ratio gauge

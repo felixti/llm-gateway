@@ -1,6 +1,8 @@
 import { env } from '@/config/env';
+import { getUserQuotaPolicyByPatSubject } from '@/db/data-access';
 import { redis } from '@/db/redis';
 import { logger } from '@/observability/logger';
+import { incrementQuotaHydrationFailures } from '@/observability/metrics';
 import { Decimal } from 'decimal.js';
 import { type TokenUsage, calculateCost } from './pricing.service';
 
@@ -17,6 +19,8 @@ export interface QuotaStatus {
   reserved_usd: number;
   remaining_usd: number;
   reset_date: string;
+  /** Enforced budget policy: false = soft limit (warn), true = hard (429 when over) */
+  hard_limit: boolean;
 }
 
 const QUOTA_KEY_PREFIX = 'quota:';
@@ -25,6 +29,9 @@ const RESERVATION_KEY_PREFIX = 'reservation:';
 
 const RESERVATION_TTL_SECONDS = env.QUOTA_RESERVATION_TTL_SECONDS;
 const DEFAULT_BUDGET = 50;
+
+/** How often to re-read Postgres policy into Redis (per user/month key) */
+const DB_POLICY_SYNC_INTERVAL_MS = 60_000;
 
 function getCurrentMonth(): string {
   const now = new Date();
@@ -53,6 +60,46 @@ function generateReservationId(): string {
   return `res_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
 }
 
+/** In tests, Postgres sync is off by default to avoid hanging on DB I/O; CI sets QUOTA_PG_SYNC_IN_TESTS=true */
+function shouldSyncQuotaFromPostgres(): boolean {
+  if (process.env.NODE_ENV === 'test' && process.env.QUOTA_PG_SYNC_IN_TESTS !== 'true') {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Postgres is authoritative for monthly budget + hard_limit. Redis holds live spent/reserved.
+ * Skips sync if recently synced (see DB_POLICY_SYNC_INTERVAL_MS).
+ */
+export async function syncQuotaPolicyFromPostgres(userId: string, month: string): Promise<void> {
+  if (!shouldSyncQuotaFromPostgres()) {
+    return;
+  }
+
+  const quotaKey = getQuotaKey(userId, month);
+
+  try {
+    const syncedAt = await redis.hget(quotaKey, 'db_synced_at');
+    if (syncedAt && Date.now() - Number(syncedAt) < DB_POLICY_SYNC_INTERVAL_MS) {
+      return;
+    }
+
+    const policy = await getUserQuotaPolicyByPatSubject(userId);
+    const budget = policy?.monthly_budget_usd ?? String(DEFAULT_BUDGET);
+    const hardLimit = policy?.hard_limit !== false;
+
+    await redis.hset(quotaKey, {
+      budget,
+      hard_limit: hardLimit ? '1' : '0',
+      db_synced_at: String(Date.now()),
+    });
+  } catch (error) {
+    incrementQuotaHydrationFailures();
+    logger.warn('Quota policy sync from Postgres failed; using Redis defaults', { userId, error });
+  }
+}
+
 const CHECK_AND_RESERVE_SCRIPT = `
   local quotaKey = KEYS[1]
   local reservedKey = KEYS[2]
@@ -62,20 +109,15 @@ const CHECK_AND_RESERVE_SCRIPT = `
   local ttl = tonumber(ARGV[3])
   local defaultBudget = tonumber(ARGV[4])
   
-  -- Get current values
   local budget = tonumber(redis.call('hget', quotaKey, 'budget') or defaultBudget)
   local spent = tonumber(redis.call('hget', quotaKey, 'spent') or 0)
   local reserved = tonumber(redis.call('get', reservedKey) or 0)
   
-  -- Check if we can reserve
   if spent + reserved + cost > budget then
     return {0, 'insufficient_quota'}
   end
   
-  -- Reserve the amount
   redis.call('incrbyfloat', reservedKey, cost)
-  
-  -- Store reservation with TTL
   redis.call('setex', reservationKey, ttl, reservationData)
   
   return {1, 'ok'}
@@ -86,6 +128,8 @@ export async function checkAndReserve(
   estimatedCost: Decimal
 ): Promise<QuotaReservation> {
   const month = getCurrentMonth();
+  await syncQuotaPolicyFromPostgres(userId, month);
+
   const reservationId = generateReservationId();
   const costStr = estimatedCost.toString();
 
@@ -172,15 +216,25 @@ export async function reconcileUsage(
   return actualCost;
 }
 
+function parseHardLimitFlag(value: string | null): boolean {
+  if (value === '0' || value === 'false') {
+    return false;
+  }
+  return true;
+}
+
 export async function getQuotaStatus(userId: string): Promise<QuotaStatus> {
   const month = getCurrentMonth();
+  await syncQuotaPolicyFromPostgres(userId, month);
+
   const quotaKey = getQuotaKey(userId, month);
   const reservedKey = getReservedKey(userId, month);
 
-  const [budget, spent, reserved] = await Promise.all([
+  const [budget, spent, reserved, hardRaw] = await Promise.all([
     redis.hget(quotaKey, 'budget'),
     redis.hget(quotaKey, 'spent'),
     redis.get(reservedKey),
+    redis.hget(quotaKey, 'hard_limit'),
   ]);
 
   const budgetDecimal = new Decimal(budget || DEFAULT_BUDGET);
@@ -194,6 +248,7 @@ export async function getQuotaStatus(userId: string): Promise<QuotaStatus> {
     reserved_usd: reservedDecimal.toNumber(),
     remaining_usd: Math.max(0, remaining.toNumber()),
     reset_date: getResetDate(),
+    hard_limit: parseHardLimitFlag(hardRaw),
   };
 }
 
@@ -209,6 +264,7 @@ export async function setMonthlyBudget(
     budget: budgetUsd.toString(),
     spent: '0',
     reset_date: getResetDate(),
+    db_synced_at: String(Date.now()),
   });
 }
 

@@ -9,6 +9,7 @@ import {
   getDeploymentByAlias,
 } from '@/config/deployments';
 import { env } from '@/config/env';
+import { upstreamHttpsFetch } from '@/utils/fetch';
 import { getAzureAuthManager } from './azure-auth';
 import { recordFailure } from './circuit-breaker';
 
@@ -36,7 +37,7 @@ async function checkChatCompletionsHealth(
 
   const startTime = Date.now();
 
-  const response = await fetch(url.toString(), {
+  const response = await upstreamHttpsFetch(url.toString(), {
     method: 'POST',
     headers: {
       ...headers,
@@ -76,7 +77,7 @@ async function checkAnthropicMessagesHealth(
 
   const startTime = Date.now();
 
-  const response = await fetch(url.toString(), {
+  const response = await upstreamHttpsFetch(url.toString(), {
     method: 'POST',
     headers: {
       ...headers,

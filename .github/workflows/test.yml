@@ -10,6 +10,25 @@ jobs:
   quality-gate:
     name: Quality Gate
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/llm_gateway_test
+      PAT_SECRET: test-secret-that-is-at-least-32-chars-for-ci-only
+      QUOTA_PG_SYNC_IN_TESTS: 'true'
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: llm_gateway_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d llm_gateway_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - uses: actions/checkout@v4
@@ -29,20 +48,10 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      - name: Run tests with coverage
-        run: bun run test:coverage
+      - name: Run tests with coverage threshold
+        run: bun run test:coverage:check
         env:
           CI: true
-
-      - name: Check coverage threshold
-        run: |
-          COVERAGE=$(cat coverage/bun/index.html 2>/dev/null | grep -oP '\d+\.\d+%' | head -1 | tr -d '%' || echo "0")
-          echo "Coverage: $COVERAGE%"
-          if (( $(echo "$COVERAGE < 85" | bc -l) )); then
-            echo "ERROR: Coverage $COVERAGE% is below 85% threshold"
-            exit 1
-          fi
-          echo "Coverage $COVERAGE% meets 85% threshold"
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4

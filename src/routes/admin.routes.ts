@@ -5,8 +5,9 @@
 
 import { logPatRevocation } from '@/db/data-access';
 import { redis } from '@/db/redis';
+import { requireAdminScopeMiddleware } from '@/middleware/admin-scope';
 import { authMiddleware } from '@/middleware/auth';
-import { scopeMiddleware } from '@/middleware/scope';
+import { incrementPatRevocationsTotal } from '@/observability/metrics';
 import { hashJtiForBlocklist } from '@/utils/auth';
 import { errorForProtocol } from '@/utils/errors';
 import { Hono } from 'hono';
@@ -20,9 +21,9 @@ const revokePatBodySchema = z.object({
 
 export const adminRoutes = new Hono();
 
-// Apply auth middleware - requires authentication
+// Apply auth + admin scope (revocation is never allowed with `all` or `read` PATs)
 adminRoutes.use('*', authMiddleware);
-adminRoutes.use('*', scopeMiddleware);
+adminRoutes.use('*', requireAdminScopeMiddleware);
 
 // POST /admin/pat/revoke
 adminRoutes.post('/pat/revoke', async (c) => {
@@ -59,12 +60,11 @@ adminRoutes.post('/pat/revoke', async (c) => {
     return c.json(error);
   }
 
-  // Add to Redis blocklist
-  // TTL: 24 hours (86400 seconds) or until explicitly removed
+  // Persist until deleted — aligns with JWT exp / explicit unblock flows
   const blocklistKey = `blocklist:pat:${hashJtiForBlocklist(pat_id)}`;
-  await redis.set(blocklistKey, '1', 'EX', 86400);
+  await redis.set(blocklistKey, '1');
 
-  // Log to PostgreSQL
+  incrementPatRevocationsTotal();
   try {
     await logPatRevocation({
       patId: pat_id,

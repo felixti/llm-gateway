@@ -1,5 +1,6 @@
 import { env } from '@/config/env';
 import { redis } from '@/db/redis';
+import { incrementRateLimit429 } from '@/observability/metrics';
 import { errorForProtocol } from '@/utils/errors';
 import type { Context, Next } from 'hono';
 
@@ -138,7 +139,7 @@ function extractTokenCount(c: Context): number {
   return 0;
 }
 
-export async function rateLimitMiddleware(c: Context, next: Next): Promise<void> {
+export async function rateLimitMiddleware(c: Context, next: Next): Promise<Response | undefined> {
   const userId = c.get('userId');
 
   if (!userId) {
@@ -156,9 +157,8 @@ export async function rateLimitMiddleware(c: Context, next: Next): Promise<void>
       'rate_limit_exceeded',
       'Rate limit exceeded. Please retry later.'
     );
-    c.status(429);
-    c.json(error);
-    return;
+    incrementRateLimit429();
+    return c.json(error, 429);
   }
 
   const tokenCount = extractTokenCount(c);
@@ -171,9 +171,8 @@ export async function rateLimitMiddleware(c: Context, next: Next): Promise<void>
         'rate_limit_exceeded',
         'Token rate limit exceeded. Please retry later.'
       );
-      c.status(429);
-      c.json(error);
-      return;
+      incrementRateLimit429();
+      return c.json(error, 429);
     }
   }
 

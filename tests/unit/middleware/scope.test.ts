@@ -35,6 +35,12 @@ describe("scopeMiddleware", () => {
     expect(result).toBeUndefined();
   });
 
+  test("scope 'admin' + POST → should call next()", async () => {
+    const c = createMockContext({ scope: 'admin', method: 'POST' });
+    const result = await scopeMiddleware(c, next);
+    expect(result).toBeUndefined();
+  });
+
   test("scope 'all' + POST → should call next()", async () => {
     const c = createMockContext({ scope: "all", method: "POST" });
     const result = await scopeMiddleware(c, next);

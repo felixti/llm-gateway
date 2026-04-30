@@ -13,6 +13,7 @@ import { calculateCost } from '@/services/pricing.service';
 import { reconcileUsage, releaseReservation } from '@/services/quota.service';
 import { withRetry } from '@/services/retry';
 import { errorForProtocol } from '@/utils/errors';
+import { upstreamHttpsFetch } from '@/utils/fetch';
 import {
   type AnthropicStreamEvent,
   handleStreamAbort,
@@ -58,7 +59,7 @@ export async function proxyNonStreamingAnthropic(
 ): Promise<Response> {
   const startTime = Date.now();
   const response = await withRetry(() =>
-    fetch(upstreamUrl, {
+    upstreamHttpsFetch(upstreamUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -140,7 +141,7 @@ export async function proxyStreamingAnthropic(
   requestId: string
 ): Promise<Response> {
   const response = await withRetry(() =>
-    fetch(upstreamUrl, {
+    upstreamHttpsFetch(upstreamUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

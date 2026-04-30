@@ -8,13 +8,13 @@ import type { DeploymentConfig } from '@/config/deployments';
 import { getDeploymentByAlias } from '@/config/deployments';
 import { logRequestAudit } from '@/db/data-access';
 import { addLLMSpanAttributes, injectTraceContext } from '@/observability/tracing';
-import { AzureAuthManager } from '@/services/azure-auth';
 import { isRequestAllowed, recordFailure, recordSuccess } from '@/services/circuit-breaker';
 import type { TokenUsage } from '@/services/pricing.service';
 import { calculateCost } from '@/services/pricing.service';
 import { reconcileUsage, releaseReservation } from '@/services/quota.service';
 import { withRetry } from '@/services/retry';
 import { errorForProtocol } from '@/utils/errors';
+import { upstreamHttpsFetch } from '@/utils/fetch';
 import {
   createOpenAIStreamTransformer,
   extractOpenAIUsage,
@@ -72,7 +72,7 @@ export async function proxyNonStreamingChat(
   const startTime = Date.now();
   const traceHeaders = injectTraceContext(headers, requestId);
   const response = await withRetry(() =>
-    fetch(upstreamUrl, {
+    upstreamHttpsFetch(upstreamUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -160,7 +160,7 @@ export async function proxyStreamingChat(
   requestId: string
 ): Promise<Response> {
   const response = await withRetry(() =>
-    fetch(upstreamUrl, {
+    upstreamHttpsFetch(upstreamUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

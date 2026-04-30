@@ -1,7 +1,7 @@
 /**
  * Scope Enforcement Middleware
  * Enforces PAT scope restrictions after authentication
- * Scopes: 'all' (full access), 'read' (GET/HEAD/OPTIONS only)
+ * Scopes: 'admin' (full LLM API access + operator routes), 'all' (full access), 'read' (GET/HEAD/OPTIONS only)
  */
 
 import { errorForProtocol } from '@/utils/errors';
@@ -20,6 +20,12 @@ export async function scopeMiddleware(c: Context, next: Next): Promise<Response 
 
   // No scope set — auth middleware hasn't run or skipped
   if (!scope) {
+    await next();
+    return;
+  }
+
+  // 'admin' tokens use the same LLM API rules as 'all' on these routes
+  if (scope === 'admin') {
     await next();
     return;
   }

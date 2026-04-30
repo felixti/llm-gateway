@@ -7,7 +7,11 @@
 
 import { env } from '@/config/env';
 import {
+  type Attributes,
+  type Link,
+  type Context as OtelContext,
   type Span,
+  type SpanKind,
   SpanStatusCode,
   type Tracer,
   context,
@@ -16,27 +20,33 @@ import {
 } from '@opentelemetry/api';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
 import { Resource } from '@opentelemetry/resources';
-import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
-import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+import {
+  BatchSpanProcessor,
+  NodeTracerProvider,
+  type Sampler,
+  SamplingDecision,
+  type SamplingResult,
+} from '@opentelemetry/sdk-trace-node';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 
 /**
- * Custom sampler: 100% of traces with error hint, 10% of normal traces.
- * Uses trace ID hash for deterministic sampling.
+ * ~10% sample rate by trace id hash (deterministic per trace).
  */
-class GatewaySampler {
-  private readonly ratio: number;
-  constructor(ratio: number) {
-    this.ratio = ratio;
-  }
+class TraceHashRatioSampler implements Sampler {
+  constructor(private readonly ratio: number) {}
 
-  shouldSample(_context: unknown, traceId: string): { decision: number } {
-    // Always sample if the trace ID hash falls within the ratio
-    const hash = this.hashTraceId(traceId);
-    if (hash < this.ratio) {
-      return { decision: 1 }; // RECORD_AND_SAMPLED
-    }
-    return { decision: 0 }; // DROP
+  shouldSample(
+    _context: OtelContext,
+    traceId: string,
+    _spanName: string,
+    _spanKind: SpanKind,
+    _attributes: Attributes,
+    _links: Link[]
+  ): SamplingResult {
+    const h = this.hashTraceId(traceId);
+    const decision =
+      h < this.ratio ? SamplingDecision.RECORD_AND_SAMPLED : SamplingDecision.NOT_RECORD;
+    return { decision };
   }
 
   private hashTraceId(traceId: string): number {
@@ -49,7 +59,7 @@ class GatewaySampler {
   }
 }
 
-const gatewaySampler = new GatewaySampler(0.1);
+const traceSampler = new TraceHashRatioSampler(0.1);
 
 // Custom span attribute keys (PRD §4.4.1)
 export const ATTR_LLM_USER_ID = 'llm.user_id';
@@ -98,14 +108,10 @@ export function initTracing(): void {
 
   provider = new NodeTracerProvider({
     resource,
-    sampler: {
-      shouldSample: (_ctx: unknown, traceId: string) => gatewaySampler.shouldSample(_ctx, traceId),
-    } as any,
+    sampler: traceSampler,
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  // biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry type incompatibility requires cast
-  provider.addSpanProcessor(new BatchSpanProcessor(exporter) as any);
+  provider.addSpanProcessor(new BatchSpanProcessor(exporter));
   provider.register();
 }
 

@@ -4,6 +4,8 @@
  * Supports hard limit (reject with 429) vs soft limit (warn and allow)
  */
 
+import { env } from '@/config/env';
+import { incrementQuotaExceeded429 } from '@/observability/metrics';
 import { calculateEstimatedCost } from '@/services/pricing.service';
 import {
   type QuotaReservation,
@@ -34,8 +36,20 @@ function estimateRequestTokens(
   let promptTokens = 0;
   let thinkingEnabled = false;
 
-  if (path.includes('/messages')) {
-    // Anthropic Messages API
+  if (path.includes('/responses')) {
+    const input = (body as { input?: string | Array<{ role?: string; content?: string }> }).input;
+    if (typeof input === 'string') {
+      promptTokens = estimateMessagesTokens([{ role: 'user', content: input }], model);
+    } else if (Array.isArray(input)) {
+      promptTokens = estimateMessagesTokens(
+        input.map((m) => ({
+          role: m.role ?? 'user',
+          content: typeof m.content === 'string' ? m.content : '',
+        })),
+        model
+      );
+    }
+  } else if (path.includes('/messages')) {
     const messages = (body as { messages?: Array<unknown> })?.messages || [];
     const thinking = (body as { thinking?: { type?: string } })?.thinking;
     thinkingEnabled = thinking?.type === 'enabled';
@@ -46,7 +60,6 @@ function estimateRequestTokens(
       thinkingEnabled
     );
   } else {
-    // OpenAI Chat Completions or Responses API
     const messages = (body as { messages?: Array<unknown> })?.messages || [];
     promptTokens = estimateMessagesTokens(
       messages as Array<{ role?: string; content?: string }>,
@@ -71,40 +84,37 @@ function setQuotaHeaders(c: Context, reservation: QuotaReservation, remaining: n
  * Quota middleware
  * Estimates tokens, reserves quota, handles release on error
  */
-export async function quotaMiddleware(c: Context, next: Next): Promise<void> {
+export async function quotaMiddleware(c: Context, next: Next): Promise<Response | undefined> {
   const userId = c.get('userId');
   const model = c.get('model');
   const path = c.req.path;
 
-  // Read body ONCE and reuse - avoid double-read bug
-  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const cached = c.get('parsedBody') as Record<string, unknown> | undefined;
+  const body =
+    cached && typeof cached === 'object'
+      ? cached
+      : ((await c.req.json().catch(() => ({}))) as Record<string, unknown>);
 
-  // Skip if no userId (auth middleware hasn't run)
   if (!userId) {
     await next();
     return;
   }
 
-  // Skip if no model
   if (!model) {
     await next();
     return;
   }
 
-  // Get user's quota status for hard/soft limit check
   const quotaStatus = await getQuotaStatus(userId);
-  const isHardLimit = true; // Default to hard limit
+  const isHardLimit = !env.QUOTA_SOFT_LIMIT_ENABLED && quotaStatus.hard_limit;
 
-  // Estimate tokens from request (synchronous, uses pre-read body)
   const { promptTokens, thinkingEnabled } = estimateRequestTokens(body, path, model);
 
-  // Estimate max output tokens (from request)
   const maxOutputTokens =
     (body as { max_tokens?: number })?.max_tokens ||
     (body as { max_completion_tokens?: number })?.max_completion_tokens ||
     1000;
 
-  // Calculate estimated cost (120% multiplier applied in calculateEstimatedCost)
   const estimatedCost = calculateEstimatedCost(
     promptTokens,
     maxOutputTokens,
@@ -112,48 +122,38 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<void> {
     thinkingEnabled ? Math.ceil(maxOutputTokens * 0.2) : 0
   );
 
-  // Check if quota would exceed budget
   const wouldExceedBudget =
     quotaStatus.spent_usd + quotaStatus.reserved_usd + estimatedCost.toNumber() >
     quotaStatus.monthly_budget_usd;
 
   if (wouldExceedBudget && isHardLimit) {
-    // Hard limit: reject with 429
     const error = errorForProtocol(
       path,
       429,
       'quota_exceeded',
       'Monthly quota exceeded. Please upgrade your plan or wait for reset.'
     );
-
-    c.status(429);
-    c.json(error);
-    return;
+    incrementQuotaExceeded429();
+    return c.json(error, 429);
   }
 
   if (wouldExceedBudget && !isHardLimit) {
-    // Soft limit: warn but allow
     c.header(HEADER_WARNING, 'Soft quota limit exceeded. Usage is being tracked.');
   }
 
-  // Attempt to reserve quota
   const reservation = await checkAndReserve(userId, estimatedCost);
 
   if (!reservation.allowed) {
-    // Quota exceeded
     const error = errorForProtocol(
       path,
       429,
       'quota_exceeded',
       reservation.reason || 'Quota reservation failed'
     );
-
-    c.status(429);
-    c.json(error);
-    return;
+    incrementQuotaExceeded429();
+    return c.json(error, 429);
   }
 
-  // Store reservation info in context for later use
   if (reservation.reservationId) {
     c.set('reservationId', reservation.reservationId);
   }
@@ -162,10 +162,8 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<void> {
   }
   c.set('model', model);
 
-  // Set quota headers
   setQuotaHeaders(c, reservation, quotaStatus.remaining_usd);
 
-  // Store cleanup on context for error handling
   const cleanup = async () => {
     if (reservation.reservationId) {
       await releaseReservation(reservation.reservationId);
@@ -177,7 +175,6 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<void> {
   try {
     await next();
   } catch (error) {
-    // Release reservation on error
     await cleanup();
     throw error;
   }

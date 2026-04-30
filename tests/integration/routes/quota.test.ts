@@ -56,12 +56,14 @@ describe('Quota Routes - /quota', () => {
         reserved_usd: number;
         remaining_usd: number;
         reset_date: string;
+        hard_limit: boolean;
       };
       expect(body.monthly_budget_usd).toBeDefined();
       expect(body.spent_usd).toBeDefined();
       expect(body.reserved_usd).toBeDefined();
       expect(body.remaining_usd).toBeDefined();
       expect(body.reset_date).toBeDefined();
+      expect(body.hard_limit).toBeDefined();
     });
 
     it('should allow read-scope PAT', async () => {

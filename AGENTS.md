@@ -83,13 +83,20 @@ An LLM Gateway API proxy server built in **Bun/Hono** that proxies requests to A
 ### PAT Authentication
 - Format: `lg_{userId}_{header}.{payload}.{signature}`
 - Algorithm: HMAC-SHA256
-- Storage: Blocklist in Redis (`blocklist:pat:{jti}`)
+- Scopes: `all` (full LLM API), `read` (GET/HEAD/OPTIONS only), `admin` (LLM API plus `/admin/*`, e.g. PAT revocation). Use dedicated operator credentials for `admin`.
+- Revocation: `POST /admin/pat/revoke` body `pat_id` must match the JWT `jti` claim for the blocklist to apply
+- Optional env **`ADMIN_OPERATOR_SECRET`**: when set, callers must send matching **`X-Operator-Secret`** (in addition to `scope: admin` PAT).
+- Storage: Blocklist in Redis (`blocklist:pat:{hash(jti)}`), no TTL on revoke entries
 - Never log raw PAT tokens
 
 ### Quota Management
+- **Postgres is authoritative** for `monthly_budget_usd` and `hard_limit` (see `users` table, optional `pat_subject` map to PAT user id)
+- Policy is **synced into Redis** (`quota:{userId}:{YYYY-MM}` hash) on a short interval for fast enforcement; live **spent/reserved** stay in Redis
 - All costs in USD with 6 decimal precision (use `decimal.js`)
-- Atomic operations via Redis Lua scripts
+- Atomic reservation via Redis Lua scripts
 - 120% multiplier for reservation, 300s TTL for orphan cleanup
+- Optional soft cap: `QUOTA_SOFT_LIMIT_ENABLED=true` forces warning path on pre-check; per-user **soft** when `users.hard_limit = false` after sync
+- In `NODE_ENV=test`, Postgres sync is **skipped** unless `QUOTA_PG_SYNC_IN_TESTS=true` (CI sets this with the Postgres service)
 
 ### Token Estimation
 - Use `tiktoken` with `cl100k_base` encoding
@@ -109,8 +116,12 @@ An LLM Gateway API proxy server built in **Bun/Hono** that proxies requests to A
 
 ### Observability
 - OpenTelemetry tracing with custom spans: `llm.user_id`, `llm.model`, `llm.tokens.*`, `llm.cost.usd`
+- In-process metrics (`metrics.ts`): quota 429s, rate-limit 429s, Postgres hydration failures, PAT revocations — Prometheus text via `getPrometheusMetrics()`
 - Structured logging with pino (JSON format)
 - Never log message content - only metadata
+
+### Operations Docs
+- Runbooks: `docs/operations/` (PAT rotation, operator secret rotation, quota drift, migrations, observability/SLOs)
 
 ---
 
@@ -125,6 +136,7 @@ src/
 ├── middleware/
 │   ├── request-id.ts    # UUID generation
 │   ├── auth.ts          # PAT authentication
+│   ├── admin-scope.ts # Require `admin` scope for operator routes
 │   ├── protocol-guard.ts # Model-endpoint validation
 │   ├── rate-limit.ts    # Redis rate limiting
 │   └── quota.ts         # Quota reservation
@@ -195,7 +207,7 @@ src/
 
 ## Security Hardening
 
-- TLS 1.3 enforced on all outbound `fetch()` calls
+- Outbound Azure traffic uses `upstreamHttpsFetch` (HTTPS-only URLs; Bun negotiates TLS)
 - PAT stored as HMAC hash only (never raw)
 - Azure API keys from env vars only
 - PII sanitization in logs (email patterns, token prefixes)

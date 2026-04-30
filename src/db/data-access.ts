@@ -40,6 +40,46 @@ interface PatRevocationRecord {
   reason?: string;
 }
 
+/** Monthly quota policy from Postgres (authoritative); keyed by PAT user id / pat_subject / users.id */
+export interface UserQuotaPolicy {
+  monthly_budget_usd: string;
+  hard_limit: boolean;
+}
+
+/**
+ * Load quota policy for a PAT subject. Matches users.pat_subject, or users.id::text (UUID strings).
+ */
+export async function getUserQuotaPolicyByPatSubject(
+  patSubject: string
+): Promise<UserQuotaPolicy | null> {
+  const query = `
+    SELECT monthly_budget_usd::text AS monthly_budget_usd, COALESCE(hard_limit, true) AS hard_limit
+    FROM users
+    WHERE pat_subject = $1 OR id::text = $1
+    LIMIT 1
+  `;
+
+  try {
+    const { rows } = await database.execute<{
+      monthly_budget_usd: string;
+      hard_limit: boolean;
+    }>({ query, params: [patSubject] });
+
+    if (!rows.length) {
+      return null;
+    }
+
+    const row = rows[0];
+    return {
+      monthly_budget_usd: row.monthly_budget_usd,
+      hard_limit: row.hard_limit,
+    };
+  } catch (error) {
+    logger.error('Failed to load user quota policy', { patSubject, error });
+    throw error;
+  }
+}
+
 /**
  * Log request audit record to PostgreSQL
  * Fire-and-forget with error logging - does not block the request

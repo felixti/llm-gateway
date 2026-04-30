@@ -26,9 +26,12 @@ describeOrSkip("Data Access Layer", () => {
         monthly_budget_usd DECIMAL(10, 6) NOT NULL DEFAULT 50.00,
         hard_limit BOOLEAN DEFAULT true,
         rate_limit_tier VARCHAR(20) DEFAULT 'standard',
+        pat_subject VARCHAR(255),
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_pat_subject_unique ON users(pat_subject) WHERE pat_subject IS NOT NULL;
 
       CREATE TABLE IF NOT EXISTS api_keys (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

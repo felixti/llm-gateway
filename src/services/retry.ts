@@ -4,6 +4,8 @@
  * skips retry for non-retryable errors (400, 401, 403)
  */
 
+import { upstreamHttpsFetch } from '@/utils/fetch';
+
 export interface RetryOptions {
   maxRetries?: number; // Default: 3
   maxBackoffMs?: number; // Default: 30000 (30s)
@@ -145,5 +147,5 @@ export async function fetchWithRetry(
 ): Promise<Response> {
   const opts = retryOptions ?? options.retryOptions ?? {};
 
-  return withRetry(() => fetch(url, options), opts);
+  return withRetry(() => upstreamHttpsFetch(url, options), opts);
 }

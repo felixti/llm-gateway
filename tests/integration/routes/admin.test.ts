@@ -9,6 +9,7 @@ import { createTestPat, INVALID_PAT } from '../helpers/test-pat';
 import { database } from '../../../src/db/client';
 
 const VALID_PAT = createTestPat('user1');
+const ADMIN_PAT = createTestPat('user1', { scope: 'admin' });
 
 let originalExecute: typeof database.execute;
 
@@ -52,6 +53,21 @@ describe('Admin Routes - /admin', () => {
   });
 
   describe('Authorization', () => {
+    it('should return 403 when PAT scope is all (operator route)', async () => {
+      const app = await createTestApp();
+      const res = await app.request('/admin/pat/revoke', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: VALID_PAT,
+        },
+        body: JSON.stringify({ pat_id: '11111111-1111-1111-1111-111111111111' }),
+      });
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('permission_error');
+    });
+
     it('should return 403 for read-only PAT on POST', async () => {
       const app = await createTestApp();
       const readPat = createTestPat('user1', { scope: 'read' });
@@ -76,7 +92,7 @@ describe('Admin Routes - /admin', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: VALID_PAT,
+          Authorization: ADMIN_PAT,
         },
         body: 'not-json',
       });
@@ -91,7 +107,7 @@ describe('Admin Routes - /admin', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: VALID_PAT,
+          Authorization: ADMIN_PAT,
         },
         body: JSON.stringify({}),
       });
@@ -106,7 +122,7 @@ describe('Admin Routes - /admin', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: VALID_PAT,
+          Authorization: ADMIN_PAT,
         },
         body: JSON.stringify({ pat_id: 'not-a-uuid' }),
       });
@@ -123,7 +139,7 @@ describe('Admin Routes - /admin', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: VALID_PAT,
+          Authorization: ADMIN_PAT,
         },
         body: JSON.stringify({
           pat_id: '11111111-1111-1111-1111-111111111111',
@@ -143,7 +159,7 @@ describe('Admin Routes - /admin', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: VALID_PAT,
+          Authorization: ADMIN_PAT,
         },
         body: JSON.stringify({
           pat_id: '22222222-2222-2222-2222-222222222222',
