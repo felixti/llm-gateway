@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Context } from 'hono';
 import { requireAdminScopeMiddleware } from '../../../src/middleware/admin-scope';
 
@@ -22,6 +22,20 @@ function createMockContext(opts: { scope?: string; operatorSecret?: string } = {
 const next = async () => {};
 
 describe('requireAdminScopeMiddleware', () => {
+  const originalOperatorSecret = process.env.ADMIN_OPERATOR_SECRET;
+
+  beforeEach(() => {
+    delete process.env.ADMIN_OPERATOR_SECRET;
+  });
+
+  afterEach(() => {
+    if (originalOperatorSecret === undefined) {
+      delete process.env.ADMIN_OPERATOR_SECRET;
+    } else {
+      process.env.ADMIN_OPERATOR_SECRET = originalOperatorSecret;
+    }
+  });
+
   test('scope admin → next()', async () => {
     const c = createMockContext({ scope: 'admin' });
     const result = await requireAdminScopeMiddleware(c, next);

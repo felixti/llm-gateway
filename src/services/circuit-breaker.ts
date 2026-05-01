@@ -1,8 +1,5 @@
-/**
- * Circuit Breaker Service
- * State machine: closed → open → half-open → closed
- * Per-deployment instances stored in Map
- */
+import { redis } from '@/db/redis';
+import { setCircuitBreakerState } from '@/observability/metrics';
 
 export enum CircuitState {
   CLOSED = 'CLOSED',
@@ -10,139 +7,166 @@ export enum CircuitState {
   HALF_OPEN = 'HALF_OPEN',
 }
 
-interface CircuitBreakerInstance {
-  state: CircuitState;
-  failureCount: number;
-  lastFailureTime: number | null;
-  nextAttemptTime: number | null;
-}
-
 const DEFAULT_FAILURE_THRESHOLD = 5;
-const DEFAULT_RESET_TIMEOUT = 30_000; // 30 seconds
+const DEFAULT_RESET_TIMEOUT = 30_000;
+const CIRCUIT_KEY_PREFIX = 'circuit:';
 
-// Per-deployment circuit breakers stored in Map
-const circuitBreakers = new Map<string, CircuitBreakerInstance>();
-
-/**
- * Create a new circuit breaker instance for a deployment
- */
-function createCircuitBreaker(): CircuitBreakerInstance {
-  return {
-    state: CircuitState.CLOSED,
-    failureCount: 0,
-    lastFailureTime: null,
-    nextAttemptTime: null,
-  };
+function getCircuitKey(deploymentName: string): string {
+  return `${CIRCUIT_KEY_PREFIX}${deploymentName}`;
 }
 
-/**
- * Get or create circuit breaker for a deployment
- */
-export function getCircuitBreaker(deploymentName: string): CircuitBreakerInstance {
-  if (!circuitBreakers.has(deploymentName)) {
-    circuitBreakers.set(deploymentName, createCircuitBreaker());
+const RECORD_SUCCESS_SCRIPT = `
+  local key = KEYS[1]
+  local state = redis.call('hget', key, 'state')
+  
+  if state == 'HALF_OPEN' then
+    redis.call('hset', key, 'state', 'CLOSED', 'failureCount', 0, 'nextAttemptTime', 0)
+    return 1
+  elseif state == 'CLOSED' or state == false then
+    redis.call('hset', key, 'failureCount', 0)
+    return 1
+  end
+  
+  return 0
+`;
+
+const RECORD_FAILURE_SCRIPT = `
+  local key = KEYS[1]
+  local now = tonumber(ARGV[1])
+  local threshold = tonumber(ARGV[2])
+  local resetTimeout = tonumber(ARGV[3])
+  
+  local state = redis.call('hget', key, 'state')
+  if state == false then
+    state = 'CLOSED'
+    redis.call('hset', key, 'state', state, 'failureCount', 0, 'lastFailureTime', 0, 'nextAttemptTime', 0)
+  end
+  
+  local failureCount = tonumber(redis.call('hget', key, 'failureCount') or 0) + 1
+  redis.call('hset', key, 'failureCount', failureCount, 'lastFailureTime', now)
+  
+  if state == 'CLOSED' then
+    if failureCount >= threshold then
+      redis.call('hset', key, 'state', 'OPEN', 'nextAttemptTime', now + resetTimeout)
+      return 2
+    end
+  elseif state == 'HALF_OPEN' then
+    redis.call('hset', key, 'state', 'OPEN', 'nextAttemptTime', now + resetTimeout)
+    return 2
+  end
+  
+  return 1
+`;
+
+const IS_REQUEST_ALLOWED_SCRIPT = `
+  local key = KEYS[1]
+  local now = tonumber(ARGV[1])
+  local resetTimeout = tonumber(ARGV[2])
+  
+  local state = redis.call('hget', key, 'state')
+  if state == false or state == 'CLOSED' then
+    return 1
+  end
+  
+  if state == 'OPEN' then
+    local nextAttemptTime = tonumber(redis.call('hget', key, 'nextAttemptTime') or 0)
+    if now >= nextAttemptTime then
+      redis.call('hset', key, 'state', 'HALF_OPEN')
+      return 1
+    end
+    return 0
+  end
+  
+  if state == 'HALF_OPEN' then
+    return 1
+  end
+  
+  return 0
+`;
+
+export async function recordSuccess(deploymentName: string): Promise<void> {
+  const key = getCircuitKey(deploymentName);
+  await redis.eval(RECORD_SUCCESS_SCRIPT, 1, key);
+  const state = await redis.hget(key, 'state');
+  if (state) {
+    setCircuitBreakerState(state as 'CLOSED' | 'OPEN' | 'HALF_OPEN');
   }
-  return circuitBreakers.get(deploymentName)!;
 }
 
-/**
- * Record a successful request - reset failure count in CLOSED,
- * or transition HALF_OPEN → CLOSED
- */
-export function recordSuccess(deploymentName: string): void {
-  const cb = getCircuitBreaker(deploymentName);
-
-  if (cb.state === CircuitState.HALF_OPEN) {
-    // Success in half-open → closed
-    cb.state = CircuitState.CLOSED;
-    cb.failureCount = 0;
-    cb.nextAttemptTime = null;
-  } else if (cb.state === CircuitState.CLOSED) {
-    // Reset failure count on success
-    cb.failureCount = 0;
+export async function recordFailure(deploymentName: string): Promise<void> {
+  const key = getCircuitKey(deploymentName);
+  await redis.eval(
+    RECORD_FAILURE_SCRIPT,
+    1,
+    key,
+    Date.now(),
+    DEFAULT_FAILURE_THRESHOLD,
+    DEFAULT_RESET_TIMEOUT
+  );
+  const state = await redis.hget(key, 'state');
+  if (state) {
+    setCircuitBreakerState(state as 'CLOSED' | 'OPEN' | 'HALF_OPEN');
   }
 }
 
-/**
- * Record a failed request - increment count, potentially open circuit
- */
-export function recordFailure(deploymentName: string): void {
-  const cb = getCircuitBreaker(deploymentName);
-  const now = Date.now();
-
-  cb.failureCount++;
-  cb.lastFailureTime = now;
-
-  if (cb.state === CircuitState.CLOSED) {
-    if (cb.failureCount >= DEFAULT_FAILURE_THRESHOLD) {
-      // CLOSED → OPEN after threshold failures
-      cb.state = CircuitState.OPEN;
-      cb.nextAttemptTime = now + DEFAULT_RESET_TIMEOUT;
-    }
-  } else if (cb.state === CircuitState.HALF_OPEN) {
-    // Failure in half-open → open immediately
-    cb.state = CircuitState.OPEN;
-    cb.nextAttemptTime = now + DEFAULT_RESET_TIMEOUT;
-  }
+export async function isRequestAllowed(deploymentName: string): Promise<boolean> {
+  const key = getCircuitKey(deploymentName);
+  const result = await redis.eval(
+    IS_REQUEST_ALLOWED_SCRIPT,
+    1,
+    key,
+    Date.now(),
+    DEFAULT_RESET_TIMEOUT
+  );
+  return result === 1;
 }
 
-/**
- * Check if a request can proceed (circuit allows it)
- */
-export function isRequestAllowed(deploymentName: string): boolean {
-  const cb = getCircuitBreaker(deploymentName);
-  const now = Date.now();
-
-  if (cb.state === CircuitState.CLOSED) {
-    return true;
-  }
-
-  if (cb.state === CircuitState.OPEN) {
-    // Check if reset timeout has elapsed
-    if (cb.nextAttemptTime && now >= cb.nextAttemptTime) {
-      // OPEN → HALF_OPEN after timeout
-      cb.state = CircuitState.HALF_OPEN;
-      return true;
-    }
-    return false;
-  }
-
-  if (cb.state === CircuitState.HALF_OPEN) {
-    // Allow one request in half-open state
-    return true;
-  }
-
-  return false;
-}
-
-/**
- * Get current state info for a deployment (for debugging/monitoring)
- */
-export function getCircuitState(deploymentName: string): {
+export async function getCircuitState(deploymentName: string): Promise<{
   state: CircuitState;
   failureCount: number;
   lastFailureTime: number | null;
   nextAttemptTime: number | null;
-} {
-  const cb = getCircuitBreaker(deploymentName);
+}> {
+  const key = getCircuitKey(deploymentName);
+  const data = await redis.hgetall(key);
+
+  if (!data || Object.keys(data).length === 0) {
+    return {
+      state: CircuitState.CLOSED,
+      failureCount: 0,
+      lastFailureTime: null,
+      nextAttemptTime: null,
+    };
+  }
+
+  const state = (data.state as CircuitState) || CircuitState.CLOSED;
+
   return {
-    state: cb.state,
-    failureCount: cb.failureCount,
-    lastFailureTime: cb.lastFailureTime,
-    nextAttemptTime: cb.nextAttemptTime,
+    state,
+    failureCount: Number(data.failureCount || 0),
+    lastFailureTime: data.lastFailureTime ? Number(data.lastFailureTime) : null,
+    nextAttemptTime:
+      data.nextAttemptTime && Number(data.nextAttemptTime) !== 0
+        ? Number(data.nextAttemptTime)
+        : null,
   };
 }
 
-/**
- * Reset circuit breaker to initial state (for testing)
- */
-export function resetCircuitBreaker(deploymentName: string): void {
-  circuitBreakers.set(deploymentName, createCircuitBreaker());
+export async function resetCircuitBreaker(deploymentName: string): Promise<void> {
+  const key = getCircuitKey(deploymentName);
+  await redis.del(key);
 }
 
-/**
- * Reset all circuit breakers (for testing)
- */
-export function resetAllCircuitBreakers(): void {
-  circuitBreakers.clear();
+export async function resetAllCircuitBreakers(): Promise<void> {
+  const pattern = `${CIRCUIT_KEY_PREFIX}*`;
+  let cursor = '0';
+
+  do {
+    const [newCursor, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+    cursor = newCursor;
+
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  } while (cursor !== '0');
 }

@@ -114,3 +114,13 @@ groups:
 ## Logging
 
 Structured JSON via pino. Always emit `requestId`, `userId` (when authenticated), and the OpenTelemetry `traceId`. **Never** log message bodies — only metadata. Sanitization for emails/token prefixes is enforced in `src/observability/logger.ts` (see unit tests).
+
+Debug request logs are metadata-only. They may include fields such as model, stream flag, message count, tool count, and token limits, but must not include `messages`, `input`, prompt text, tool payloads, raw PATs, or upstream response bodies.
+
+## Pricing Reload
+
+`src/config/pricing.json` is watched at runtime. Valid JSON changes replace the in-memory pricing cache without restart; invalid changes are rejected and the last known good pricing stays active. Reload failures are emitted as structured warnings.
+
+## Local Secret Files
+
+Local environment backups such as `.env.bak*` and `.env.backup*` are ignored by git. Do not attach or commit backup env files; rotate any secret that was copied into a tracked file or shared artifact.

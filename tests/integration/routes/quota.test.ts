@@ -75,4 +75,59 @@ describe('Quota Routes - /quota', () => {
       expect(res.status).toBe(200);
     });
   });
+
+  describe('Degraded dependencies', () => {
+    /**
+     * With `getQuotaStatus()` hardened to swallow Redis read failures and
+     * return defaults, the GET /quota endpoint must keep returning 200 with a
+     * conservative payload — never 500 — so clients can render a graceful
+     * "limits unknown" state instead of surfacing infra errors.
+     */
+    it('returns 200 with defaulted numbers when quota-key Redis reads reject', async () => {
+      const app = await createTestApp();
+      const { redis } = await import('@/db/redis');
+      const r = redis as unknown as Record<
+        string,
+        (key: string, ...rest: unknown[]) => Promise<unknown>
+      >;
+      const originalHget = r.hget;
+      const originalGet = r.get;
+
+      // Only fail reads that target quota keys. Blocklist keys used by the
+      // auth middleware must keep working so the request can reach /quota.
+      r.hget = async (key: string, ...rest: unknown[]) => {
+        if (key.startsWith('quota:')) {
+          throw new Error('redis quota partition unreachable');
+        }
+        return originalHget.call(redis, key, ...rest);
+      };
+      r.get = async (key: string, ...rest: unknown[]) => {
+        if (key.startsWith('reserved:')) {
+          throw new Error('redis reserved partition unreachable');
+        }
+        return originalGet.call(redis, key, ...rest);
+      };
+
+      try {
+        const res = await app.request('/quota', {
+          headers: { Authorization: VALID_PAT },
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          monthly_budget_usd: number;
+          spent_usd: number;
+          reserved_usd: number;
+          remaining_usd: number;
+          hard_limit: boolean;
+        };
+        expect(body.spent_usd).toBe(0);
+        expect(body.reserved_usd).toBe(0);
+        expect(body.hard_limit).toBe(true);
+        expect(body.monthly_budget_usd).toBeGreaterThan(0);
+      } finally {
+        r.hget = originalHget;
+        r.get = originalGet;
+      }
+    });
+  });
 });

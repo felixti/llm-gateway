@@ -40,7 +40,11 @@ const envSchema = z.object({
   // OpenTelemetry
   OTEL_EXPORTER_OTLP_GRPC_ENDPOINT: z.string().url().optional(),
   OTEL_SERVICE_NAME: z.string().default('llm-gateway'),
-  OTEL_ENABLED: z.boolean().default(false),
+  OTEL_ENABLED: z
+    .enum(['true', 'false'])
+    .optional()
+    .default('false')
+    .transform((v) => v === 'true'),
 
   // Rate limiting defaults
   RATE_LIMIT_RPM: z.coerce.number().int().positive().default(100),
@@ -57,54 +61,83 @@ const envSchema = z.object({
     .transform((v) => v === 'true'),
 
   // Health checks
-  HEALTH_CHECK_ENABLED: z.boolean().default(true),
+  HEALTH_CHECK_ENABLED: z
+    .enum(['true', 'false'])
+    .optional()
+    .default('true')
+    .transform((v) => v === 'true'),
   HEALTH_CHECK_INTERVAL_MS: z.coerce.number().int().positive().default(30000),
   HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+
+  // Security
+  /** Comma-separated list of allowed CORS origins, or '*' for all origins */
+  CORS_ALLOWED_ORIGINS: z.string().default('*'),
+  /** Maximum request body size in bytes (default 10MB) */
+  BODY_SIZE_LIMIT_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10 * 1024 * 1024),
+  /** Request timeout in milliseconds for non-streaming requests (default 30s) */
+  REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  /** Graceful shutdown timeout in milliseconds (default 30s) */
+  SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 });
 
-// Validate and parse environment variables lazily with fallback for tests
-let _env: z.infer<typeof envSchema> | null = null;
+const TEST_PAT_SECRET = 'test-secret-that-is-at-least-32-chars!!';
 
-function parseEnvOnce(): z.infer<typeof envSchema> {
-  if (_env === null) {
-    // In test environment, provide fallback values if validation would fail
-    const testFallback = process.env.NODE_ENV === 'test' && !process.env.PAT_SECRET;
+type ParsedEnv = z.infer<typeof envSchema>;
 
-    try {
-      const result = envSchema.safeParse(process.env);
-      if (result.success) {
-        _env = result.data;
-      } else if (testFallback) {
-        // Use defaults for tests
-        _env = envSchema.parse({
-          ...process.env,
-          PAT_SECRET: 'test-secret-that-is-at-least-32-chars!!',
-        });
-      } else {
-        const errors = result.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`);
-        throw new Error(`Invalid environment configuration:\n${errors.join('\n')}`);
-      }
-    } catch (e) {
-      if (testFallback || process.env.NODE_ENV === 'test') {
-        // Use defaults for tests
-        _env = envSchema.parse({
-          ...process.env,
-          PAT_SECRET: 'test-secret-that-is-at-least-32-chars!!',
-        });
-      } else {
-        throw e;
-      }
+function buildEnvInput(): Record<string, string | undefined> {
+  const input = { ...process.env };
+
+  if (process.env.NODE_ENV === 'test') {
+    input.PAT_SECRET = input.PAT_SECRET || TEST_PAT_SECRET;
+
+    if (input.ADMIN_OPERATOR_SECRET && input.ADMIN_OPERATOR_SECRET.length < 16) {
+      input.ADMIN_OPERATOR_SECRET = undefined;
     }
+  }
+
+  return input;
+}
+
+function parseEnv(): ParsedEnv {
+  const result = envSchema.safeParse(buildEnvInput());
+  if (result.success) {
+    return result.data;
+  }
+
+  const errors = result.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`);
+  throw new Error(`Invalid environment configuration:\n${errors.join('\n')}`);
+}
+
+// Validate and parse environment variables lazily. Tests re-parse so mutations remain isolated.
+let _env: ParsedEnv | null = null;
+
+function parseEnvOnce(): ParsedEnv {
+  if (process.env.NODE_ENV === 'test') {
+    return parseEnv();
+  }
+
+  if (_env === null) {
+    _env = parseEnv();
   }
   return _env;
 }
 
+export function resetEnvForTests(): void {
+  if (process.env.NODE_ENV === 'test') {
+    _env = null;
+  }
+}
+
 // Export typed config singleton - validated lazily
-export const env = new Proxy({} as z.infer<typeof envSchema>, {
+export const env = new Proxy({} as ParsedEnv, {
   get(_target, prop) {
-    return parseEnvOnce()[prop as keyof z.infer<typeof envSchema>];
+    return parseEnvOnce()[prop as keyof ParsedEnv];
   },
 });
 
 // Type export for use in other modules
-export type Env = z.infer<typeof envSchema>;
+export type Env = ParsedEnv;

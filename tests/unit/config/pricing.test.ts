@@ -9,6 +9,13 @@ import {
 
 describe("Pricing Service", () => {
   describe("getPricingByPattern", () => {
+    it("should find pricing for gpt-5-mini", () => {
+      const pricing = getPricingByPattern("gpt-5-mini");
+      expect(pricing).toBeDefined();
+      expect(pricing?.inputPerMillion.toNumber()).toBe(0.25);
+      expect(pricing?.outputPerMillion.toNumber()).toBe(2.0);
+    });
+
     it("should find pricing for gpt-5.4", () => {
       const pricing = getPricingByPattern("gpt-5.4");
       expect(pricing).toBeDefined();
@@ -71,6 +78,7 @@ describe("Pricing Service", () => {
     });
 
     it("should be case-insensitive", () => {
+      expect(getPricingByPattern("GPT-5-MINI")?.inputPerMillion.toNumber()).toBe(0.25);
       expect(getPricingByPattern("GPT-5.4")?.inputPerMillion.toNumber()).toBe(5.0);
       expect(getPricingByPattern("Claude-Opus-4-6")?.inputPerMillion.toNumber()).toBe(15.0);
       expect(getPricingByPattern("KIMI-K2.5")?.inputPerMillion.toNumber()).toBe(2.5);
@@ -86,6 +94,12 @@ describe("Pricing Service", () => {
       const cost = calculateCost("gpt-5.4", 1000, 500);
       // 1000 input @ $5/M = $0.005, 500 output @ $15/M = $0.0075
       expect(cost.toNumber()).toBeCloseTo(0.0125, 4);
+    });
+
+    it("should calculate cost for GPT-5 Mini correctly", () => {
+      const cost = calculateCost("gpt-5-mini", 1000, 500);
+      // 1000 input @ $0.25/M = $0.00025, 500 output @ $2/M = $0.001
+      expect(cost.toNumber()).toBeCloseTo(0.00125, 6);
     });
 
     it("should calculate cost for GPT-5.3-Codex correctly", () => {
@@ -148,9 +162,9 @@ describe("Pricing Service", () => {
   });
 
   describe("getAllPricingKeys", () => {
-    it("should return all 8 model pricing keys", () => {
+    it("should return all 9 model pricing keys", () => {
       const keys = getAllPricingKeys();
-      expect(keys.length).toBe(8);
+      expect(keys.length).toBe(9);
     });
   });
 

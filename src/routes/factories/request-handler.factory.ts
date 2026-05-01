@@ -15,7 +15,8 @@
  */
 
 import { getDeploymentByAlias } from '@/config/deployments';
-import { logDebugBody } from '@/observability/logger';
+import { REQUEST_SIGNAL_KEY } from '@/middleware/timeout';
+import { getRequestBodyLogMetadata, logDebugRequestMetadata } from '@/observability/logger';
 import {
   addLLMSpanAttributes,
   getCurrentTraceId,
@@ -36,11 +37,16 @@ function extractRequestContext(c: Context): {
   requestId: string;
   reservationId: string;
   userId: string | undefined;
+  abortSignal: AbortSignal;
 } {
+  // Prefer the timeout-aware signal set by `timeoutMiddleware`; fall back to
+  // the raw request signal (e.g. for tests that bypass the middleware chain).
+  const signal = (c.get(REQUEST_SIGNAL_KEY) as AbortSignal | undefined) ?? c.req.raw.signal;
   return {
     requestId: c.get('requestId') || '',
     reservationId: c.get('reservationId') || '',
     userId: c.get('userId'),
+    abortSignal: signal,
   };
 }
 
@@ -62,10 +68,11 @@ function getDeployment(
 /**
  * Check circuit breaker, wrapped in Result
  */
-function checkCircuitBreaker(
+async function checkCircuitBreaker(
   deployment: import('@/config/deployments').DeploymentConfig
-): Result<void, RequestError> {
-  if (!isRequestAllowed(deployment.name)) {
+): Promise<Result<void, RequestError>> {
+  const allowed = await isRequestAllowed(deployment.name);
+  if (!allowed) {
     return err({ type: 'circuit_open', message: 'Service temporarily unavailable' });
   }
   return ok(undefined);
@@ -78,7 +85,7 @@ function checkCircuitBreaker(
 export function createRequestHandler(deps: RequestHandlerDeps) {
   return async function handleRequest(c: Context): Promise<Response> {
     const path = c.req.path;
-    const { requestId, reservationId, userId } = extractRequestContext(c);
+    const { requestId, reservationId, userId, abortSignal } = extractRequestContext(c);
     const startTime = Date.now();
 
     return withSpan(
@@ -104,7 +111,10 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         // Cast to record for downstream use
         const bodyRecord = validatedBody.value as Record<string, unknown>;
 
-        logDebugBody('request', bodyRecord, { traceId: getCurrentTraceId(), userId });
+        logDebugRequestMetadata('request', getRequestBodyLogMetadata(bodyRecord), {
+          traceId: getCurrentTraceId(),
+          userId,
+        });
 
         // 3. Get deployment
         const model = deps.getModel(bodyRecord);
@@ -123,7 +133,7 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         });
 
         // 4. Check circuit breaker
-        const circuitCheck = checkCircuitBreaker(deployment.value);
+        const circuitCheck = await checkCircuitBreaker(deployment.value);
         if (!circuitCheck.ok) {
           return createRequestErrorResponse(c, path, circuitCheck.error);
         }
@@ -148,14 +158,15 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
 
         // 7. Route to streaming or non-streaming proxy
         let response: Response;
+        const proxyContext = { reservationId, requestId, userId, abortSignal };
+
         if (bodyRecord.stream === true) {
           response = await deps.proxyStreaming(
             upstreamUrl,
             authHeaders,
             upstreamBody,
             deployment.value,
-            reservationId,
-            requestId
+            proxyContext
           );
         } else {
           response = await deps.proxyNonStreaming(
@@ -163,8 +174,7 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
             authHeaders,
             upstreamBody,
             deployment.value,
-            reservationId,
-            requestId
+            proxyContext
           );
         }
 
@@ -172,7 +182,7 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         span.setAttribute('http.status_code', response.status);
         span.setAttribute('duration_ms', Date.now() - startTime);
 
-        logDebugBody(
+        logDebugRequestMetadata(
           'response',
           { status: response.status },
           { traceId: getCurrentTraceId(), userId }

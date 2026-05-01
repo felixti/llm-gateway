@@ -74,5 +74,23 @@ describe('Models Routes - /v1/models', () => {
       });
       expect(res.status).toBe(200);
     });
+
+    it('should not serve an all-scope cached model list to a restricted scope', async () => {
+      const app = await createTestApp();
+
+      const allRes = await app.request('/v1/models', {
+        headers: { Authorization: createTestPat('user1', { scope: 'all' }) },
+      });
+      expect(allRes.status).toBe(200);
+      const allBody = (await allRes.json()) as { data: unknown[] };
+      expect(allBody.data.length).toBeGreaterThan(0);
+
+      const readRes = await app.request('/v1/models', {
+        headers: { Authorization: createTestPat('user1', { scope: 'read' }) },
+      });
+      expect(readRes.status).toBe(200);
+      const readBody = (await readRes.json()) as { data: unknown[] };
+      expect(readBody.data.length).toBe(0);
+    });
   });
 });

@@ -4,6 +4,7 @@
  * Hot-reloads pricing configuration from pricing.json
  */
 
+import { type FSWatcher, watch } from 'node:fs';
 import { Decimal } from 'decimal.js';
 import pricingData from '../config/pricing.json';
 
@@ -40,6 +41,8 @@ interface PricingData {
   >;
 }
 
+const DEFAULT_PRICING_PATH = new URL('../config/pricing.json', import.meta.url).pathname;
+
 /**
  * Normalize pricing data to use Decimal types
  */
@@ -66,18 +69,103 @@ function normalizePricing(data: PricingData): Map<string, ModelPricing> {
   return normalized;
 }
 
+function validatePricingPayload(data: unknown): { valid: boolean; reason?: string } {
+  if (!data || typeof data !== 'object') {
+    return { valid: false, reason: 'not_object' };
+  }
+
+  const candidate = data as PricingData;
+  const models = candidate.models;
+  if (typeof candidate.version !== 'string') {
+    return { valid: false, reason: 'version' };
+  }
+  if (candidate.currency !== 'USD') {
+    return { valid: false, reason: 'currency' };
+  }
+  if (!models || typeof models !== 'object') {
+    return { valid: false, reason: 'models' };
+  }
+  if (Object.keys(models).length === 0) {
+    return { valid: false, reason: 'empty_models' };
+  }
+
+  for (const key of Object.keys(models)) {
+    const model = (models as Record<string, unknown>)[key];
+    if (!model || typeof model !== 'object') {
+      return { valid: false, reason: `model_${key}` };
+    }
+
+    const input = Number(Reflect.get(model, 'input_per_million'));
+    const output = Number(Reflect.get(model, 'output_per_million'));
+    const valid =
+      typeof Reflect.get(model, 'deployment_pattern') === 'string' &&
+      Number.isFinite(input) &&
+      Number.isFinite(output);
+    if (!valid) {
+      return { valid: false, reason: `model_fields_${key}` };
+    }
+  }
+
+  return { valid: true };
+}
+
 // Initialize pricing cache with hot-reload support
 let pricingCache: Map<string, ModelPricing> = normalizePricing(pricingData as PricingData);
 
+async function loadPricingFromFile(filePath: string): Promise<PricingData> {
+  const data = await Bun.file(filePath).json();
+  const validation = validatePricingPayload(data);
+  if (!validation.valid) {
+    const candidate = data as Partial<PricingData>;
+    throw new Error(
+      `Invalid pricing data: reason=${validation.reason}, version=${typeof candidate.version}, currency=${candidate.currency}, models=${candidate.models ? Object.keys(candidate.models).length : 0}`
+    );
+  }
+  return data;
+}
+
 /**
- * Reload pricing from JSON (for hot-reload support)
+ * Reload pricing from a JSON file. Returns false and keeps the last good cache on invalid input.
  */
-export function reloadPricing(): void {
-  // Re-read the pricing data
-  // In Bun, we can use import() to re-fetch the JSON module
-  import('../config/pricing.json').then((module) => {
-    pricingCache = normalizePricing(module.default as PricingData);
+export async function reloadPricingFromFile(filePath: string): Promise<boolean> {
+  try {
+    const data = await loadPricingFromFile(filePath);
+    pricingCache = normalizePricing(data);
+    return true;
+  } catch (err) {
+    const { logger } = await import('@/observability/logger');
+    logger.warn({ err, filePath }, 'Failed to reload pricing data');
+    return false;
+  }
+}
+
+/**
+ * Reload pricing from the default JSON file.
+ */
+export async function reloadPricing(): Promise<boolean> {
+  return reloadPricingFromFile(DEFAULT_PRICING_PATH);
+}
+
+/**
+ * Watch the pricing file and hot-reload validated changes.
+ */
+export function startPricingWatcher(filePath = DEFAULT_PRICING_PATH): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const watcher: FSWatcher = watch(filePath, () => {
+    if (timer) {
+      clearTimeout(timer);
+    }
+    timer = setTimeout(() => {
+      reloadPricingFromFile(filePath);
+    }, 100);
   });
+
+  return () => {
+    if (timer) {
+      clearTimeout(timer);
+    }
+    watcher?.close();
+  };
 }
 
 /**
@@ -186,9 +274,5 @@ export function getAllPricingKeys(): string[] {
  * Validate pricing data structure
  */
 export function validatePricingData(): boolean {
-  return (
-    (pricingData as PricingData).version !== undefined &&
-    (pricingData as PricingData).currency === 'USD' &&
-    Object.keys((pricingData as PricingData).models).length === 8
-  );
+  return validatePricingPayload(pricingData).valid;
 }

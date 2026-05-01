@@ -12,15 +12,22 @@ const VALID_PAT = createTestPat('user1');
 const ADMIN_PAT = createTestPat('user1', { scope: 'admin' });
 
 let originalExecute: typeof database.execute;
+const originalOperatorSecret = process.env.ADMIN_OPERATOR_SECRET;
 
 describe('Admin Routes - /admin', () => {
   beforeEach(() => {
+    delete process.env.ADMIN_OPERATOR_SECRET;
     originalExecute = database.execute.bind(database);
     database.execute = async () => ({ rows: [], rowCount: 0 });
   });
 
   afterEach(() => {
     database.execute = originalExecute;
+    if (originalOperatorSecret === undefined) {
+      delete process.env.ADMIN_OPERATOR_SECRET;
+    } else {
+      process.env.ADMIN_OPERATOR_SECRET = originalOperatorSecret;
+    }
   });
 
   describe('Authentication', () => {

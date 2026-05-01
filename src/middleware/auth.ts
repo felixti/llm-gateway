@@ -89,15 +89,33 @@ function checkExpiry(exp: number): AuthResult<void> {
 }
 
 /**
- * Check blocklist in Redis
+ * Check the PAT revocation blocklist in Redis.
+ *
+ * Fails CLOSED: if the Redis lookup throws (connection drop, timeout), we
+ * surface a 503 via a dedicated error code rather than silently accepting the
+ * request. This prevents a Redis outage from undoing PAT revocation.
  */
-async function checkBlocklist(jti: string): Promise<AuthResult<void>> {
+async function checkBlocklist(
+  jti: string
+): Promise<Result<void, { code: string; message: string; status: number }>> {
   const key = `blocklist:pat:${hashJtiForBlocklist(jti)}`;
-  const result = await redis.get(key);
-  if (result) {
-    return err({ code: 'authentication_error', message: 'Token has been revoked' });
+  try {
+    const result = await redis.get(key);
+    if (result) {
+      return err({
+        code: 'authentication_error',
+        message: 'Token has been revoked',
+        status: 401,
+      });
+    }
+    return ok(undefined) as Result<void, { code: string; message: string; status: number }>;
+  } catch {
+    return err({
+      code: 'service_unavailable',
+      message: 'Authentication service temporarily unavailable',
+      status: 503,
+    });
   }
-  return ok(undefined) as AuthResult<void>;
 }
 
 /**
@@ -142,9 +160,10 @@ export async function authMiddleware(c: Context, next: Next): Promise<Response |
 
   const blocklistResult = await checkBlocklist(payload.jti);
   if (!isOk(blocklistResult)) {
+    const status = blocklistResult.error.status;
     return c.json(
-      errorForProtocol(path, 401, blocklistResult.error.code, blocklistResult.error.message),
-      401
+      errorForProtocol(path, status, blocklistResult.error.code, blocklistResult.error.message),
+      status as 401 | 503
     );
   }
 

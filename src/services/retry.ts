@@ -10,6 +10,8 @@ export interface RetryOptions {
   maxRetries?: number; // Default: 3
   maxBackoffMs?: number; // Default: 30000 (30s)
   baseDelayMs?: number; // Default: 1000 (1s)
+  /** Abort signal: stops retries and aborts any pending sleep on abort. */
+  signal?: AbortSignal;
 }
 
 const DEFAULT_MAX_RETRIES = 3;
@@ -72,10 +74,38 @@ export function parseRetryAfterHeader(headers: Headers): number | null {
 }
 
 /**
- * Sleep for specified milliseconds
+ * Sleep for specified milliseconds. If an AbortSignal is provided, the sleep
+ * resolves early when the signal aborts (does NOT reject — callers decide).
  */
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * Check whether an error indicates the request was aborted (client disconnect
+ * or gateway timeout). Abort errors must NOT be retried.
+ */
+function isAbortError(error: unknown): boolean {
+  if (error instanceof Error && error.name === 'AbortError') return true;
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  return false;
 }
 
 /**
@@ -98,14 +128,25 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions =
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
   const maxBackoffMs = options.maxBackoffMs ?? DEFAULT_MAX_BACKOFF_MS;
   const baseDelayMs = options.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
+  const signal = options.signal;
 
   let lastError: unknown = null;
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    if (signal?.aborted) {
+      throw lastError ?? new DOMException('Request aborted before retry attempt', 'AbortError');
+    }
+
     try {
       return await fn();
     } catch (error: unknown) {
       lastError = error;
+
+      // Never retry aborted fetches — the caller is already gone (client
+      // disconnect) or the gateway timeout fired.
+      if (isAbortError(error) || signal?.aborted) {
+        throw error;
+      }
 
       // If this was the last attempt, throw immediately (no sleep)
       if (attempt > maxRetries) {
@@ -129,8 +170,8 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions =
         }
       }
 
-      // Wait before next retry
-      await sleep(delay);
+      // Wait before next retry (interruptible by signal)
+      await sleep(delay, signal);
     }
   }
 

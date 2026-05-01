@@ -20,9 +20,73 @@ export class MockRedis {
     this.store.set(key, String(value));
   }
 
-  async eval(_script: string, _numKeys: number, ..._args: (string | number)[]): Promise<unknown> {
-    // Rate-limit and quota scripts: always allow
-    return [1, 0];
+  async eval(script: string, _numKeys: number, ...args: (string | number)[]): Promise<unknown> {
+    // Rate-limit scripts (use sorted sets)
+    if (script.includes('zremrangebyscore') || script.includes('zcard')) {
+      return [1, 0];
+    }
+
+    // Quota check-and-reserve scripts
+    if (script.includes('monthly_budget') || script.includes('reserved')) {
+      return [1, 0];
+    }
+
+    // Circuit breaker: record failure
+    if (script.includes('threshold')) {
+      const key = args[0] as string;
+      const now = Number(args[1]);
+      const threshold = Number(args[2]);
+      const resetTimeout = Number(args[3]);
+
+      const map = this.hashes.get(key);
+      const currentState = map?.get('state') || 'CLOSED';
+      const failureCount = Number(map?.get('failureCount') || 0) + 1;
+
+      this.hset(key, { failureCount: String(failureCount), lastFailureTime: String(now) });
+
+      if (currentState === 'CLOSED' && failureCount >= threshold) {
+        this.hset(key, { state: 'OPEN', nextAttemptTime: String(now + resetTimeout) });
+        return 2;
+      }
+      if (currentState === 'HALF_OPEN') {
+        this.hset(key, { state: 'OPEN', nextAttemptTime: String(now + resetTimeout) });
+        return 2;
+      }
+      return 1;
+    }
+
+    // Circuit breaker: check request allowed
+    if (script.includes('nextAttemptTime') && !script.includes('failureCount')) {
+      const key = args[0] as string;
+      const now = Number(args[1]);
+
+      const map = this.hashes.get(key);
+      const state = map?.get('state') || 'CLOSED';
+
+      if (state === 'CLOSED') return 1;
+      if (state === 'OPEN') {
+        const nextAttemptTime = Number(map?.get('nextAttemptTime') || 0);
+        if (now >= nextAttemptTime) {
+          this.hset(key, { state: 'HALF_OPEN' });
+          return 1;
+        }
+        return 0;
+      }
+      if (state === 'HALF_OPEN') return 1;
+      return 0;
+    }
+
+    // Circuit breaker: record success (default catch-all for circuit breaker scripts)
+    {
+      const key = args[0] as string;
+      const state = this.hashes.get(key)?.get('state');
+      if (state === 'HALF_OPEN') {
+        this.hset(key, { state: 'CLOSED', failureCount: 0, nextAttemptTime: 0 });
+      } else {
+        this.hset(key, { failureCount: 0 });
+      }
+      return 1;
+    }
   }
 
   async hget(key: string, field: string): Promise<string | null> {
@@ -39,16 +103,29 @@ export class MockRedis {
     return result;
   }
 
-  async hset(key: string, obj: Record<string, string | number | Buffer>): Promise<number> {
+  async hset(key: string, ...args: unknown[]): Promise<number> {
     if (!this.hashes.has(key)) {
       this.hashes.set(key, new Map());
     }
     const map = this.hashes.get(key)!;
     let added = 0;
-    for (const [field, value] of Object.entries(obj)) {
-      if (!map.has(field)) added++;
-      map.set(field, String(value));
+
+    if (args.length === 1 && typeof args[0] === 'object' && args[0] !== null) {
+      // Object form: hset(key, { field: value })
+      for (const [field, value] of Object.entries(args[0] as Record<string, unknown>)) {
+        if (!map.has(field)) added++;
+        map.set(field, String(value));
+      }
+    } else if (args.length >= 2) {
+      // Variadic form: hset(key, field, value, field2, value2, ...)
+      for (let i = 0; i < args.length; i += 2) {
+        const field = String(args[i]);
+        const value = String(args[i + 1]);
+        if (!map.has(field)) added++;
+        map.set(field, value);
+      }
     }
+
     return added;
   }
 
@@ -119,6 +196,7 @@ export class MockRedis {
     let count = 0;
     for (const key of keys) {
       if (this.store.delete(key)) count++;
+      if (this.hashes.delete(key)) count++;
     }
     return count;
   }

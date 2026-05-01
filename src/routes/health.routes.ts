@@ -4,9 +4,11 @@
  * GET /ready - critical dependencies check (Redis + Azure connectivity)
  */
 
+import { isPostgresHealthy } from '@/db/client';
 import { isRedisHealthy } from '@/db/redis';
 import { getPrometheusMetrics } from '@/observability/metrics';
-import { getAllDeploymentHealth } from '@/services/health.service';
+import { getCachedDeploymentHealth } from '@/services/health.service';
+import { Scalar } from '@scalar/hono-api-reference';
 import { Hono } from 'hono';
 
 // Lazy-load OpenAPI spec to avoid bundling it into hot paths
@@ -37,32 +39,37 @@ healthRoutes.get('/health', (c) => {
 
 /**
  * GET /ready
- * Checks critical dependencies: Redis and at least one Azure deployment
- * Returns 503 if critical dependencies are unavailable
+ * Checks critical dependencies: Redis, Postgres, and at least one Azure deployment.
+ *
+ * Deployment health is read from the in-memory cache populated by
+ * `startHealthChecks()` so probes (Kubernetes liveness/readiness at 1-10s
+ * intervals) do not trigger real upstream LLM calls. If the cache is empty
+ * (e.g. server just started), deployments are reported as unknown and the
+ * endpoint returns 503 until the first background probe completes.
  */
 healthRoutes.get('/ready', async (c) => {
   const checks: Record<string, boolean> = {
     redis: false,
+    postgres: false,
     deployments: false,
   };
 
-  // Check Redis connectivity
   try {
     checks.redis = await isRedisHealthy();
   } catch {
     checks.redis = false;
   }
 
-  // Check Azure deployments (at least one must be healthy)
   try {
-    const allHealth = await getAllDeploymentHealth();
-    const healthyDeployments = Array.from(allHealth.values()).filter((h) => h.healthy);
-    checks.deployments = healthyDeployments.length > 0;
+    checks.postgres = await isPostgresHealthy();
   } catch {
-    checks.deployments = false;
+    checks.postgres = false;
   }
 
-  const isReady = checks.redis && checks.deployments;
+  const cachedHealth = getCachedDeploymentHealth();
+  checks.deployments = Array.from(cachedHealth.values()).some((h) => h.healthy);
+
+  const isReady = checks.redis && checks.postgres && checks.deployments;
 
   if (!isReady) {
     return c.json(
@@ -82,12 +89,6 @@ healthRoutes.get('/ready', async (c) => {
   });
 });
 
-healthRoutes.get('/metrics', (c) => {
-  return c.text(getPrometheusMetrics(), 200, {
-    'Content-Type': 'text/plain; charset=utf-8',
-  });
-});
-
 /**
  * GET /openapi.json
  * Returns the OpenAPI 3.1 specification
@@ -96,3 +97,27 @@ healthRoutes.get('/openapi.json', async (c) => {
   const spec = await getOpenApiSpec();
   return c.json(spec);
 });
+
+/**
+ * GET /metrics
+ * Prometheus-compatible metrics endpoint
+ */
+healthRoutes.get('/metrics', (c) => {
+  const metrics = getPrometheusMetrics();
+  return c.text(metrics, 200, {
+    'Content-Type': 'text/plain; version=0.0.4',
+  });
+});
+
+/**
+ * GET /docs
+ * Interactive API documentation powered by Scalar
+ */
+healthRoutes.get(
+  '/docs',
+  Scalar({
+    url: '/openapi.json',
+    pageTitle: 'LLM Gateway API Reference',
+    theme: 'purple',
+  })
+);

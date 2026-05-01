@@ -331,6 +331,57 @@ describe("Retry Service", () => {
     });
   });
 
+  describe("AbortSignal integration", () => {
+    it("throws AbortError without calling fn when signal is already aborted", async () => {
+      const controller = new AbortController();
+      controller.abort(new DOMException("client gone", "AbortError"));
+
+      let attempts = 0;
+      const fn = async () => {
+        attempts++;
+        return "unexpected";
+      };
+
+      await expect(withRetry(fn, { signal: controller.signal })).rejects.toBeDefined();
+      expect(attempts).toBe(0);
+    });
+
+    it("does not retry when fn throws an AbortError", async () => {
+      let attempts = 0;
+      const fn = async () => {
+        attempts++;
+        throw new DOMException("timed out", "AbortError");
+      };
+
+      await expect(withRetry(fn, { maxRetries: 3 })).rejects.toBeDefined();
+      expect(attempts).toBe(1); // no retries after abort
+    });
+
+    it("short-circuits retry sleep when signal aborts mid-backoff", async () => {
+      const controller = new AbortController();
+      let attempts = 0;
+      const fn = async () => {
+        attempts++;
+        if (attempts === 1) {
+          // Abort immediately so the post-failure sleep wakes early and the
+          // loop exits via the aborted-check rather than waiting ~1s.
+          setTimeout(() => controller.abort(new DOMException("cancelled", "AbortError")), 5);
+          throw new Error("transient");
+        }
+        return "never";
+      };
+
+      const start = Date.now();
+      await expect(
+        withRetry(fn, { signal: controller.signal, baseDelayMs: 2000 })
+      ).rejects.toBeDefined();
+      const elapsed = Date.now() - start;
+
+      // Would normally sleep ~1-2s before retrying; abort wakes it well before.
+      expect(elapsed).toBeLessThan(1500);
+    });
+  });
+
   describe("Retry-After header override", () => {
     it("should use Retry-After instead of backoff calculation", async () => {
       let attempts = 0;

@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   CircuitState,
-  getCircuitBreaker,
   recordSuccess,
   recordFailure,
   isRequestAllowed,
@@ -9,73 +8,89 @@ import {
   resetCircuitBreaker,
   resetAllCircuitBreakers,
 } from "../../../src/services/circuit-breaker";
+import { redis } from "../../../src/db/redis";
+import { MockRedis } from "../../integration/helpers/mock-redis";
+
+function bindMockRedis(mock: MockRedis): void {
+  const r = redis as unknown as Record<string, unknown>;
+  r.get = mock.get.bind(mock);
+  r.set = mock.set.bind(mock);
+  r.setex = mock.setex.bind(mock);
+  r.eval = mock.eval.bind(mock);
+  r.hget = mock.hget.bind(mock);
+  r.hgetall = mock.hgetall.bind(mock);
+  r.hset = mock.hset.bind(mock);
+  r.pipeline = mock.pipeline.bind(mock);
+  r.incrbyfloat = mock.incrbyfloat.bind(mock);
+  r.del = mock.del.bind(mock);
+  r.ping = mock.ping.bind(mock);
+  r.scan = mock.scan.bind(mock);
+  r.ttl = mock.ttl.bind(mock);
+}
 
 describe("Circuit Breaker Service", () => {
   const DEPLOYMENT = "test-deployment";
 
-  beforeEach(() => {
-    resetAllCircuitBreakers();
+  beforeEach(async () => {
+    bindMockRedis(new MockRedis());
+    await resetAllCircuitBreakers();
   });
 
-  afterEach(() => {
-    resetAllCircuitBreakers();
+  afterEach(async () => {
+    await resetAllCircuitBreakers();
   });
 
   describe("Initial State", () => {
-    it("should start in CLOSED state", () => {
-      const state = getCircuitState(DEPLOYMENT);
+    it("should start in CLOSED state", async () => {
+      const state = await getCircuitState(DEPLOYMENT);
       expect(state.state).toBe(CircuitState.CLOSED);
       expect(state.failureCount).toBe(0);
       expect(state.lastFailureTime).toBeNull();
       expect(state.nextAttemptTime).toBeNull();
     });
 
-    it("should allow requests in CLOSED state", () => {
-      expect(isRequestAllowed(DEPLOYMENT)).toBe(true);
+    it("should allow requests in CLOSED state", async () => {
+      expect(await isRequestAllowed(DEPLOYMENT)).toBe(true);
     });
   });
 
   describe("CLOSED → OPEN Transition", () => {
-    it("should transition to OPEN after 5 failures", () => {
-      // Record 4 failures - should still be CLOSED
+    it("should transition to OPEN after 5 failures", async () => {
       for (let i = 0; i < 4; i++) {
-        recordFailure(DEPLOYMENT);
+        await recordFailure(DEPLOYMENT);
       }
-      expect(getCircuitState(DEPLOYMENT).state).toBe(CircuitState.CLOSED);
-      expect(isRequestAllowed(DEPLOYMENT)).toBe(true);
+      expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.CLOSED);
+      expect(await isRequestAllowed(DEPLOYMENT)).toBe(true);
 
-      // 5th failure - should transition to OPEN
-      recordFailure(DEPLOYMENT);
-      expect(getCircuitState(DEPLOYMENT).state).toBe(CircuitState.OPEN);
-      expect(isRequestAllowed(DEPLOYMENT)).toBe(false);
+      await recordFailure(DEPLOYMENT);
+      expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.OPEN);
+      expect(await isRequestAllowed(DEPLOYMENT)).toBe(false);
     });
 
-    it("should increment failure count", () => {
-      recordFailure(DEPLOYMENT);
-      expect(getCircuitState(DEPLOYMENT).failureCount).toBe(1);
+    it("should increment failure count", async () => {
+      await recordFailure(DEPLOYMENT);
+      expect((await getCircuitState(DEPLOYMENT)).failureCount).toBe(1);
 
-      recordFailure(DEPLOYMENT);
-      expect(getCircuitState(DEPLOYMENT).failureCount).toBe(2);
+      await recordFailure(DEPLOYMENT);
+      expect((await getCircuitState(DEPLOYMENT)).failureCount).toBe(2);
     });
 
-    it("should record last failure time", () => {
+    it("should record last failure time", async () => {
       const before = Date.now();
-      recordFailure(DEPLOYMENT);
+      await recordFailure(DEPLOYMENT);
       const after = Date.now();
 
-      const lastFailure = getCircuitState(DEPLOYMENT).lastFailureTime;
+      const lastFailure = (await getCircuitState(DEPLOYMENT)).lastFailureTime;
       expect(lastFailure).toBeGreaterThanOrEqual(before);
       expect(lastFailure).toBeLessThanOrEqual(after);
     });
 
-    it("should set nextAttemptTime when opening", () => {
-      recordFailure(DEPLOYMENT);
-      recordFailure(DEPLOYMENT);
-      recordFailure(DEPLOYMENT);
-      recordFailure(DEPLOYMENT);
-      recordFailure(DEPLOYMENT);
+    it("should set nextAttemptTime when opening", async () => {
+      for (let i = 0; i < 5; i++) {
+        await recordFailure(DEPLOYMENT);
+      }
 
-      const state = getCircuitState(DEPLOYMENT);
+      const state = await getCircuitState(DEPLOYMENT);
       expect(state.nextAttemptTime).not.toBeNull();
       expect(state.nextAttemptTime).toBeGreaterThan(Date.now());
     });
@@ -83,211 +98,179 @@ describe("Circuit Breaker Service", () => {
 
   describe("OPEN → HALF_OPEN Transition", () => {
     it("should transition to HALF_OPEN after 30s timeout", async () => {
-      // Open the circuit
       for (let i = 0; i < 5; i++) {
-        recordFailure(DEPLOYMENT);
+        await recordFailure(DEPLOYMENT);
       }
-      expect(getCircuitState(DEPLOYMENT).state).toBe(CircuitState.OPEN);
+      expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.OPEN);
 
-      // Fast-forward time by manipulating nextAttemptTime
-      const state = getCircuitBreaker(DEPLOYMENT);
-      state.nextAttemptTime = Date.now() - 1; // Already expired
+      const key = `circuit:${DEPLOYMENT}`;
+      const { redis } = require("../../../src/db/redis");
+      await redis.hset(key, 'nextAttemptTime', Date.now() - 1);
 
-      // Now request should be allowed and transition to HALF_OPEN
-      expect(isRequestAllowed(DEPLOYMENT)).toBe(true);
-      expect(getCircuitState(DEPLOYMENT).state).toBe(CircuitState.HALF_OPEN);
+      expect(await isRequestAllowed(DEPLOYMENT)).toBe(true);
+      expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.HALF_OPEN);
     });
 
-    it("should not transition before timeout", () => {
-      // Open the circuit
+    it("should not transition before timeout", async () => {
       for (let i = 0; i < 5; i++) {
-        recordFailure(DEPLOYMENT);
+        await recordFailure(DEPLOYMENT);
       }
 
-      // Set next attempt time to future
-      const state = getCircuitBreaker(DEPLOYMENT);
-      state.nextAttemptTime = Date.now() + 30_000;
+      const key = `circuit:${DEPLOYMENT}`;
+      const { redis } = require("../../../src/db/redis");
+      await redis.hset(key, 'nextAttemptTime', Date.now() + 30_000);
 
-      expect(isRequestAllowed(DEPLOYMENT)).toBe(false);
-      expect(getCircuitState(DEPLOYMENT).state).toBe(CircuitState.OPEN);
+      expect(await isRequestAllowed(DEPLOYMENT)).toBe(false);
+      expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.OPEN);
     });
   });
 
   describe("HALF_OPEN → CLOSED Transition", () => {
-    it("should transition to CLOSED on success in HALF_OPEN", () => {
-      // Open the circuit
+    it("should transition to CLOSED on success in HALF_OPEN", async () => {
       for (let i = 0; i < 5; i++) {
-        recordFailure(DEPLOYMENT);
+        await recordFailure(DEPLOYMENT);
       }
 
-      // Transition to HALF_OPEN
-      const state = getCircuitBreaker(DEPLOYMENT);
-      state.nextAttemptTime = Date.now() - 1;
-      isRequestAllowed(DEPLOYMENT);
+      const key = `circuit:${DEPLOYMENT}`;
+      const { redis } = require("../../../src/db/redis");
+      await redis.hset(key, 'nextAttemptTime', Date.now() - 1);
+      await isRequestAllowed(DEPLOYMENT);
 
-      expect(getCircuitState(DEPLOYMENT).state).toBe(CircuitState.HALF_OPEN);
+      expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.HALF_OPEN);
 
-      // Record success
-      recordSuccess(DEPLOYMENT);
+      await recordSuccess(DEPLOYMENT);
 
-      expect(getCircuitState(DEPLOYMENT).state).toBe(CircuitState.CLOSED);
-      expect(getCircuitState(DEPLOYMENT).failureCount).toBe(0);
+      expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.CLOSED);
+      expect((await getCircuitState(DEPLOYMENT)).failureCount).toBe(0);
     });
 
-    it("should reset failure count on successful transition to CLOSED", () => {
-      // Open the circuit
+    it("should reset failure count on successful transition to CLOSED", async () => {
       for (let i = 0; i < 5; i++) {
-        recordFailure(DEPLOYMENT);
+        await recordFailure(DEPLOYMENT);
       }
 
-      // Transition to HALF_OPEN
-      const state = getCircuitBreaker(DEPLOYMENT);
-      state.nextAttemptTime = Date.now() - 1;
-      isRequestAllowed(DEPLOYMENT);
+      const key = `circuit:${DEPLOYMENT}`;
+      const { redis } = require("../../../src/db/redis");
+      await redis.hset(key, 'nextAttemptTime', Date.now() - 1);
+      await isRequestAllowed(DEPLOYMENT);
 
-      // Record success
-      recordSuccess(DEPLOYMENT);
+      await recordSuccess(DEPLOYMENT);
 
-      expect(getCircuitState(DEPLOYMENT).failureCount).toBe(0);
-      expect(getCircuitState(DEPLOYMENT).nextAttemptTime).toBeNull();
+      expect((await getCircuitState(DEPLOYMENT)).failureCount).toBe(0);
+      expect((await getCircuitState(DEPLOYMENT)).nextAttemptTime).toBeNull();
     });
   });
 
   describe("HALF_OPEN → OPEN Transition", () => {
-    it("should transition back to OPEN on failure in HALF_OPEN", () => {
-      // Open the circuit
+    it("should transition back to OPEN on failure in HALF_OPEN", async () => {
       for (let i = 0; i < 5; i++) {
-        recordFailure(DEPLOYMENT);
+        await recordFailure(DEPLOYMENT);
       }
 
-      // Transition to HALF_OPEN
-      const state = getCircuitBreaker(DEPLOYMENT);
-      state.nextAttemptTime = Date.now() - 1;
-      isRequestAllowed(DEPLOYMENT);
+      const key = `circuit:${DEPLOYMENT}`;
+      const { redis } = require("../../../src/db/redis");
+      await redis.hset(key, 'nextAttemptTime', Date.now() - 1);
+      await isRequestAllowed(DEPLOYMENT);
 
-      expect(getCircuitState(DEPLOYMENT).state).toBe(CircuitState.HALF_OPEN);
+      expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.HALF_OPEN);
 
-      // Record failure in HALF_OPEN
-      recordFailure(DEPLOYMENT);
+      await recordFailure(DEPLOYMENT);
 
-      expect(getCircuitState(DEPLOYMENT).state).toBe(CircuitState.OPEN);
+      expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.OPEN);
     });
 
-    it("should reset nextAttemptTime when returning to OPEN", () => {
-      // Open the circuit
+    it("should reset nextAttemptTime when returning to OPEN", async () => {
       for (let i = 0; i < 5; i++) {
-        recordFailure(DEPLOYMENT);
+        await recordFailure(DEPLOYMENT);
       }
 
-      // Transition to HALF_OPEN
-      const state = getCircuitBreaker(DEPLOYMENT);
-      state.nextAttemptTime = Date.now() - 1;
-      isRequestAllowed(DEPLOYMENT);
+      const key = `circuit:${DEPLOYMENT}`;
+      const { redis } = require("../../../src/db/redis");
+      await redis.hset(key, 'nextAttemptTime', Date.now() - 1);
+      await isRequestAllowed(DEPLOYMENT);
 
-      // Record failure in HALF_OPEN
-      recordFailure(DEPLOYMENT);
+      await recordFailure(DEPLOYMENT);
 
-      expect(getCircuitState(DEPLOYMENT).nextAttemptTime).toBeGreaterThan(
+      expect((await getCircuitState(DEPLOYMENT)).nextAttemptTime).toBeGreaterThan(
         Date.now()
       );
     });
   });
 
   describe("CLOSED state behavior", () => {
-    it("should reset failure count on success in CLOSED", () => {
-      recordFailure(DEPLOYMENT);
-      recordFailure(DEPLOYMENT);
-      expect(getCircuitState(DEPLOYMENT).failureCount).toBe(2);
+    it("should reset failure count on success in CLOSED", async () => {
+      await recordFailure(DEPLOYMENT);
+      await recordFailure(DEPLOYMENT);
+      expect((await getCircuitState(DEPLOYMENT)).failureCount).toBe(2);
 
-      recordSuccess(DEPLOYMENT);
+      await recordSuccess(DEPLOYMENT);
 
-      expect(getCircuitState(DEPLOYMENT).failureCount).toBe(0);
+      expect((await getCircuitState(DEPLOYMENT)).failureCount).toBe(0);
     });
 
-    it("should remain in CLOSED until threshold reached", () => {
+    it("should remain in CLOSED until threshold reached", async () => {
       for (let i = 0; i < 4; i++) {
-        expect(getCircuitState(DEPLOYMENT).state).toBe(CircuitState.CLOSED);
-        recordFailure(DEPLOYMENT);
+        expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.CLOSED);
+        await recordFailure(DEPLOYMENT);
       }
 
-      expect(getCircuitState(DEPLOYMENT).state).toBe(CircuitState.CLOSED);
-      recordFailure(DEPLOYMENT);
-      expect(getCircuitState(DEPLOYMENT).state).toBe(CircuitState.OPEN);
+      expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.CLOSED);
+      await recordFailure(DEPLOYMENT);
+      expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.OPEN);
     });
   });
 
   describe("Per-deployment isolation", () => {
-    it("should maintain separate circuit breakers per deployment", () => {
+    it("should maintain separate circuit breakers per deployment", async () => {
       const DEPLOYMENT_A = "deployment-a";
       const DEPLOYMENT_B = "deployment-b";
 
-      // Open circuit A
       for (let i = 0; i < 5; i++) {
-        recordFailure(DEPLOYMENT_A);
+        await recordFailure(DEPLOYMENT_A);
       }
 
-      expect(getCircuitState(DEPLOYMENT_A).state).toBe(CircuitState.OPEN);
-      expect(getCircuitState(DEPLOYMENT_B).state).toBe(CircuitState.CLOSED);
+      expect((await getCircuitState(DEPLOYMENT_A)).state).toBe(CircuitState.OPEN);
+      expect((await getCircuitState(DEPLOYMENT_B)).state).toBe(CircuitState.CLOSED);
 
-      // B should still allow requests
-      expect(isRequestAllowed(DEPLOYMENT_B)).toBe(true);
+      expect(await isRequestAllowed(DEPLOYMENT_B)).toBe(true);
     });
 
-    it("should allow independent state transitions", () => {
+    it("should allow independent state transitions", async () => {
       const DEPLOYMENT_A = "deployment-a";
       const DEPLOYMENT_B = "deployment-b";
 
-      // Open circuit A only
       for (let i = 0; i < 5; i++) {
-        recordFailure(DEPLOYMENT_A);
+        await recordFailure(DEPLOYMENT_A);
       }
 
-      // Transition A to HALF_OPEN
-      const stateA = getCircuitBreaker(DEPLOYMENT_A);
-      stateA.nextAttemptTime = Date.now() - 1;
-      isRequestAllowed(DEPLOYMENT_A);
+      const keyA = `circuit:${DEPLOYMENT_A}`;
+      const { redis } = require("../../../src/db/redis");
+      await redis.hset(keyA, 'nextAttemptTime', Date.now() - 1);
+      await isRequestAllowed(DEPLOYMENT_A);
 
-      // B should still be CLOSED
-      expect(getCircuitState(DEPLOYMENT_B).state).toBe(CircuitState.CLOSED);
+      expect((await getCircuitState(DEPLOYMENT_B)).state).toBe(CircuitState.CLOSED);
 
-      // Success on A should close it
-      recordSuccess(DEPLOYMENT_A);
-      expect(getCircuitState(DEPLOYMENT_A).state).toBe(CircuitState.CLOSED);
+      await recordSuccess(DEPLOYMENT_A);
+      expect((await getCircuitState(DEPLOYMENT_A)).state).toBe(CircuitState.CLOSED);
 
-      // B should still be CLOSED
-      expect(getCircuitState(DEPLOYMENT_B).state).toBe(CircuitState.CLOSED);
+      expect((await getCircuitState(DEPLOYMENT_B)).state).toBe(CircuitState.CLOSED);
     });
   });
 
   describe("resetCircuitBreaker", () => {
-    it("should reset circuit to initial CLOSED state", () => {
-      // Open the circuit
+    it("should reset circuit to initial CLOSED state", async () => {
       for (let i = 0; i < 5; i++) {
-        recordFailure(DEPLOYMENT);
+        await recordFailure(DEPLOYMENT);
       }
-      expect(getCircuitState(DEPLOYMENT).state).toBe(CircuitState.OPEN);
+      expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.OPEN);
 
-      resetCircuitBreaker(DEPLOYMENT);
+      await resetCircuitBreaker(DEPLOYMENT);
 
-      const state = getCircuitState(DEPLOYMENT);
+      const state = await getCircuitState(DEPLOYMENT);
       expect(state.state).toBe(CircuitState.CLOSED);
       expect(state.failureCount).toBe(0);
       expect(state.lastFailureTime).toBeNull();
       expect(state.nextAttemptTime).toBeNull();
-    });
-  });
-
-  describe("getCircuitBreaker", () => {
-    it("should return same instance for same deployment", () => {
-      const cb1 = getCircuitBreaker(DEPLOYMENT);
-      const cb2 = getCircuitBreaker(DEPLOYMENT);
-      expect(cb1).toBe(cb2);
-    });
-
-    it("should create new instance for different deployment", () => {
-      const cb1 = getCircuitBreaker(DEPLOYMENT);
-      const cb2 = getCircuitBreaker("other-deployment");
-      expect(cb1).not.toBe(cb2);
     });
   });
 });

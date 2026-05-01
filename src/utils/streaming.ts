@@ -4,6 +4,7 @@
  * Handles usage extraction for quota reconciliation
  */
 
+import { logger } from '@/observability/logger';
 import type { TokenUsage } from '@/services/pricing.service';
 
 // =============================================================================
@@ -230,15 +231,33 @@ export function parseAnthropicEvents(text: string): AnthropicStreamEvent[] {
  */
 export function handleStreamAbort(
   reservationId: string | null,
-  releaseFn: (id: string) => Promise<void>
-): () => void {
-  return () => {
-    if (reservationId) {
-      releaseFn(reservationId).catch((err) => {
-        console.error('Failed to release reservation on abort:', err);
-      });
+  releaseFn: (id: string) => Promise<void>,
+  signal?: AbortSignal
+): () => Promise<void> {
+  let released = false;
+
+  const releaseOnce = async () => {
+    if (released || !reservationId) {
+      return;
+    }
+
+    released = true;
+    try {
+      await releaseFn(reservationId);
+    } catch (err) {
+      logger.warn({ err, reservationId }, 'Failed to release reservation on stream abort');
     }
   };
+
+  if (signal) {
+    if (signal.aborted) {
+      releaseOnce();
+    } else {
+      signal.addEventListener('abort', releaseOnce, { once: true });
+    }
+  }
+
+  return releaseOnce;
 }
 
 // =============================================================================

@@ -5,6 +5,7 @@
 
 import { authMiddleware } from '@/middleware/auth';
 import { scopeMiddleware } from '@/middleware/scope';
+import { logger } from '@/observability/logger';
 import { getQuotaStatus } from '@/services/quota.service';
 import { errorForProtocol } from '@/utils/errors';
 import { Hono } from 'hono';
@@ -34,7 +35,7 @@ quotaRoutes.get('/', async (c) => {
     const quotaStatus = await getQuotaStatus(userId);
     return c.json(quotaStatus);
   } catch (err) {
-    console.error('Failed to get quota status:', err);
+    logger.error({ err, userId, requestId: c.get('requestId') }, 'Failed to get quota status');
     const error = errorForProtocol(
       c.req.path,
       500,

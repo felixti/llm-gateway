@@ -9,6 +9,7 @@ import {
   getDeploymentByAlias,
 } from '@/config/deployments';
 import { env } from '@/config/env';
+import { logger } from '@/observability/logger';
 import { upstreamHttpsFetch } from '@/utils/fetch';
 import { getAzureAuthManager } from './azure-auth';
 import { recordFailure } from './circuit-breaker';
@@ -129,7 +130,14 @@ export async function checkDeploymentHealth(
     };
   } catch (error) {
     // Mark unhealthy in circuit breaker
-    recordFailure(deployment.name);
+    try {
+      await recordFailure(deployment.name);
+    } catch (recordError) {
+      logger.warn(
+        { err: recordError, deployment: deployment.name },
+        'Failed to record deployment health failure in circuit breaker'
+      );
+    }
 
     return {
       deploymentName: deployment.name,
@@ -154,14 +162,19 @@ export async function getDeploymentHealth(
   return checkDeploymentHealth(deployment);
 }
 
+// In-memory snapshot of the most recent probe for every deployment.
+// /ready reads this map so k8s probes never trigger live LLM calls.
+const healthCache = new Map<string, DeploymentHealth>();
+
 /**
- * Get health status for all enabled deployments
+ * Get health status for all enabled deployments.
+ * Performs LIVE probes in parallel. Callers on the hot path should prefer
+ * {@link getCachedDeploymentHealth} to avoid billable upstream calls.
  */
 export async function getAllDeploymentHealth(): Promise<Map<string, DeploymentHealth>> {
   const deployments = getAllDeployments();
   const healthMap = new Map<string, DeploymentHealth>();
 
-  // Check all deployments in parallel
   const results = await Promise.all(
     deployments.map(async (deployment) => {
       const health = await checkDeploymentHealth(deployment);
@@ -169,38 +182,52 @@ export async function getAllDeploymentHealth(): Promise<Map<string, DeploymentHe
     })
   );
 
-  // Populate map
   for (const { name, health } of results) {
     healthMap.set(name, health);
+    healthCache.set(name, health);
   }
 
   return healthMap;
 }
 
-// Active health check interval handle
+/**
+ * Return the most recent cached health snapshot (populated by the scheduled
+ * probe). Returns an empty map until the first probe has completed.
+ */
+export function getCachedDeploymentHealth(): ReadonlyMap<string, DeploymentHealth> {
+  return healthCache;
+}
+
+/**
+ * Reset the in-memory health cache (testing only).
+ */
+export function resetHealthCacheForTests(): void {
+  healthCache.clear();
+}
+
 let healthCheckInterval: ReturnType<typeof setInterval> | null = null;
 
 /**
- * Start periodic health checks for all deployments
+ * Start periodic health checks for all deployments.
+ * Kicks off an immediate probe so `/ready` has data before the first interval.
  */
 export function startHealthChecks(): void {
   if (healthCheckInterval !== null || !env.HEALTH_CHECK_ENABLED) {
-    return; // Already running or disabled
+    return;
   }
 
-  healthCheckInterval = setInterval(async () => {
-    await getAllDeploymentHealth();
+  // Prime the cache on startup (fire-and-forget; errors are already logged inside).
+  void getAllDeploymentHealth();
+
+  healthCheckInterval = setInterval(() => {
+    void getAllDeploymentHealth();
   }, env.HEALTH_CHECK_INTERVAL_MS);
 
-  // Don't keep process alive just for health checks
   if (healthCheckInterval.unref) {
     healthCheckInterval.unref();
   }
 }
 
-/**
- * Stop periodic health checks
- */
 export function stopHealthChecks(): void {
   if (healthCheckInterval !== null) {
     clearInterval(healthCheckInterval);

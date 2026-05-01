@@ -30,9 +30,16 @@ vi.mock('@/services/circuit-breaker', () => ({
   isRequestAllowed: (...args: unknown[]) => mockIsRequestAllowed(...args),
 }));
 
+const debugEntries: unknown[] = [];
+
+vi.mock('@/observability/logger', () => ({
+  logDebugRequestMetadata: (...args: unknown[]) => debugEntries.push(args),
+}));
+
 describe('Request Handler Factory', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    debugEntries.length = 0;
     // Default mock behaviors
     mockGetAuthHeaders.mockResolvedValue({ Authorization: 'Bearer test' });
     mockProxyStreaming.mockResolvedValue(new Response());
@@ -140,6 +147,66 @@ describe('Request Handler Factory', () => {
 
       expect(mockProxyNonStreaming).toHaveBeenCalled();
       expect(mockProxyStreaming).not.toHaveBeenCalled();
+    });
+
+    it('passes authenticated request metadata to proxy functions', async () => {
+      mockGetDeploymentByAlias.mockReturnValue(mockDeployment);
+      mockIsRequestAllowed.mockReturnValue(true);
+
+      const app = new Hono();
+      app.use('*', async (c, next) => {
+        c.set('userId', 'user-123');
+        c.set('requestId', 'req-123');
+        c.set('reservationId', 'res-123');
+        await next();
+      });
+      const deps = createRequestHandlerDeps();
+      deps.proxyNonStreaming = mockProxyNonStreaming;
+      const handler = createRequestHandler(deps);
+      app.post('/', handler);
+
+      await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'test-model', messages: [], stream: false }),
+      });
+
+      expect(mockProxyNonStreaming.mock.calls[0][4]).toMatchObject({
+        userId: 'user-123',
+        requestId: 'req-123',
+        reservationId: 'res-123',
+      });
+    });
+
+    it('debug logging records request metadata without message content', async () => {
+      mockGetDeploymentByAlias.mockReturnValue(mockDeployment);
+      mockIsRequestAllowed.mockReturnValue(true);
+
+      const app = new Hono();
+      app.use('*', async (c, next) => {
+        c.set('userId', 'user-123');
+        await next();
+      });
+      const deps = createRequestHandlerDeps();
+      deps.proxyNonStreaming = mockProxyNonStreaming;
+      const handler = createRequestHandler(deps);
+      app.post('/', handler);
+
+      await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'test-model',
+          messages: [{ role: 'user', content: 'secret prompt content' }],
+          stream: false,
+        }),
+      });
+
+      const serialized = JSON.stringify(debugEntries);
+      expect(serialized).toContain('messageCount');
+      expect(serialized).not.toContain('secret prompt content');
+      expect(serialized).not.toContain('"messages"');
+      expect(serialized).not.toContain('"content"');
     });
 
     it('should route to streaming proxy when stream is true', async () => {

@@ -6,6 +6,7 @@
 
 import { type DeploymentConfig, getAllDeployments } from '@/config/deployments';
 import { authMiddleware } from '@/middleware/auth';
+import { cacheMiddleware } from '@/middleware/cache';
 import { scopeMiddleware } from '@/middleware/scope';
 import { Hono } from 'hono';
 
@@ -15,6 +16,18 @@ export const modelsRoutes = new Hono();
 // Apply auth middleware
 modelsRoutes.use('*', authMiddleware);
 modelsRoutes.use('*', scopeMiddleware);
+modelsRoutes.use(
+  '*',
+  cacheMiddleware({
+    ttl: 300,
+    keyGenerator: (c) => {
+      const scope = c.get('scope') || 'all';
+      const userId = c.get('userId') || 'anonymous';
+      const query = new URL(c.req.url).search;
+      return `response-cache:${c.req.method}:${c.req.path}${query}:user:${userId}:scope:${scope}`;
+    },
+  })
+);
 
 // GET /v1/models
 modelsRoutes.get('/', (c) => {

@@ -223,6 +223,21 @@ function parseHardLimitFlag(value: string | null): boolean {
   return true;
 }
 
+/**
+ * Safely read a Redis value, returning `null` if the call rejects. Used by
+ * `getQuotaStatus` to degrade to defaults instead of erroring when Redis
+ * hiccups — callers can still render a 200 with conservative numbers rather
+ * than leaking a 500 for a transient read failure.
+ */
+async function safeReadOrNull(op: () => Promise<string | null>): Promise<string | null> {
+  try {
+    return await op();
+  } catch (error) {
+    logger.warn('Quota read failed; falling back to defaults', { error });
+    return null;
+  }
+}
+
 export async function getQuotaStatus(userId: string): Promise<QuotaStatus> {
   const month = getCurrentMonth();
   await syncQuotaPolicyFromPostgres(userId, month);
@@ -231,10 +246,10 @@ export async function getQuotaStatus(userId: string): Promise<QuotaStatus> {
   const reservedKey = getReservedKey(userId, month);
 
   const [budget, spent, reserved, hardRaw] = await Promise.all([
-    redis.hget(quotaKey, 'budget'),
-    redis.hget(quotaKey, 'spent'),
-    redis.get(reservedKey),
-    redis.hget(quotaKey, 'hard_limit'),
+    safeReadOrNull(() => redis.hget(quotaKey, 'budget')),
+    safeReadOrNull(() => redis.hget(quotaKey, 'spent')),
+    safeReadOrNull(() => redis.get(reservedKey)),
+    safeReadOrNull(() => redis.hget(quotaKey, 'hard_limit')),
   ]);
 
   const budgetDecimal = new Decimal(budget || DEFAULT_BUDGET);

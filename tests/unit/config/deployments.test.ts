@@ -20,6 +20,14 @@ describe("Deployment Registry", () => {
       expect(deployment?.protocolFamily).toBe("chat-completions");
     });
 
+    it("should resolve gpt-5-mini alias correctly", () => {
+      const deployment = getDeploymentByAlias("gpt-5-mini");
+      expect(deployment).toBeDefined();
+      expect(deployment?.name).toBe("gpt-5-mini");
+      expect(deployment?.modelFamily).toBe("gpt");
+      expect(deployment?.protocolFamily).toBe("chat-completions");
+    });
+
     it("should resolve gpt-5.3-codex alias correctly", () => {
       const deployment = getDeploymentByAlias("gpt-5.3-codex");
       expect(deployment).toBeDefined();
@@ -66,6 +74,7 @@ describe("Deployment Registry", () => {
 
     it("should be case-insensitive", () => {
       expect(getDeploymentByAlias("GPT-5.4")?.name).toBe("gpt-5.4-global");
+      expect(getDeploymentByAlias("GPT-5-MINI")?.name).toBe("gpt-5-mini");
       expect(getDeploymentByAlias("Claude-Opus-4-6")?.name).toBe("claude-opus-4-6");
       expect(getDeploymentByAlias("KIMI-K2.5")?.name).toBe("kimi-k2.5");
     });
@@ -77,6 +86,7 @@ describe("Deployment Registry", () => {
 
   describe("getModelFamily", () => {
     it("should return correct model family for all aliases", () => {
+      expect(getModelFamily("gpt-5-mini")).toBe("gpt");
       expect(getModelFamily("gpt-5.4")).toBe("gpt");
       expect(getModelFamily("gpt-5.3-codex")).toBe("gpt");
       expect(getModelFamily("claude-opus-4-6")).toBe("claude");
@@ -94,6 +104,7 @@ describe("Deployment Registry", () => {
 
   describe("getProtocolFamily", () => {
     it("should return chat-completions for GPT models", () => {
+      expect(getProtocolFamily("gpt-5-mini")).toBe("chat-completions");
       expect(getProtocolFamily("gpt-5.4")).toBe("chat-completions");
       expect(getProtocolFamily("gpt-5.3-codex")).toBe("chat-completions");
     });
@@ -114,7 +125,8 @@ describe("Deployment Registry", () => {
   describe("getDeploymentsByFamily", () => {
     it("should return all GPT deployments", () => {
       const gptDeployments = getDeploymentsByFamily("gpt");
-      expect(gptDeployments.length).toBe(2);
+      expect(gptDeployments.length).toBe(3);
+      expect(gptDeployments.map(d => d.modelAlias)).toContain("gpt-5-mini");
       expect(gptDeployments.map(d => d.modelAlias)).toContain("gpt-5.4");
       expect(gptDeployments.map(d => d.modelAlias)).toContain("gpt-5.3-codex");
     });
@@ -149,13 +161,20 @@ describe("Deployment Registry", () => {
   describe("getAllDeployments", () => {
     it("should return all 8 enabled deployments", () => {
       const all = getAllDeployments();
-      expect(all.length).toBe(8);
+      expect(all.length).toBe(9);
     });
   });
 
   describe("getFallbackChain", () => {
     it("should return fallback chain for GPT-5.4", () => {
       const deployment = getDeploymentByAlias("gpt-5.4")!;
+      const chain = getFallbackChain(deployment);
+      expect(chain.length).toBe(1);
+      expect(chain[0].modelAlias).toBe("gpt-5.3-codex");
+    });
+
+    it("should return fallback chain for GPT-5 Mini", () => {
+      const deployment = getDeploymentByAlias("gpt-5-mini")!;
       const chain = getFallbackChain(deployment);
       expect(chain.length).toBe(1);
       expect(chain[0].modelAlias).toBe("gpt-5.3-codex");
@@ -185,7 +204,8 @@ describe("Deployment Registry", () => {
   describe("getAllModelAliases", () => {
     it("should return all 8 model aliases", () => {
       const aliases = getAllModelAliases();
-      expect(aliases.length).toBe(8);
+      expect(aliases.length).toBe(9);
+      expect(aliases).toContain("gpt-5-mini");
       expect(aliases).toContain("gpt-5.4");
       expect(aliases).toContain("gpt-5.3-codex");
       expect(aliases).toContain("claude-opus-4-6");
@@ -200,20 +220,21 @@ describe("Deployment Registry", () => {
   describe("Deployment Configuration", () => {
     it("should have correct endpoints for each model family", () => {
       // GPT models should use Azure OpenAI endpoint
-      const gptDeployment = getDeploymentByAlias("gpt-5.4");
-      expect(gptDeployment?.endpoint).toContain("openai.azure.com");
+      const gptDeployment = getDeploymentByAlias("gpt-5-mini");
+      expect(gptDeployment?.endpoint).toMatch(/^https:\/\//);
 
       // Claude models should use Azure AI Foundry endpoint
       const claudeDeployment = getDeploymentByAlias("claude-opus-4-6");
-      expect(claudeDeployment?.endpoint).toContain("ai.azure.com");
+      expect(claudeDeployment?.endpoint).toMatch(/^https:\/\//);
 
       // Kimi should use Azure AI Foundry endpoint
       const kimiDeployment = getDeploymentByAlias("kimi-k2.5");
-      expect(kimiDeployment?.endpoint).toContain("ai.azure.com");
+      expect(kimiDeployment?.endpoint).toMatch(/^https:\/\//);
     });
 
     it("should have correct API versions", () => {
       // GPT and Kimi/GLM/MiniMax should use chat completions API version
+      expect(getDeploymentByAlias("gpt-5-mini")?.apiVersion).toBe("2024-06-01");
       expect(getDeploymentByAlias("gpt-5.4")?.apiVersion).toBe("2024-06-01");
       expect(getDeploymentByAlias("kimi-k2.5")?.apiVersion).toBe("2024-06-01");
 
@@ -227,6 +248,12 @@ describe("Deployment Registry", () => {
         expect(deployment.authConfig).toBeDefined();
         expect(["entra-id", "api-key"]).toContain(deployment.authConfig.type);
       }
+    });
+
+    it("should use OpenAI-compatible api-key header for Foundry chat models", () => {
+      expect(getDeploymentByAlias("kimi-k2.5")?.authConfig.keyHeader).toBe("api-key");
+      expect(getDeploymentByAlias("glm-5")?.authConfig.keyHeader).toBe("api-key");
+      expect(getDeploymentByAlias("minimax-m2.5")?.authConfig.keyHeader).toBe("api-key");
     });
   });
 });

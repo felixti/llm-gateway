@@ -1,4 +1,5 @@
 import { env } from '@/config/env';
+import { logger } from '@/observability/logger';
 import Redis from 'ioredis';
 import type { RedisOptions } from 'ioredis';
 
@@ -11,7 +12,6 @@ const redisOptions: RedisOptions = {
   maxRetriesPerRequest: 3,
   enableReadyCheck: true,
   enableOfflineQueue: true,
-  // Defer connection in tests; helpers monkey-patch methods directly.
   lazyConnect: isTest,
 };
 
@@ -22,10 +22,10 @@ if (env.REDIS_PASSWORD) {
 export const redis = new Redis(redisOptions);
 
 if (!isTest) {
-  redis.on('connect', () => console.log('Redis client connected'));
-  redis.on('ready', () => console.log('Redis client ready'));
-  redis.on('error', (err) => console.error('Redis client error:', err));
-  redis.on('close', () => console.log('Redis client connection closed'));
+  redis.on('connect', () => logger.info('Redis client connected'));
+  redis.on('ready', () => logger.info('Redis client ready'));
+  redis.on('error', (err) => logger.error({ err }, 'Redis client error'));
+  redis.on('close', () => logger.info('Redis client connection closed'));
 } else {
   // Swallow connection errors in tests; methods are mocked by helpers.
   redis.on('error', () => {});

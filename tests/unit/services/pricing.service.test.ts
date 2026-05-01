@@ -5,6 +5,8 @@ import {
   calculateEstimatedCost,
   getPricingByPattern,
   getAllPricingKeys,
+  reloadPricingFromFile,
+  reloadPricing,
   type TokenUsage,
 } from "../../../src/services/pricing.service";
 
@@ -192,9 +194,47 @@ describe("Pricing Service", () => {
   });
 
   describe("getAllPricingKeys", () => {
-    it("should return all 8 model pricing keys", () => {
+    it("should return all 9 model pricing keys", () => {
       const keys = getAllPricingKeys();
-      expect(keys.length).toBe(8);
+      expect(keys.length).toBe(9);
+    });
+  });
+
+  describe("reloadPricingFromFile", () => {
+    it("loads changed pricing from disk without process restart", async () => {
+      const tempPath = `/tmp/llm-gateway-pricing-${Date.now()}.json`;
+      await Bun.write(
+        tempPath,
+        JSON.stringify({
+          version: "test",
+          currency: "USD",
+          models: {
+            "reload-test": {
+              deployment_pattern: "reload-test*",
+              input_per_million: 1,
+              output_per_million: 2,
+            },
+          },
+        })
+      );
+
+      const loaded = await reloadPricingFromFile(tempPath);
+
+      expect(loaded).toBe(true);
+      expect(getPricingByPattern("reload-test")?.inputPerMillion.toNumber()).toBe(1);
+
+      await reloadPricing();
+    });
+
+    it("keeps the last good cache when a reload file is invalid", async () => {
+      const tempPath = `/tmp/llm-gateway-pricing-invalid-${Date.now()}.json`;
+      const before = getPricingByPattern("gpt-5.4")?.inputPerMillion.toNumber();
+      await Bun.write(tempPath, JSON.stringify({ version: "bad", currency: "EUR", models: {} }));
+
+      const loaded = await reloadPricingFromFile(tempPath);
+
+      expect(loaded).toBe(false);
+      expect(getPricingByPattern("gpt-5.4")?.inputPerMillion.toNumber()).toBe(before);
     });
   });
 });

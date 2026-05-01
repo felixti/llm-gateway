@@ -6,6 +6,7 @@
 - **Redis is the fast path**: `quota:{userId}:{YYYY-MM}` hash holds `budget`, `hard_limit`, `spent`, and `db_synced_at`.
 - The gateway syncs Postgres → Redis on every quota check, gated by `db_synced_at` so we re-read at most once every 60 s per user-month.
 - `reserved` lives in `reserved:{userId}:{YYYY-MM}` and is mutated by atomic Lua scripts.
+- Upstream failures, missing usage, and client stream aborts release the reservation immediately; successful responses with usage reconcile the reservation to actual spend.
 - Failures to read Postgres increment the metric `quota_hydration_failures_total` and fall back to Redis defaults (`50` USD, `hard_limit=true`) so the gateway stays available.
 
 ---
@@ -18,6 +19,8 @@
 | `quota_hydration_failures_total` rising | Postgres connectivity / auth issue |
 | `hard_limit` ignored (soft behavior) when Postgres says `true` | `QUOTA_SOFT_LIMIT_ENABLED=true` overrides per-user policy globally |
 | 429 `quota_exceeded` for users with budget remaining | `reserved_usd` stuck high (orphaned reservations) |
+
+If `reserved_usd` rises during upstream incidents, compare it with upstream 5xx/429 logs. Non-OK upstream responses should release reservations immediately; only process crashes or Redis failures should leave reservations waiting for TTL cleanup.
 
 ---
 

@@ -30,6 +30,10 @@ declare module 'hono' {
 
     // Deployment (used in proxy handlers)
     deployment: DeploymentConfig;
+
+    // Timeout middleware — request-scoped AbortSignal that fires on client
+    // disconnect OR gateway timeout. MUST be forwarded to upstream fetch.
+    requestSignal: AbortSignal;
   }
 }
 

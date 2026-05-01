@@ -85,6 +85,21 @@ export interface RequestLogContext {
   protocol?: string;
 }
 
+export interface RequestBodyLogMetadata {
+  model?: string;
+  stream?: boolean;
+  messageCount?: number;
+  inputItemCount?: number;
+  inputType?: 'string' | 'array' | 'unknown';
+  toolCount?: number;
+  functionCount?: number;
+  hasSystem?: boolean;
+  thinkingEnabled?: boolean;
+  maxTokens?: number;
+  maxCompletionTokens?: number;
+  responseFormat?: string;
+}
+
 /**
  * Format request log entry with all context fields
  */
@@ -143,22 +158,63 @@ export function logWarning(ctx: RequestLogContext, message: string): void {
   logger.warn(logEntry, message);
 }
 
+function countArray(value: unknown): number | undefined {
+  return Array.isArray(value) ? value.length : undefined;
+}
+
+function getResponseFormatType(value: unknown): string | undefined {
+  if (value && typeof value === 'object' && 'type' in value) {
+    const type = (value as { type?: unknown }).type;
+    return typeof type === 'string' ? type : undefined;
+  }
+  return undefined;
+}
+
 /**
- * Log request/response body at DEBUG level (sanitized)
+ * Summarize a request body without retaining prompt, message, input, or tool payload content.
  */
-export function logDebugBody(
+export function getRequestBodyLogMetadata(body: Record<string, unknown>): RequestBodyLogMetadata {
+  const input = body.input;
+  const thinking = body.thinking as { type?: unknown } | undefined;
+
+  return {
+    model: typeof body.model === 'string' ? body.model : undefined,
+    stream: typeof body.stream === 'boolean' ? body.stream : undefined,
+    messageCount: countArray(body.messages),
+    inputItemCount: Array.isArray(input) ? input.length : undefined,
+    inputType: typeof input === 'string' ? 'string' : Array.isArray(input) ? 'array' : undefined,
+    toolCount: countArray(body.tools),
+    functionCount: countArray(body.functions),
+    hasSystem: body.system !== undefined,
+    thinkingEnabled: thinking?.type === 'enabled',
+    maxTokens: typeof body.max_tokens === 'number' ? body.max_tokens : undefined,
+    maxCompletionTokens:
+      typeof body.max_completion_tokens === 'number' ? body.max_completion_tokens : undefined,
+    responseFormat: getResponseFormatType(body.response_format),
+  };
+}
+
+/**
+ * Log request/response body metadata at DEBUG level.
+ *
+ * SECURITY: This function only accepts structured metadata (counts/types/flags).
+ * It MUST NOT accept raw request/response bodies — that would risk logging
+ * prompt/message content. The previous `logDebugBody()` helper was removed
+ * deliberately to make this guarantee enforceable at the type level.
+ */
+export function logDebugRequestMetadata(
   direction: 'request' | 'response',
-  body: unknown,
+  metadata: RequestBodyLogMetadata | Record<string, unknown>,
   ctx?: RequestLogContext
 ): void {
   if (env.LOG_LEVEL !== 'debug') {
     return;
   }
-  const sanitized = sanitizePII(body);
+
   const logEntry = {
     ...formatRequestLog(ctx ?? {}),
     direction,
-    body: sanitized,
+    metadata: sanitizePII(metadata),
   };
-  logger.debug(logEntry, `${direction} body`);
+  logger.debug(logEntry, `${direction} metadata`);
 }

@@ -5,10 +5,13 @@ import postgres from 'postgres';
 const connectionString = env.DATABASE_URL || 'postgres://localhost:5432/postgres';
 
 export const sql = postgres(connectionString, {
-  max: 10,
-  idle_timeout: 20,
+  max: 20,
+  idle_timeout: 30,
   connect_timeout: 10,
-  prepare: false,
+  prepare: true,
+  transform: {
+    undefined: null,
+  },
 });
 
 export const database = {
@@ -35,6 +38,15 @@ export const database = {
     return sql;
   },
 };
+
+export async function isPostgresHealthy(): Promise<boolean> {
+  try {
+    const result = await sql`SELECT 1 AS healthy`;
+    return result.length > 0 && result[0].healthy === 1;
+  } catch {
+    return false;
+  }
+}
 
 export async function closeDatabase(): Promise<void> {
   await sql.end();

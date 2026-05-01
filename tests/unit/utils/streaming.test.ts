@@ -5,6 +5,7 @@ import {
   parseAnthropicEvents,
   createOpenAIStreamTransformer,
   createAnthropicStreamTransformer,
+  handleStreamAbort,
   type OpenAIStreamChunk,
   type AnthropicStreamEvent,
 } from "../../../src/utils/streaming";
@@ -236,6 +237,37 @@ data: {"type":"message_stop"}`;
       transformer.transform(event2, mockController);
 
       expect(chunks).toHaveLength(2);
+    });
+  });
+
+  describe("handleStreamAbort", () => {
+    it("releases the reservation when the request abort signal fires", async () => {
+      const controller = new AbortController();
+      const released: string[] = [];
+
+      handleStreamAbort("res-abort-1", async (id) => {
+        released.push(id);
+      }, controller.signal);
+
+      controller.abort();
+      await Promise.resolve();
+
+      expect(released).toEqual(["res-abort-1"]);
+    });
+
+    it("does not release twice when cleanup runs after an abort", async () => {
+      const controller = new AbortController();
+      const released: string[] = [];
+
+      const cleanup = handleStreamAbort("res-abort-2", async (id) => {
+        released.push(id);
+      }, controller.signal);
+
+      controller.abort();
+      cleanup();
+      await Promise.resolve();
+
+      expect(released).toEqual(["res-abort-2"]);
     });
   });
 });

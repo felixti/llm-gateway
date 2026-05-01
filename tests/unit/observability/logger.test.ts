@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   sanitizePII,
   formatRequestLog,
@@ -6,9 +6,24 @@ import {
   logRequest,
   logError,
   logWarning,
+  getRequestBodyLogMetadata,
 } from "../../../src/observability/logger";
 
 describe("Logger Service", () => {
+  const originalLogLevel = process.env.LOG_LEVEL;
+
+  beforeEach(() => {
+    process.env.LOG_LEVEL = "info";
+  });
+
+  afterEach(() => {
+    if (originalLogLevel === undefined) {
+      delete process.env.LOG_LEVEL;
+    } else {
+      process.env.LOG_LEVEL = originalLogLevel;
+    }
+  });
+
   describe("sanitizePII", () => {
     it("should redact email addresses", () => {
       const input = { email: "user@example.com", name: "John" };
@@ -129,6 +144,28 @@ describe("Logger Service", () => {
       const ctx = { traceId: null };
       const result = formatRequestLog(ctx);
       expect(result).toMatchObject({ trace_id: "unknown" });
+    });
+  });
+
+  describe("getRequestBodyLogMetadata", () => {
+    it("summarizes request bodies without message content", () => {
+      const metadata = getRequestBodyLogMetadata({
+        model: "gpt-5.4",
+        messages: [{ role: "user", content: "secret prompt" }],
+        tools: [{ type: "function", name: "search", parameters: { q: "secret" } }],
+        stream: true,
+        max_completion_tokens: 100,
+      });
+
+      expect(metadata).toMatchObject({
+        model: "gpt-5.4",
+        stream: true,
+        messageCount: 1,
+        toolCount: 1,
+        maxCompletionTokens: 100,
+      });
+      expect(JSON.stringify(metadata)).not.toContain("secret prompt");
+      expect(JSON.stringify(metadata)).not.toContain("parameters");
     });
   });
 

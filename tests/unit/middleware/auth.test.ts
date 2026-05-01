@@ -120,4 +120,20 @@ describe("authMiddleware", () => {
 
     expect(result!.status).toBe(401);
   });
+
+  test("Redis blocklist read rejects → fails closed with 503", async () => {
+    const jti = "jti-redis-down";
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    const token = generateValidPat("user-1", { jti, exp });
+    mockRedisGet.mockRejectedValue(new Error("ECONNRESET"));
+
+    const c = createMockContext(`Bearer ${token}`);
+    const result = await authMiddleware(c, next);
+
+    expect(result).toBeInstanceOf(Response);
+    expect(result!.status).toBe(503);
+    const body = (await result!.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("service_unavailable");
+    expect(body.error.message).toMatch(/authentication service/i);
+  });
 });

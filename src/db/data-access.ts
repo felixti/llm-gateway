@@ -76,7 +76,7 @@ export async function getUserQuotaPolicyByPatSubject(
     };
   } catch (error) {
     logger.error('Failed to load user quota policy', { patSubject, error });
-    throw error;
+    return null;
   }
 }
 

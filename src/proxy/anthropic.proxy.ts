@@ -6,10 +6,11 @@
 
 import type { DeploymentConfig } from '@/config/deployments';
 import { logRequestAudit } from '@/db/data-access';
+import { logger } from '@/observability/logger';
 import { addLLMSpanAttributes } from '@/observability/tracing';
+import type { ProxyRequestContext } from '@/routes/factories/types';
 import { recordFailure, recordSuccess } from '@/services/circuit-breaker';
 import type { TokenUsage } from '@/services/pricing.service';
-import { calculateCost } from '@/services/pricing.service';
 import { reconcileUsage, releaseReservation } from '@/services/quota.service';
 import { withRetry } from '@/services/retry';
 import { errorForProtocol } from '@/utils/errors';
@@ -19,6 +20,28 @@ import {
   handleStreamAbort,
   parseAnthropicEvents,
 } from '@/utils/streaming';
+
+function normalizeProxyContext(
+  contextOrReservationId: ProxyRequestContext | string,
+  requestId?: string
+): ProxyRequestContext {
+  if (typeof contextOrReservationId === 'string') {
+    return { reservationId: contextOrReservationId, requestId: requestId || '' };
+  }
+  return contextOrReservationId;
+}
+
+async function releaseReservedQuota(reservationId: string, requestId: string): Promise<void> {
+  if (!reservationId) {
+    return;
+  }
+
+  try {
+    await releaseReservation(reservationId);
+  } catch (err) {
+    logger.warn({ err, requestId, reservationId }, 'Failed to release quota reservation');
+  }
+}
 
 /**
  * Build upstream URL for Anthropic Messages API
@@ -54,24 +77,32 @@ export async function proxyNonStreamingAnthropic(
   headers: Record<string, string>,
   body: Record<string, unknown>,
   deployment: DeploymentConfig,
-  reservationId: string,
-  requestId: string
+  contextOrReservationId: ProxyRequestContext | string,
+  legacyRequestId?: string
 ): Promise<Response> {
+  const { reservationId, requestId, userId, abortSignal } = normalizeProxyContext(
+    contextOrReservationId,
+    legacyRequestId
+  );
   const startTime = Date.now();
-  const response = await withRetry(() =>
-    upstreamHttpsFetch(upstreamUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'anthropic-version': '2023-06-01',
-        ...headers,
-      },
-      body: JSON.stringify(body),
-    })
+  const response = await withRetry(
+    () =>
+      upstreamHttpsFetch(upstreamUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01',
+          ...headers,
+        },
+        body: JSON.stringify(body),
+        signal: abortSignal,
+      }),
+    { signal: abortSignal }
   );
 
   if (!response.ok) {
-    recordFailure(deployment.name);
+    await recordFailure(deployment.name);
+    await releaseReservedQuota(reservationId, requestId);
     const errorBody = await response.text();
     const error = errorForProtocol(
       '/v1/messages',
@@ -85,7 +116,7 @@ export async function proxyNonStreamingAnthropic(
     });
   }
 
-  recordSuccess(deployment.name);
+  await recordSuccess(deployment.name);
 
   const responseBody = (await response.json()) as {
     type?: string;
@@ -104,7 +135,7 @@ export async function proxyNonStreamingAnthropic(
       costUsd: actualCost.toNumber(),
     });
     logRequestAudit({
-      userId: deployment.name,
+      userId: userId || 'unknown',
       requestId,
       model: deployment.azureModelName,
       deployment: deployment.name,
@@ -114,12 +145,12 @@ export async function proxyNonStreamingAnthropic(
       tokensThinking: usage.thinking_tokens || 0,
       costUsd: actualCost.toString(),
       thinkingEnabled: false,
-      azureAuthType: 'entra_id',
+      azureAuthType: deployment.authConfig.type,
       durationMs: Date.now() - startTime,
       statusCode: 200,
-    }).catch(() => {});
+    }).catch((err) => logger.warn({ err, requestId }, 'Failed to log request audit'));
   } else if (reservationId) {
-    await releaseReservation(reservationId);
+    await releaseReservedQuota(reservationId, requestId);
   }
 
   return new Response(JSON.stringify(responseBody), {
@@ -137,25 +168,33 @@ export async function proxyStreamingAnthropic(
   headers: Record<string, string>,
   body: Record<string, unknown>,
   deployment: DeploymentConfig,
-  reservationId: string,
-  requestId: string
+  contextOrReservationId: ProxyRequestContext | string,
+  legacyRequestId?: string
 ): Promise<Response> {
-  const response = await withRetry(() =>
-    upstreamHttpsFetch(upstreamUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'anthropic-version': '2023-06-01',
-        ...headers,
-        Accept: 'text/event-stream',
-        'x-ms-client-request-id': requestId,
-      },
-      body: JSON.stringify({ ...body, stream: true }),
-    })
+  const { reservationId, requestId, userId, abortSignal } = normalizeProxyContext(
+    contextOrReservationId,
+    legacyRequestId
+  );
+  const response = await withRetry(
+    () =>
+      upstreamHttpsFetch(upstreamUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01',
+          ...headers,
+          Accept: 'text/event-stream',
+          'x-ms-client-request-id': requestId,
+        },
+        body: JSON.stringify({ ...body, stream: true }),
+        signal: abortSignal,
+      }),
+    { signal: abortSignal }
   );
 
   if (!response.ok) {
-    recordFailure(deployment.name);
+    await recordFailure(deployment.name);
+    await releaseReservedQuota(reservationId, requestId);
     const errorBody = await response.text();
     const error = errorForProtocol(
       '/v1/messages',
@@ -169,15 +208,24 @@ export async function proxyStreamingAnthropic(
     });
   }
 
-  recordSuccess(deployment.name);
+  await recordSuccess(deployment.name);
 
   if (!response.body) {
+    await releaseReservedQuota(reservationId, requestId);
     return new Response('Internal Server Error: No response body', { status: 500 });
   }
 
   let usageExtracted = false;
+  let reservationFinalized = false;
   const startTime = Date.now();
-  const cleanup = handleStreamAbort(reservationId, releaseReservation);
+  const releaseUnreconciled = async () => {
+    if (reservationFinalized) {
+      return;
+    }
+    reservationFinalized = true;
+    await releaseReservedQuota(reservationId, requestId);
+  };
+  const cleanup = handleStreamAbort(reservationId, releaseUnreconciled, abortSignal);
 
   const stream = response.body.pipeThrough(
     new TransformStream({
@@ -191,6 +239,7 @@ export async function proxyStreamingAnthropic(
 
           if (usage) {
             usageExtracted = true;
+            reservationFinalized = true;
             reconcileUsage(reservationId, usage, deployment.azureModelName)
               .then((actualCost) => {
                 addLLMSpanAttributes({
@@ -200,7 +249,7 @@ export async function proxyStreamingAnthropic(
                   costUsd: actualCost.toNumber(),
                 });
                 logRequestAudit({
-                  userId: deployment.name,
+                  userId: userId || 'unknown',
                   requestId,
                   model: deployment.azureModelName,
                   deployment: deployment.name,
@@ -210,17 +259,17 @@ export async function proxyStreamingAnthropic(
                   tokensThinking: usage.thinking_tokens || 0,
                   costUsd: actualCost.toString(),
                   thinkingEnabled: false,
-                  azureAuthType: 'entra_id',
+                  azureAuthType: deployment.authConfig.type,
                   durationMs: Date.now() - startTime,
                   statusCode: 200,
-                }).catch(() => {});
+                }).catch((err) => logger.warn({ err, requestId }, 'Failed to log request audit'));
               })
-              .catch((err) => console.error('Quota reconciliation error:', err));
+              .catch((err) => logger.error({ err, requestId }, 'Quota reconciliation error'));
           }
         }
       },
-      flush(controller) {
-        cleanup();
+      async flush(controller) {
+        await cleanup();
         controller.terminate();
       },
     })

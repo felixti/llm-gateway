@@ -50,8 +50,8 @@ function buildAzureOpenAIAuth(): AzureAuthConfig {
   };
 }
 
-// Build auth config for Azure AI Foundry
-function buildFoundryAuth(): AzureAuthConfig {
+// Build auth config for Azure AI Foundry Anthropic-compatible models
+function buildFoundryAnthropicAuth(): AzureAuthConfig {
   if (env.AZURE_ENTRA_TENANT_ID && env.AZURE_ENTRA_CLIENT_ID && env.AZURE_ENTRA_CLIENT_SECRET) {
     return {
       type: 'entra-id',
@@ -70,9 +70,41 @@ function buildFoundryAuth(): AzureAuthConfig {
   };
 }
 
-// All 8 model deployments
+// Build auth config for Azure AI Foundry OpenAI-compatible models
+function buildFoundryOpenAIAuth(): AzureAuthConfig {
+  if (env.AZURE_ENTRA_TENANT_ID && env.AZURE_ENTRA_CLIENT_ID && env.AZURE_ENTRA_CLIENT_SECRET) {
+    return {
+      type: 'entra-id',
+      tenantId: env.AZURE_ENTRA_TENANT_ID,
+      clientId: env.AZURE_ENTRA_CLIENT_ID,
+      clientSecret: env.AZURE_ENTRA_CLIENT_SECRET,
+      scope: 'https://ai.azure.com/.default',
+    };
+  }
+  return {
+    type: 'api-key',
+    apiKey:
+      env.AZURE_AI_FOUNDRY_KEY ||
+      (process.env.NODE_ENV === 'test' ? 'test-foundry-key' : undefined),
+    keyHeader: 'api-key',
+  };
+}
+
+// All 9 model deployments
 const DEPLOYMENTS: DeploymentConfig[] = [
   // GPT models via Azure OpenAI
+  {
+    name: 'gpt-5-mini',
+    modelAlias: 'gpt-5-mini',
+    modelFamily: 'gpt',
+    protocolFamily: 'chat-completions',
+    azureModelName: 'gpt-5-mini',
+    endpoint: env.AZURE_OPENAI_ENDPOINT || 'https://example.openai.azure.com',
+    authConfig: buildAzureOpenAIAuth(),
+    apiVersion: '2024-06-01',
+    fallbackDeployment: 'gpt-5.3-codex',
+    enabled: true,
+  },
   {
     name: 'gpt-5.4-global',
     modelAlias: 'gpt-5.4',
@@ -104,7 +136,7 @@ const DEPLOYMENTS: DeploymentConfig[] = [
     protocolFamily: 'anthropic-messages',
     azureModelName: 'claude-opus-4-6',
     endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || 'https://example.ai.azure.com',
-    authConfig: buildFoundryAuth(),
+    authConfig: buildFoundryAnthropicAuth(),
     apiVersion: '2023-06-01',
     fallbackDeployment: 'claude-sonnet-4-6',
     enabled: true,
@@ -116,7 +148,7 @@ const DEPLOYMENTS: DeploymentConfig[] = [
     protocolFamily: 'anthropic-messages',
     azureModelName: 'claude-sonnet-4-6',
     endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || 'https://example.ai.azure.com',
-    authConfig: buildFoundryAuth(),
+    authConfig: buildFoundryAnthropicAuth(),
     apiVersion: '2023-06-01',
     fallbackDeployment: 'claude-haiku-4-5',
     enabled: true,
@@ -128,7 +160,7 @@ const DEPLOYMENTS: DeploymentConfig[] = [
     protocolFamily: 'anthropic-messages',
     azureModelName: 'claude-haiku-4-5',
     endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || 'https://example.ai.azure.com',
-    authConfig: buildFoundryAuth(),
+    authConfig: buildFoundryAnthropicAuth(),
     apiVersion: '2023-06-01',
     enabled: true,
   },
@@ -140,7 +172,7 @@ const DEPLOYMENTS: DeploymentConfig[] = [
     protocolFamily: 'chat-completions',
     azureModelName: 'FW-Kimi-K2.5',
     endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || 'https://example.ai.azure.com',
-    authConfig: buildFoundryAuth(),
+    authConfig: buildFoundryOpenAIAuth(),
     apiVersion: '2024-06-01',
     enabled: true,
   },
@@ -151,7 +183,7 @@ const DEPLOYMENTS: DeploymentConfig[] = [
     protocolFamily: 'chat-completions',
     azureModelName: 'FW-GLM-5',
     endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || 'https://example.ai.azure.com',
-    authConfig: buildFoundryAuth(),
+    authConfig: buildFoundryOpenAIAuth(),
     apiVersion: '2024-06-01',
     enabled: true,
   },
@@ -162,7 +194,7 @@ const DEPLOYMENTS: DeploymentConfig[] = [
     protocolFamily: 'chat-completions',
     azureModelName: 'FW-MiniMax-M2.5',
     endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT || 'https://example.ai.azure.com',
-    authConfig: buildFoundryAuth(),
+    authConfig: buildFoundryOpenAIAuth(),
     apiVersion: '2024-06-01',
     enabled: true,
   },

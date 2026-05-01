@@ -3,10 +3,30 @@ import {
   buildUpstreamUrl,
   buildRequestBody,
   proxyNonStreamingChat,
+  proxyStreamingChat,
 } from "../../../src/proxy/openai-chat.proxy";
 import type { DeploymentConfig } from "../../../src/config/deployments";
 import { Decimal } from "decimal.js";
 import { resetCircuitBreaker } from "../../../src/services/circuit-breaker";
+import { redis } from "../../../src/db/redis";
+import { MockRedis } from "../../integration/helpers/mock-redis";
+
+function bindMockRedis(mock: MockRedis): void {
+  const r = redis as unknown as Record<string, unknown>;
+  r.get = mock.get.bind(mock);
+  r.set = mock.set.bind(mock);
+  r.setex = mock.setex.bind(mock);
+  r.eval = mock.eval.bind(mock);
+  r.hget = mock.hget.bind(mock);
+  r.hgetall = mock.hgetall.bind(mock);
+  r.hset = mock.hset.bind(mock);
+  r.pipeline = mock.pipeline.bind(mock);
+  r.incrbyfloat = mock.incrbyfloat.bind(mock);
+  r.del = mock.del.bind(mock);
+  r.ping = mock.ping.bind(mock);
+  r.scan = mock.scan.bind(mock);
+  r.ttl = mock.ttl.bind(mock);
+}
 
 // Mock dependencies
 const mockReconcileUsage = vi.fn();
@@ -14,6 +34,8 @@ const mockReleaseReservation = vi.fn();
 const mockLogRequestAudit = vi.fn();
 const mockWithRetry = vi.fn();
 const mockGetDeploymentByAlias = vi.fn();
+const mockRecordFailure = vi.fn();
+const mockRecordSuccess = vi.fn();
 
 vi.mock("../../../src/services/quota.service", () => ({
   reconcileUsage: (...args: unknown[]) => mockReconcileUsage(...args),
@@ -31,6 +53,14 @@ vi.mock("../../../src/services/retry", () => ({
 vi.mock("../../../src/config/deployments", () => ({
   getDeploymentByAlias: (...args: unknown[]) => mockGetDeploymentByAlias(...args),
 }));
+
+vi.mock("../../../src/services/circuit-breaker", () => ({
+  recordFailure: (...args: unknown[]) => mockRecordFailure(...args),
+  recordSuccess: (...args: unknown[]) => mockRecordSuccess(...args),
+  resetCircuitBreaker: () => undefined,
+}));
+
+
 
 const baseDeployment: DeploymentConfig = {
   name: "test-deployment",
@@ -119,9 +149,12 @@ describe("proxyNonStreamingChat", () => {
 
   beforeEach(() => {
     originalFetch = global.fetch;
+    bindMockRedis(new MockRedis());
     mockReconcileUsage.mockReset();
     mockReleaseReservation.mockReset();
     mockLogRequestAudit.mockReset();
+    mockRecordFailure.mockReset();
+    mockRecordSuccess.mockReset();
     mockWithRetry.mockImplementation((fn: () => unknown) => fn());
     resetCircuitBreaker("test-deployment");
   });
@@ -170,6 +203,22 @@ describe("proxyNonStreamingChat", () => {
     expect(body.error.code).toBe("bad_gateway");
   });
 
+  test("releases quota reservation on upstream failure", async () => {
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ error: "server error" }), { status: 500 })) as unknown as typeof fetch;
+    mockReleaseReservation.mockResolvedValue(undefined);
+
+    await proxyNonStreamingChat(
+      "https://test.azure.com/chat",
+      {},
+      { model: "gpt-5.4", messages: [] },
+      baseDeployment,
+      { reservationId: "res-failure", requestId: "req-failure", userId: "user-123" } as any
+    );
+
+    expect(mockReleaseReservation).toHaveBeenCalledWith("res-failure");
+  });
+
   test("calls recordFailure on upstream error", async () => {
     global.fetch = vi.fn(async () =>
       new Response(JSON.stringify({ error: "server error" }), { status: 500 })) as unknown as typeof fetch;
@@ -183,11 +232,7 @@ describe("proxyNonStreamingChat", () => {
       "req-123"
     );
 
-    // recordFailure increments the failure count in the circuit breaker
-    // We can verify by checking the circuit breaker state
-    const { getCircuitState } = await import("../../../src/services/circuit-breaker");
-    const state = getCircuitState("test-deployment");
-    expect(state.failureCount).toBeGreaterThan(0);
+    expect(mockRecordFailure).toHaveBeenCalledWith("test-deployment");
   });
 
   test("calls reconcileUsage and logRequestAudit when usage is present", async () => {
@@ -219,6 +264,34 @@ describe("proxyNonStreamingChat", () => {
     expect(mockLogRequestAudit).toHaveBeenCalled();
   });
 
+  test("logs authenticated user id in request audit", async () => {
+    const upstreamBody = {
+      id: "chat-2",
+      choices: [],
+      usage: { prompt_tokens: 10, completion_tokens: 5 },
+    };
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify(upstreamBody), { status: 200 })) as unknown as typeof fetch;
+
+    mockReconcileUsage.mockResolvedValue(new Decimal("0.001"));
+    mockLogRequestAudit.mockResolvedValue(undefined);
+
+    await proxyNonStreamingChat(
+      "https://test.azure.com/chat",
+      {},
+      { model: "gpt-5.4", messages: [] },
+      baseDeployment,
+      { reservationId: "res-789", requestId: "req-789", userId: "user-123" } as any
+    );
+
+    expect(mockLogRequestAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-123",
+        deployment: "test-deployment",
+      })
+    );
+  });
+
   test("calls releaseReservation when usage is missing", async () => {
     const upstreamBody = { id: "chat-3", choices: [] };
     global.fetch = vi.fn(async () =>
@@ -236,6 +309,138 @@ describe("proxyNonStreamingChat", () => {
     );
 
     expect(mockReleaseReservation).toHaveBeenCalledWith("res-456");
+    expect(mockReconcileUsage).not.toHaveBeenCalled();
+  });
+});
+
+describe("proxyStreamingChat", () => {
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+    mockReleaseReservation.mockReset();
+    mockReconcileUsage.mockReset();
+    mockLogRequestAudit.mockReset();
+    mockRecordFailure.mockReset();
+    mockRecordSuccess.mockReset();
+    mockWithRetry.mockImplementation((fn: () => unknown) => fn());
+    resetCircuitBreaker("test-deployment");
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  test("releases quota reservation on streaming upstream failure", async () => {
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ error: "server error" }), { status: 500 })) as unknown as typeof fetch;
+    mockReleaseReservation.mockResolvedValue(undefined);
+
+    await proxyStreamingChat(
+      "https://test.azure.com/chat",
+      {},
+      { model: "gpt-5.4", messages: [] },
+      baseDeployment,
+      { reservationId: "res-stream-failure", requestId: "req-stream-failure", userId: "user-123" } as any
+    );
+
+    expect(mockReleaseReservation).toHaveBeenCalledWith("res-stream-failure");
+  });
+
+  test("returns 500 and releases reservation when upstream has no response body", async () => {
+    global.fetch = vi.fn(async () => new Response(null, { status: 200 })) as unknown as typeof fetch;
+    mockReleaseReservation.mockResolvedValue(undefined);
+
+    const response = await proxyStreamingChat(
+      "https://test.azure.com/chat",
+      {},
+      { model: "gpt-5.4", messages: [] },
+      baseDeployment,
+      { reservationId: "res-nobody", requestId: "req-nobody", userId: "user-123" } as any
+    );
+
+    expect(response.status).toBe(500);
+    expect(mockReleaseReservation).toHaveBeenCalledWith("res-nobody");
+  });
+
+  test("extracts usage from stream, reconciles quota, and audits authenticated user", async () => {
+    const chunks = [
+      'data: {"id":"c1","choices":[{"index":0,"delta":{"content":"hi"}}]}\n\n',
+      'data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}\n\n',
+      "data: [DONE]\n\n",
+    ];
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(encoder.encode(chunk));
+        }
+        controller.close();
+      },
+    });
+
+    global.fetch = vi.fn(async () =>
+      new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })) as unknown as typeof fetch;
+    mockReconcileUsage.mockResolvedValue(new Decimal("0.000321"));
+    mockLogRequestAudit.mockResolvedValue(undefined);
+
+    const response = await proxyStreamingChat(
+      "https://test.azure.com/chat",
+      {},
+      { model: "gpt-5.4", messages: [], stream: true },
+      baseDeployment,
+      { reservationId: "res-stream-ok", requestId: "req-stream-ok", userId: "user-stream" } as any
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).not.toBeNull();
+    // Drain the stream so the transform runs to completion.
+    const text = await response.text();
+    expect(text).toContain("finish_reason");
+
+    // Allow microtasks for the async reconcile/audit chain to settle.
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(mockReconcileUsage).toHaveBeenCalledWith(
+      "res-stream-ok",
+      expect.objectContaining({ prompt_tokens: 7, completion_tokens: 3 }),
+      "gpt-test"
+    );
+    expect(mockLogRequestAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user-stream", deployment: "test-deployment" })
+    );
+    // Usage present → no spurious release.
+    expect(mockReleaseReservation).not.toHaveBeenCalled();
+  });
+
+  test("releases reservation on stream end when upstream never emits usage", async () => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode('data: {"id":"c1","choices":[{"index":0,"delta":{"content":"hi"}}]}\n\n')
+        );
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
+
+    global.fetch = vi.fn(async () =>
+      new Response(body, { status: 200 })) as unknown as typeof fetch;
+    mockReleaseReservation.mockResolvedValue(undefined);
+
+    const response = await proxyStreamingChat(
+      "https://test.azure.com/chat",
+      {},
+      { model: "gpt-5.4", messages: [], stream: true },
+      baseDeployment,
+      { reservationId: "res-no-usage", requestId: "req-no-usage", userId: "user-1" } as any
+    );
+
+    await response.text();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(mockReleaseReservation).toHaveBeenCalledWith("res-no-usage");
     expect(mockReconcileUsage).not.toHaveBeenCalled();
   });
 });

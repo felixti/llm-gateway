@@ -7,6 +7,7 @@ import { logPatRevocation } from '@/db/data-access';
 import { redis } from '@/db/redis';
 import { requireAdminScopeMiddleware } from '@/middleware/admin-scope';
 import { authMiddleware } from '@/middleware/auth';
+import { logger } from '@/observability/logger';
 import { incrementPatRevocationsTotal } from '@/observability/metrics';
 import { hashJtiForBlocklist } from '@/utils/auth';
 import { errorForProtocol } from '@/utils/errors';
@@ -72,7 +73,7 @@ adminRoutes.post('/pat/revoke', async (c) => {
       reason,
     });
   } catch (err) {
-    console.error('Failed to log PAT revocation to PostgreSQL:', err);
+    logger.warn({ err, patId: pat_id, revokedBy }, 'Failed to log PAT revocation to PostgreSQL');
     // Continue anyway - Redis blocklist is the primary mechanism
   }
 

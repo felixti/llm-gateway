@@ -4,7 +4,6 @@
  */
 
 import type { DeploymentConfig } from '@/config/deployments';
-import type { Context } from 'hono';
 import type { ZodSchema } from 'zod';
 
 /**
@@ -47,6 +46,13 @@ export interface RequestHandlerDeps {
   ) => Record<string, unknown>;
 }
 
+export interface ProxyRequestContext {
+  reservationId: string;
+  requestId: string;
+  userId?: string;
+  abortSignal?: AbortSignal;
+}
+
 /**
  * Streaming proxy function signature
  */
@@ -55,8 +61,7 @@ export type ProxyStreamingFn = (
   headers: Record<string, string>,
   body: Record<string, unknown>,
   deployment: DeploymentConfig,
-  reservationId: string,
-  requestId: string
+  context: ProxyRequestContext
 ) => Promise<Response>;
 
 export type ProxyNonStreamingFn = (
@@ -64,6 +69,5 @@ export type ProxyNonStreamingFn = (
   headers: Record<string, string>,
   body: Record<string, unknown>,
   deployment: DeploymentConfig,
-  reservationId: string,
-  requestId: string
+  context: ProxyRequestContext
 ) => Promise<Response>;

@@ -128,7 +128,7 @@ export function validatePricingData(): boolean {
   return (
     pricingData.version !== undefined &&
     pricingData.currency === 'USD' &&
-    Object.keys(pricingData.models).length === 8
+    Object.keys(pricingData.models).length === 9
   );
 }
 
