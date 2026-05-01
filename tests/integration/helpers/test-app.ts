@@ -19,9 +19,25 @@ import { MockRedis } from './mock-redis';
 let isRedisMocked = false;
 let originalFetch: typeof fetch | undefined;
 
+type RedisMockSurface = Pick<
+  MockRedis,
+  | 'get'
+  | 'set'
+  | 'setex'
+  | 'eval'
+  | 'hget'
+  | 'hgetall'
+  | 'hset'
+  | 'pipeline'
+  | 'incrbyfloat'
+  | 'del'
+  | 'ping'
+  | 'scan'
+  | 'ttl'
+>;
+
 function bindMockRedis(mock: MockRedis): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const r = redis as any;
+  const r = redis as unknown as RedisMockSurface;
   r.get = mock.get.bind(mock);
   r.set = mock.set.bind(mock);
   r.setex = mock.setex.bind(mock);
@@ -39,9 +55,9 @@ function bindMockRedis(mock: MockRedis): void {
 
 function setupMockFetch(): void {
   if (originalFetch) return;
-  originalFetch = global.fetch;
+  originalFetch = globalThis.fetch;
 
-  (global as any).fetch = async (
+  const mockFetch = async (
     input: Parameters<typeof fetch>[0],
     _init?: RequestInit
   ): Promise<Response> => {
@@ -75,6 +91,10 @@ function setupMockFetch(): void {
     // Fallback: return 404 for unhandled URLs
     return new Response('Not Found', { status: 404 });
   };
+
+  globalThis.fetch = Object.assign(mockFetch, {
+    preconnect: originalFetch.preconnect,
+  });
 }
 
 /**

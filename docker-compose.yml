@@ -22,7 +22,8 @@ services:
       - AZURE_ENTRA_CLIENT_ID=${AZURE_ENTRA_CLIENT_ID}
       - AZURE_ENTRA_CLIENT_SECRET=${AZURE_ENTRA_CLIENT_SECRET}
       # Redis
-      - REDIS_URL=redis://redis:6379
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       # PostgreSQL
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/llm_gateway
       # PAT Secret
