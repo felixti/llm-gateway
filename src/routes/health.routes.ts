@@ -4,12 +4,33 @@
  * GET /ready - critical dependencies check (Redis + Azure connectivity)
  */
 
+import { timingSafeEqual } from 'node:crypto';
+import { env } from '@/config/env';
 import { isPostgresHealthy } from '@/db/client';
 import { isRedisHealthy } from '@/db/redis';
 import { getPrometheusMetrics } from '@/observability/metrics';
 import { getCachedDeploymentHealth } from '@/services/health.service';
 import { Scalar } from '@scalar/hono-api-reference';
 import { Hono } from 'hono';
+
+const BEARER_PREFIX = 'Bearer ';
+
+function metricsBearerAuthorized(authHeader: string | undefined, expected: string): boolean {
+  if (!authHeader || !authHeader.startsWith(BEARER_PREFIX)) {
+    return false;
+  }
+  const token = authHeader.slice(BEARER_PREFIX.length);
+  try {
+    const a = Buffer.from(token, 'utf8');
+    const b = Buffer.from(expected, 'utf8');
+    if (a.length !== b.length) {
+      return false;
+    }
+    return timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
 
 // Lazy-load OpenAPI spec to avoid bundling it into hot paths
 let openApiSpec: Record<string, unknown> | null = null;
@@ -66,8 +87,12 @@ healthRoutes.get('/ready', async (c) => {
     checks.postgres = false;
   }
 
-  const cachedHealth = getCachedDeploymentHealth();
-  checks.deployments = Array.from(cachedHealth.values()).some((h) => h.healthy);
+  if (env.HEALTH_CHECK_DEPLOYMENTS_ENABLED) {
+    const cachedHealth = getCachedDeploymentHealth();
+    checks.deployments = Array.from(cachedHealth.values()).some((h) => h.healthy);
+  } else {
+    checks.deployments = true;
+  }
 
   const isReady = checks.redis && checks.postgres && checks.deployments;
 
@@ -103,6 +128,10 @@ healthRoutes.get('/openapi.json', async (c) => {
  * Prometheus-compatible metrics endpoint
  */
 healthRoutes.get('/metrics', (c) => {
+  const bearer = env.METRICS_SCRAPE_BEARER;
+  if (bearer && !metricsBearerAuthorized(c.req.header('Authorization'), bearer)) {
+    return c.text('Unauthorized', 401);
+  }
   const metrics = getPrometheusMetrics();
   return c.text(metrics, 200, {
     'Content-Type': 'text/plain; version=0.0.4',

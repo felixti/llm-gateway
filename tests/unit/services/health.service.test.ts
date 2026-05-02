@@ -20,6 +20,18 @@ const deployment: DeploymentConfig = {
   enabled: true,
 };
 
+const foundryDeployment: DeploymentConfig = {
+  name: 'kimi-k2.5',
+  modelAlias: 'kimi-k2.5',
+  modelFamily: 'kimi',
+  protocolFamily: 'chat-completions',
+  azureModelName: 'FW-Kimi-K2.5',
+  endpoint: 'https://example.foundry.azure.com',
+  authConfig: { type: 'api-key', apiKey: 'test-foundry-key', keyHeader: 'api-key' },
+  apiVersion: '2024-06-01',
+  enabled: true,
+};
+
 describe('checkDeploymentHealth', () => {
   let originalFetch: typeof globalThis.fetch;
   let originalEval: typeof redis.eval;
@@ -53,6 +65,78 @@ describe('checkDeploymentHealth', () => {
     expect(performance.now() - start).toBeGreaterThanOrEqual(20);
     expect(health.healthy).toBe(false);
     expect(health.error).toBe('network down');
+  });
+
+  it('uses Azure OpenAI path for gpt deployments', async () => {
+    let capturedUrl = '';
+    globalThis.fetch = Object.assign(
+      async (input: string | URL | Request, _init?: RequestInit) => {
+        capturedUrl = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        return new Response('{}', { status: 200 });
+      },
+      { preconnect: originalFetch.preconnect }
+    ) as typeof fetch;
+
+    redis.eval = (async () => 'OK') as typeof redis.eval;
+
+    await checkDeploymentHealth(deployment);
+
+    const url = new URL(capturedUrl);
+    expect(url.pathname).toBe('/openai/deployments/gpt-5.4-global/chat/completions');
+  });
+
+  it('uses Foundry /models path for kimi deployments', async () => {
+    let capturedUrl = '';
+    globalThis.fetch = Object.assign(
+      async (input: string | URL | Request, _init?: RequestInit) => {
+        capturedUrl = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        return new Response('{}', { status: 200 });
+      },
+      { preconnect: originalFetch.preconnect }
+    ) as typeof fetch;
+
+    redis.eval = (async () => 'OK') as typeof redis.eval;
+
+    await checkDeploymentHealth(foundryDeployment);
+
+    const url = new URL(capturedUrl);
+    expect(url.pathname).toBe('/models/chat/completions');
+  });
+
+  it('sends azureModelName for Foundry chat-completions health probes', async () => {
+    let capturedBody = '';
+    globalThis.fetch = Object.assign(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        capturedBody = typeof init?.body === 'string' ? init.body : '';
+        return new Response('{}', { status: 200 });
+      },
+      { preconnect: originalFetch.preconnect }
+    ) as typeof fetch;
+
+    redis.eval = (async () => 'OK') as typeof redis.eval;
+
+    await checkDeploymentHealth(foundryDeployment);
+
+    const body = JSON.parse(capturedBody);
+    expect(body.model).toBe('FW-Kimi-K2.5');
+  });
+
+  it('sends deployment.name for non-Foundry health probes', async () => {
+    let capturedBody = '';
+    globalThis.fetch = Object.assign(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        capturedBody = typeof init?.body === 'string' ? init.body : '';
+        return new Response('{}', { status: 200 });
+      },
+      { preconnect: originalFetch.preconnect }
+    ) as typeof fetch;
+
+    redis.eval = (async () => 'OK') as typeof redis.eval;
+
+    await checkDeploymentHealth(deployment);
+
+    const body = JSON.parse(capturedBody);
+    expect(body.model).toBe('gpt-5.4-global');
   });
 });
 

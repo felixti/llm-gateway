@@ -1,6 +1,7 @@
 import { env } from '@/config/env';
+import { resolveOtlpHttpMetricsUrl } from '@/observability/otlp-http-url';
 import { metrics } from '@opentelemetry/api';
-import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-grpc';
+import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 
 let meterProvider: MeterProvider | null = null;
@@ -14,6 +15,8 @@ const inMemoryCounters: Record<string, number> = {
   quota_exceeded_429_total: 0,
   rate_limit_429_total: 0,
   pat_revocations_total: 0,
+  quota_orphan_cleaned_total: 0,
+  quota_reservation_null_total: 0,
 };
 
 const inMemoryGauges: Record<string, number> = {
@@ -49,11 +52,11 @@ export function getPrometheusMetrics(): string {
 }
 
 function createMetricExporter(): OTLPMetricExporter | null {
-  if (!env.OTEL_EXPORTER_OTLP_GRPC_ENDPOINT) {
+  if (!env.OTEL_EXPORTER_OTLP_ENDPOINT) {
     return null;
   }
   return new OTLPMetricExporter({
-    url: env.OTEL_EXPORTER_OTLP_GRPC_ENDPOINT,
+    url: resolveOtlpHttpMetricsUrl(env.OTEL_EXPORTER_OTLP_ENDPOINT),
   });
 }
 
@@ -177,6 +180,14 @@ export function incrementPatRevocationsTotal(): void {
 export function incrementAzureRateLimitHits(): void {
   azureRateLimitHitsTotal.add(1);
   incrementCounter('azure_rate_limit_hits_total');
+}
+
+export function incrementQuotaOrphanCleaned(): void {
+  incrementCounter('quota_orphan_cleaned_total');
+}
+
+export function incrementQuotaReservationNull(): void {
+  incrementCounter('quota_reservation_null_total');
 }
 
 export function setQuotaRemainingRatio(ratio: number): void {

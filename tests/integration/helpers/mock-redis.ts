@@ -26,9 +26,33 @@ export class MockRedis {
       return [1, 0];
     }
 
-    // Quota check-and-reserve scripts
     if (script.includes('monthly_budget') || script.includes('reserved')) {
-      return [1, 0];
+      const quotaKey = args[0] as string;
+      const reservedKey = args[1] as string;
+      const reservationKey = args[2] as string;
+      const hashKey = args[3] as string;
+      const cost = Number(args[4]);
+      const reservationData = args[5] as string;
+      const reservationId = args[8] as string;
+
+      const budgetRaw = this.hashes.get(quotaKey)?.get('budget') || '50';
+      const defaultBudget = Number(args[6]);
+      const budget = Number(budgetRaw) || defaultBudget;
+      const spent = Number(this.hashes.get(quotaKey)?.get('spent') || '0');
+      const reserved = Number(this.store.get(reservedKey) || '0');
+
+      if (spent + reserved + cost > budget) {
+        return [0, 'insufficient_quota'];
+      }
+
+      this.store.set(reservationKey, reservationData);
+      this.incrbyfloat(reservedKey, cost);
+      if (!this.hashes.has(hashKey)) {
+        this.hashes.set(hashKey, new Map());
+      }
+      this.hashes.get(hashKey)!.set(reservationId, reservationData);
+
+      return [1, 'ok'];
     }
 
     // Circuit breaker: record failure
@@ -145,6 +169,10 @@ export class MockRedis {
         cmds.push({ method: 'del', args: keys });
         return builder;
       },
+      hdel(key: string, ...fields: string[]) {
+        cmds.push({ method: 'hdel', args: [key, ...fields] });
+        return builder;
+      },
       exec: async (): Promise<unknown[][]> => {
         const results: unknown[][] = [];
         for (const cmd of cmds) {
@@ -176,6 +204,18 @@ export class MockRedis {
               }
             }
             results.push([null, count]);
+          } else if (cmd.method === 'hdel') {
+            const key = cmd.args[0] as string;
+            const fields = cmd.args.slice(1) as string[];
+            const map = this.hashes.get(key);
+            let deleted = 0;
+            if (map) {
+              for (const field of fields) {
+                if (map.delete(field)) deleted++;
+              }
+              if (map.size === 0) this.hashes.delete(key);
+            }
+            results.push([null, deleted]);
           }
         }
         return results;
@@ -205,8 +245,46 @@ export class MockRedis {
     return 'PONG';
   }
 
-  async scan(_cursor: string, ..._args: unknown[]): Promise<[string, string[]]> {
-    return ['0', []];
+  async scan(_cursor: string, ...args: unknown[]): Promise<[string, string[]]> {
+    let pattern = '*';
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === 'MATCH' && i + 1 < args.length) {
+        pattern = String(args[i + 1]);
+      }
+    }
+
+    const regex = new RegExp(pattern.replace(/\*/g, '.*'));
+    const keys: string[] = [];
+
+    for (const key of this.store.keys()) {
+      if (regex.test(key)) keys.push(key);
+    }
+    for (const key of this.hashes.keys()) {
+      if (regex.test(key)) keys.push(key);
+    }
+
+    return ['0', keys];
+  }
+
+  async exists(...keys: string[]): Promise<number> {
+    let count = 0;
+    for (const key of keys) {
+      if (this.store.has(key) || this.hashes.has(key)) count++;
+    }
+    return count;
+  }
+
+  async hdel(key: string, ...fields: string[]): Promise<number> {
+    const map = this.hashes.get(key);
+    if (!map) return 0;
+    let deleted = 0;
+    for (const field of fields) {
+      if (map.delete(field)) deleted++;
+    }
+    if (map.size === 0) {
+      this.hashes.delete(key);
+    }
+    return deleted;
   }
 
   async ttl(_key: string): Promise<number> {

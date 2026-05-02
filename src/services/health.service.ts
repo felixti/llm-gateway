@@ -5,6 +5,7 @@
 
 import {
   type DeploymentConfig,
+  FOUNDRY_FAMILIES,
   getAllDeployments,
   getDeploymentByAlias,
 } from '@/config/deployments';
@@ -23,6 +24,25 @@ export interface DeploymentHealth {
   error?: string;
 }
 
+function buildChatCompletionsHealthBody(deployment: DeploymentConfig): Record<string, unknown> {
+  const model = FOUNDRY_FAMILIES.includes(deployment.modelFamily)
+    ? deployment.azureModelName || deployment.name
+    : deployment.name;
+  return {
+    model,
+    messages: [{ role: 'user', content: 'Health check' }],
+    max_tokens: 1,
+  };
+}
+
+function buildAnthropicHealthBody(deployment: DeploymentConfig): Record<string, unknown> {
+  return {
+    model: deployment.name,
+    max_tokens: 1,
+    messages: [{ role: 'user', content: 'Health check' }],
+  };
+}
+
 /**
  * Perform a lightweight health check for chat-completions (OpenAI-compatible) deployment
  */
@@ -33,7 +53,11 @@ async function checkChatCompletionsHealth(
   const headers = await authManager.getAuthHeadersForDeployment(deployment);
 
   const url = new URL(deployment.endpoint);
-  url.pathname = `/openai/deployments/${deployment.azureModelName}/chat/completions`;
+  if (FOUNDRY_FAMILIES.includes(deployment.modelFamily)) {
+    url.pathname = '/models/chat/completions';
+  } else {
+    url.pathname = `/openai/deployments/${deployment.name}/chat/completions`;
+  }
   url.searchParams.set('api-version', deployment.apiVersion);
 
   const startTime = Date.now();
@@ -44,20 +68,14 @@ async function checkChatCompletionsHealth(
       ...headers,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model: deployment.azureModelName,
-      messages: [{ role: 'user', content: 'ping' }],
-      max_tokens: 1,
-    }),
+    body: JSON.stringify(buildChatCompletionsHealthBody(deployment)),
     signal: AbortSignal.timeout(env.HEALTH_CHECK_TIMEOUT_MS),
   });
 
   const latencyMs = Date.now() - startTime;
 
-  // 400 Bad Request is acceptable - means deployment is reachable
-  // 401/403 would indicate auth issues which we still consider "reachable"
-  if (response.status >= 500) {
-    throw new Error(`Server error: ${response.status}`);
+  if (!response.ok) {
+    throw new Error(`Upstream returned error: ${response.status}`);
   }
 
   return { latencyMs };
@@ -73,7 +91,7 @@ async function checkAnthropicMessagesHealth(
   const headers = await authManager.getAuthHeadersForDeployment(deployment);
 
   const url = new URL(deployment.endpoint);
-  url.pathname = `/openai/deployments/${deployment.azureModelName}/messages`;
+  url.pathname = '/anthropic/v1/messages';
   url.searchParams.set('api-version', deployment.apiVersion);
 
   const startTime = Date.now();
@@ -85,19 +103,14 @@ async function checkAnthropicMessagesHealth(
       'Content-Type': 'application/json',
       'anthropic-version': '2023-06-01',
     },
-    body: JSON.stringify({
-      model: deployment.azureModelName,
-      messages: [{ role: 'user', content: 'ping' }],
-      max_tokens: 1,
-    }),
+    body: JSON.stringify(buildAnthropicHealthBody(deployment)),
     signal: AbortSignal.timeout(env.HEALTH_CHECK_TIMEOUT_MS),
   });
 
   const latencyMs = Date.now() - startTime;
 
-  // 400 Bad Request is acceptable - means deployment is reachable
-  if (response.status >= 500) {
-    throw new Error(`Server error: ${response.status}`);
+  if (!response.ok) {
+    throw new Error(`Upstream returned error: ${response.status}`);
   }
 
   return { latencyMs };
@@ -155,6 +168,12 @@ export async function checkDeploymentHealth(
 export async function getDeploymentHealth(
   deploymentName: string
 ): Promise<DeploymentHealth | null> {
+  if (!env.HEALTH_CHECK_DEPLOYMENTS_ENABLED) {
+    const deployment = getDeploymentByAlias(deploymentName);
+    return deployment
+      ? { deploymentName: deployment.name, healthy: false, latencyMs: 0, lastCheck: null }
+      : null;
+  }
   const deployment = getDeploymentByAlias(deploymentName);
   if (!deployment) {
     return null;
@@ -172,6 +191,10 @@ const healthCache = new Map<string, DeploymentHealth>();
  * {@link getCachedDeploymentHealth} to avoid billable upstream calls.
  */
 export async function getAllDeploymentHealth(): Promise<Map<string, DeploymentHealth>> {
+  if (!env.HEALTH_CHECK_DEPLOYMENTS_ENABLED) {
+    return healthCache;
+  }
+
   const deployments = getAllDeployments();
   const healthMap = new Map<string, DeploymentHealth>();
 
@@ -212,7 +235,11 @@ let healthCheckInterval: ReturnType<typeof setInterval> | null = null;
  * Kicks off an immediate probe so `/ready` has data before the first interval.
  */
 export function startHealthChecks(): void {
-  if (healthCheckInterval !== null || !env.HEALTH_CHECK_ENABLED) {
+  if (
+    healthCheckInterval !== null ||
+    !env.HEALTH_CHECK_ENABLED ||
+    !env.HEALTH_CHECK_DEPLOYMENTS_ENABLED
+  ) {
     return;
   }
 

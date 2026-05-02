@@ -5,6 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'bun:test';
 import { Decimal } from 'decimal.js';
+import * as metrics from '../../../src/observability/metrics';
 import { redis } from '../../../src/db/redis';
 import { MockRedis } from '../../integration/helpers/mock-redis';
 
@@ -13,6 +14,8 @@ let policyResolver: () => Promise<{ monthly_budget_usd: string; hard_limit: bool
 let policyCalls = 0;
 
 vi.mock('../../../src/db/data-access', () => ({
+  resolveUserId: vi.fn(),
+  logRequestAudit: vi.fn(),
   getUserQuotaPolicyByPatSubject: async () => {
     policyCalls += 1;
     return policyResolver();
@@ -95,7 +98,89 @@ describe('quota.service Postgres policy sync', () => {
     const { checkAndReserve } = await import('../../../src/services/quota.service');
     const result = await checkAndReserve('user-3', new Decimal('0.001'));
     expect(result.allowed).toBe(true);
-    expect(result.reservationId).toBeDefined();
+    expect(result.reservationId).toMatch(/^res_[0-9a-f-]{36}$/i);
+  });
+
+  test('checkAndReserve passes TTL to Redis eval script', async () => {
+    policyResolver = async () => ({
+      monthly_budget_usd: '50',
+      hard_limit: true,
+    });
+
+    const evalSpy = vi.fn(async () => [1, 'ok']);
+    const r = redis as unknown as { eval: (...args: unknown[]) => Promise<unknown> };
+    r.eval = evalSpy;
+
+    const { checkAndReserve } = await import('../../../src/services/quota.service');
+    const result = await checkAndReserve('user-ttl', new Decimal('0.001'));
+
+    expect(result.allowed).toBe(true);
+    expect(evalSpy).toHaveBeenCalledTimes(1);
+
+    const callArgs = evalSpy.mock.calls[0] as unknown[];
+    expect(callArgs[9]).toBe(300);
+
+    const script = callArgs[0] as string;
+    expect(script).toContain("'EX'");
+    expect(script).toContain('hset');
+  });
+});
+
+describe('quota.service edge cases', () => {
+  test('checkAndReserve returns denied when Redis eval fails', async () => {
+    policyResolver = async () => ({
+      monthly_budget_usd: '100',
+      hard_limit: true,
+    });
+    bindMockRedis(new MockRedis());
+    const r = redis as unknown as { eval: (...args: unknown[]) => Promise<unknown> };
+    r.eval = async () => {
+      throw new Error('redis eval');
+    };
+
+    const { checkAndReserve } = await import('../../../src/services/quota.service');
+    const result = await checkAndReserve('user-eval-fail', new Decimal('0.01'));
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe('Reservation failed');
+  });
+
+  test('reconcileUsage returns zero when reservation is missing', async () => {
+    const { reconcileUsage } = await import('../../../src/services/quota.service');
+    const cost = await reconcileUsage(
+      'res_missing',
+      { prompt_tokens: 1, completion_tokens: 1 },
+      'gpt-5-mini'
+    );
+    expect(cost.toNumber()).toBe(0);
+  });
+
+  test('releaseReservation is a no-op when key is missing', async () => {
+    const { releaseReservation } = await import('../../../src/services/quota.service');
+    await expect(releaseReservation('res_never_existed')).resolves.toBeUndefined();
+  });
+
+  test('syncQuotaPolicyFromPostgres increments metric when policy lookup throws', async () => {
+    const spy = vi.spyOn(metrics, 'incrementQuotaHydrationFailures');
+    policyResolver = async () => {
+      throw new Error('postgres unavailable');
+    };
+
+    const { syncQuotaPolicyFromPostgres } = await import('../../../src/services/quota.service');
+    await syncQuotaPolicyFromPostgres('user-pg-throw', '2026-04');
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  test('cleanupOrphanedReservations returns zero when scan fails', async () => {
+    bindMockRedis(new MockRedis());
+    const r = redis as unknown as { scan: (...args: unknown[]) => Promise<unknown> };
+    r.scan = async () => {
+      throw new Error('scan down');
+    };
+
+    const { cleanupOrphanedReservations } = await import('../../../src/services/quota.service');
+    const cleaned = await cleanupOrphanedReservations();
+    expect(cleaned).toBe(0);
   });
 });
 

@@ -26,6 +26,7 @@ export interface QuotaStatus {
 const QUOTA_KEY_PREFIX = 'quota:';
 const RESERVED_KEY_PREFIX = 'reserved:';
 const RESERVATION_KEY_PREFIX = 'reservation:';
+const RESERVATION_HASH_PREFIX = 'reservations_meta:';
 
 const RESERVATION_TTL_SECONDS = env.QUOTA_RESERVATION_TTL_SECONDS;
 const DEFAULT_BUDGET = 50;
@@ -56,8 +57,12 @@ function getReservationKey(reservationId: string): string {
   return `${RESERVATION_KEY_PREFIX}${reservationId}`;
 }
 
+function getReservationHashKey(userId: string, month: string): string {
+  return `${RESERVATION_HASH_PREFIX}${userId}:${month}`;
+}
+
 function generateReservationId(): string {
-  return `res_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+  return `res_${crypto.randomUUID()}`;
 }
 
 /** In tests, Postgres sync is off by default to avoid hanging on DB I/O; CI sets QUOTA_PG_SYNC_IN_TESTS=true */
@@ -96,7 +101,7 @@ export async function syncQuotaPolicyFromPostgres(userId: string, month: string)
     });
   } catch (error) {
     incrementQuotaHydrationFailures();
-    logger.warn('Quota policy sync from Postgres failed; using Redis defaults', { userId, error });
+    logger.warn({ userId, error }, 'Quota policy sync from Postgres failed; using Redis defaults');
   }
 }
 
@@ -104,22 +109,25 @@ const CHECK_AND_RESERVE_SCRIPT = `
   local quotaKey = KEYS[1]
   local reservedKey = KEYS[2]
   local reservationKey = KEYS[3]
+  local hashKey = KEYS[4]
   local cost = tonumber(ARGV[1])
   local reservationData = ARGV[2]
-  local ttl = tonumber(ARGV[3])
-  local defaultBudget = tonumber(ARGV[4])
-  
+  local defaultBudget = tonumber(ARGV[3])
+  local ttl = tonumber(ARGV[4])
+  local reservationId = ARGV[5]
+
   local budget = tonumber(redis.call('hget', quotaKey, 'budget') or defaultBudget)
   local spent = tonumber(redis.call('hget', quotaKey, 'spent') or 0)
   local reserved = tonumber(redis.call('get', reservedKey) or 0)
-  
+
   if spent + reserved + cost > budget then
     return {0, 'insufficient_quota'}
   end
-  
+
   redis.call('incrbyfloat', reservedKey, cost)
-  redis.call('setex', reservationKey, ttl, reservationData)
-  
+  redis.call('set', reservationKey, reservationData, 'EX', ttl)
+  redis.call('hset', hashKey, reservationId, reservationData)
+
   return {1, 'ok'}
 `;
 
@@ -136,19 +144,22 @@ export async function checkAndReserve(
   const quotaKey = getQuotaKey(userId, month);
   const reservedKey = getReservedKey(userId, month);
   const reservationKey = getReservationKey(reservationId);
-  const reservationData = `${costStr}|${userId}|${month}`;
+  const hashKey = getReservationHashKey(userId, month);
+  const reservationData = `${costStr}|${userId}|${month}|${Date.now()}`;
 
   try {
     const result = await redis.eval(
       CHECK_AND_RESERVE_SCRIPT,
-      3,
+      4,
       quotaKey,
       reservedKey,
       reservationKey,
+      hashKey,
       costStr,
       reservationData,
+      DEFAULT_BUDGET,
       RESERVATION_TTL_SECONDS,
-      DEFAULT_BUDGET
+      reservationId
     );
 
     if (Array.isArray(result) && result[0] === 0) {
@@ -164,7 +175,7 @@ export async function checkAndReserve(
       estimatedCost,
     };
   } catch (error) {
-    logger.error('Quota reservation error', { error, userId });
+    logger.error({ error, userId }, 'Quota reservation error');
     return {
       allowed: false,
       reason: 'Reservation failed',
@@ -177,14 +188,45 @@ export async function releaseReservation(reservationId: string): Promise<void> {
 
   const reservationData = await redis.get(reservationKey);
   if (!reservationData) {
+    const nullData = await tryRecoverFromHash(reservationId);
+    if (nullData) {
+      logger.warn(
+        { reservationId, userId: nullData.userId, month: nullData.month },
+        'Released expired reservation via hash fallback'
+      );
+    }
     return;
   }
 
-  const [amountStr, userId, month] = reservationData.split('|');
+  const parts = reservationData.split('|');
+  const amountStr = parts[0];
+  const userId = parts[1];
+  const month = parts[2];
   const reservedKey = getReservedKey(userId, month);
+  const hashKey = getReservationHashKey(userId, month);
 
   await redis.incrbyfloat(reservedKey, -Number.parseFloat(amountStr));
   await redis.del(reservationKey);
+  await redis.hdel(hashKey, reservationId);
+}
+
+/**
+ * Record actual usage for soft-quota requests that bypassed reservation.
+ * Directly increments the user's spent quota without requiring a reservation.
+ * Used when QUOTA_SOFT_LIMIT_ENABLED=true and user is over budget but still allowed.
+ */
+export async function recordUsageOnly(
+  userId: string,
+  actualUsage: TokenUsage,
+  model: string
+): Promise<Decimal> {
+  const actualCost = calculateCost(actualUsage, model);
+  const month = getCurrentMonth();
+  const quotaKey = getQuotaKey(userId, month);
+
+  await redis.hincrbyfloat(quotaKey, 'spent', actualCost.toString());
+
+  return actualCost;
 }
 
 export async function reconcileUsage(
@@ -196,21 +238,45 @@ export async function reconcileUsage(
 
   const reservationData = await redis.get(reservationKey);
   if (!reservationData) {
+    const nullData = await tryRecoverFromHash(reservationId);
+    if (nullData) {
+      const actualCost = calculateCost(actualUsage, model);
+      const quotaKey = getQuotaKey(nullData.userId, nullData.month);
+      const reservedKey = getReservedKey(nullData.userId, nullData.month);
+      const hashKey = getReservationHashKey(nullData.userId, nullData.month);
+
+      const pipeline = redis.pipeline();
+      pipeline.hincrbyfloat(quotaKey, 'spent', actualCost.toString());
+      pipeline.incrbyfloat(reservedKey, -nullData.amount);
+      pipeline.hdel(hashKey, reservationId);
+      await pipeline.exec();
+
+      logger.warn(
+        { reservationId, userId: nullData.userId, month: nullData.month },
+        'Reconciled expired reservation via hash fallback'
+      );
+      return actualCost;
+    }
     return new Decimal(0);
   }
 
-  const [reservedAmountStr, userId, month] = reservationData.split('|');
+  const parts = reservationData.split('|');
+  const reservedAmountStr = parts[0];
+  const userId = parts[1];
+  const month = parts[2];
 
   const actualCost = calculateCost(actualUsage, model);
   const reservedNum = Number.parseFloat(reservedAmountStr);
 
   const quotaKey = getQuotaKey(userId, month);
   const reservedKey = getReservedKey(userId, month);
+  const hashKey = getReservationHashKey(userId, month);
 
   const pipeline = redis.pipeline();
   pipeline.hincrbyfloat(quotaKey, 'spent', actualCost.toString());
   pipeline.incrbyfloat(reservedKey, -reservedNum);
   pipeline.del(reservationKey);
+  pipeline.hdel(hashKey, reservationId);
   await pipeline.exec();
 
   return actualCost;
@@ -233,7 +299,7 @@ async function safeReadOrNull(op: () => Promise<string | null>): Promise<string 
   try {
     return await op();
   } catch (error) {
-    logger.warn('Quota read failed; falling back to defaults', { error });
+    logger.warn({ error }, 'Quota read failed; falling back to defaults');
     return null;
   }
 }
@@ -283,28 +349,87 @@ export async function setMonthlyBudget(
   });
 }
 
-export async function cleanupOrphanedReservations(): Promise<number> {
-  const pattern = `${RESERVATION_KEY_PREFIX}*`;
-  let cleaned = 0;
-
+async function tryRecoverFromHash(
+  reservationId: string
+): Promise<{ userId: string; month: string; amount: number } | null> {
   try {
     let cursor = '0';
     do {
-      const scanResult = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      const scanResult = await redis.scan(
+        cursor,
+        'MATCH',
+        `${RESERVATION_HASH_PREFIX}*`,
+        'COUNT',
+        100
+      );
       cursor = scanResult[0];
-      const keys = scanResult[1];
+      const hashKeys = scanResult[1];
 
-      for (const key of keys) {
-        const ttl = await redis.ttl(key);
-        if (ttl === -1) {
-          const reservationId = key.replace(RESERVATION_KEY_PREFIX, '');
-          await releaseReservation(reservationId);
-          cleaned++;
+      for (const hashKey of hashKeys) {
+        const data = await redis.hget(hashKey, reservationId);
+        if (data) {
+          const parts = data.split('|');
+          if (parts.length >= 2) {
+            const amount = Number.parseFloat(parts[0]);
+            const userId = parts[1];
+            const month = parts[2] || getCurrentMonth();
+            return { userId, month, amount };
+          }
         }
       }
     } while (cursor !== '0');
   } catch (error) {
-    logger.error('Cleanup error', { error });
+    logger.warn({ error, reservationId }, 'Failed to recover reservation from hash');
+  }
+  return null;
+}
+
+export async function cleanupOrphanedReservations(): Promise<number> {
+  let cleaned = 0;
+
+  const nowMs = Date.now();
+  const ttlMs = RESERVATION_TTL_SECONDS * 1000;
+
+  try {
+    let cursor = '0';
+    do {
+      const scanResult = await redis.scan(
+        cursor,
+        'MATCH',
+        `${RESERVATION_HASH_PREFIX}*`,
+        'COUNT',
+        100
+      );
+      cursor = scanResult[0];
+      const hashKeys = scanResult[1];
+
+      for (const hashKey of hashKeys) {
+        const fields = await redis.hgetall(hashKey);
+        for (const [reservationId, data] of Object.entries(fields)) {
+          const parts = data.split('|');
+          if (parts.length < 3) continue;
+          const amountStr = parts[0];
+          const userId = parts[1];
+          const month = parts[2];
+          const createdAt = parts.length >= 4 ? Number(parts[3]) : 0;
+
+          if (!createdAt || nowMs - createdAt <= ttlMs) continue;
+
+          const exists = await redis.exists(getReservationKey(reservationId));
+          if (exists > 0) continue;
+
+          const reservedKey = getReservedKey(userId, month);
+          const amount = Number.parseFloat(amountStr);
+          if (!Number.isNaN(amount)) {
+            await redis.incrbyfloat(reservedKey, -amount);
+            cleaned++;
+          }
+          await redis.hdel(hashKey, reservationId);
+        }
+      }
+    } while (cursor !== '0');
+  } catch (error) {
+    logger.error({ error }, 'Cleanup error');
   }
 
   return cleaned;
