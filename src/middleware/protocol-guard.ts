@@ -53,7 +53,7 @@ export async function protocolGuardMiddleware(
       body = await c.req.json();
       c.set('parsedBody', body);
     } catch {
-      // Body not JSON, will be handled by route validation
+      return c.json(errorForProtocol(path, 400, 'invalid_request', 'Invalid JSON body'), 400);
     }
   }
 

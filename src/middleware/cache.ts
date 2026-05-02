@@ -1,4 +1,5 @@
 import { redis } from '@/db/redis';
+import { logger } from '@/observability/logger';
 import type { Context, Next } from 'hono';
 
 const CACHE_PREFIX = 'response-cache:';
@@ -34,7 +35,9 @@ export function cacheMiddleware(config: CacheConfig = {}) {
         const data = JSON.parse(cached);
         return c.json(data.body, data.status);
       }
-    } catch {}
+    } catch (error) {
+      logger.warn({ cacheKey, error }, 'Cache read/parse error');
+    }
 
     await next();
 
@@ -42,7 +45,9 @@ export function cacheMiddleware(config: CacheConfig = {}) {
       try {
         const body = await c.res.clone().json();
         await redis.setex(cacheKey, ttl, JSON.stringify({ body, status: 200 }));
-      } catch {}
+      } catch (error) {
+        logger.warn({ cacheKey, error }, 'Cache write error');
+      }
     }
   };
 }

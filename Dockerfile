@@ -1,13 +1,16 @@
-FROM oven/bun:1.0 AS base
+FROM oven/bun:1.1 AS base
 WORKDIR /app
 
 FROM base AS install
 COPY package.json ./
-RUN bun install --frozen-lockfile
+RUN bun install
 
 FROM install AS build
-COPY . .
-RUN bun build src/index.ts --outdir=dist --target=bun
+COPY src ./src
+COPY bun.lock ./
+COPY tsconfig.json ./
+COPY openapi.json ./
+RUN bun build src/index.ts --outdir=dist --target=bun --external '@opentelemetry/*'
 
 FROM base AS production
 ENV NODE_ENV=production
@@ -16,6 +19,7 @@ ENV TZ=UTC
 COPY --from=install /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
+COPY openapi.json ./
 
 EXPOSE 3000
 

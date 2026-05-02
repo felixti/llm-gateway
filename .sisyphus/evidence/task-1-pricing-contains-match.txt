@@ -1,0 +1,6 @@
+PASS: getPricingByPattern('fw-kimi-k2.5') -> *kimi* (expected: *kimi*)
+PASS: getPricingByPattern('fw-glm-5') -> *glm* (expected: *glm*)
+PASS: getPricingByPattern('fw-minimax-m2.5') -> *minimax* (expected: *minimax*)
+PASS: getPricingByPattern('gpt-5-mini-reasoning') -> gpt-5-mini* (expected: gpt-5-mini*)
+PASS: getPricingByPattern('kimi-k2.5-preview') -> *kimi* (expected: *kimi*)
+PASS: getPricingByPattern('unknown-model') -> undefined (expected: undefined)

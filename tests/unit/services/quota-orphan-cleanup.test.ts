@@ -48,7 +48,7 @@ describe('quota service orphan cleanup', () => {
     const hashKey = `reservations_meta:user-1:${month}`;
     const hashData = await redis.hget(hashKey, result.reservationId!);
     expect(hashData).toBeTruthy();
-    expect(hashData).toContain('0.05');
+    expect(hashData).toContain('50000');
   });
 
   test('reconcileUsage cleans up hash entry', async () => {
@@ -87,8 +87,8 @@ describe('quota service orphan cleanup', () => {
     );
 
     expect(cost.toString()).toBe('0.05');
-    expect(await redis.hget(quotaKey, 'spent')).toBe('0.05');
-    expect(Number(await redis.get(reservedKey))).toBe(0);
+    expect(await redis.hget(quotaKey, 'spent')).toBe('50000');
+    expect(Number(await redis.get(reservedKey) || '0')).toBe(0);
     expect(await redis.hget(hashKey, reservationId)).toBeNull();
   });
 
@@ -149,6 +149,6 @@ describe('quota service orphan cleanup', () => {
     expect(cleaned).toBe(0);
 
     const reserved = await redis.get(reservedKey);
-    expect(Number(reserved)).toBe(0.05);
+    expect(Number(reserved)).toBe(50000);
   });
 });

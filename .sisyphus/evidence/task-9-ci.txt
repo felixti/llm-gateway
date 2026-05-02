@@ -1,0 +1,76 @@
+Task 9: Enhance CI Workflow with Matrix Testing, Security Scan, and Coverage Thresholds
+================================================================================
+
+FILES CREATED/MODIFIED:
+  - .github/workflows/ci.yml (NEW)
+  - package.json (MODIFIED: test:coverage:check threshold 85% → 90%)
+
+VALIDATION:
+  - YAML syntax: ✅ Valid (validated with python3 yaml.safe_load)
+
+CI WORKFLOW FEATURES:
+  ✅ Matrix strategy: bun-version: ['1.1.x', 'latest']
+  ✅ Security scan: bun audit step
+  ✅ Coverage thresholds: ≥90% lines, ≥90% functions (Node.js parser)
+  ✅ Integration test job with Redis + Postgres services
+  ✅ Docker build verification step
+  ✅ Concurrency group: ci-${{ github.workflow }}-${{ github.ref }}
+
+JOBS:
+  1. security-scan
+     - Runs on: ubuntu-latest
+     - Steps: checkout, setup-bun (latest), install, bun audit
+
+  2. quality-gate
+     - Matrix: bun ['1.1.x', 'latest']
+     - fail-fast: false
+     - Services: postgres:16-alpine
+     - Steps:
+       * checkout
+       * setup-bun (matrix version)
+       * bun install
+       * bun run lint
+       * bun run typecheck
+       * bun test --coverage
+       * Check coverage thresholds (Node.js inline script)
+         - Parses coverage/bun/index.html
+         - Enforces 90% lines, 90% functions
+       * Upload coverage artifact
+       * PR coverage comment (latest matrix only)
+
+  3. integration-tests
+     - Services: redis:7-alpine + postgres:16-alpine
+     - Steps:
+       * checkout
+       * setup-bun (latest)
+       * bun install
+       * Wait for services (nc health checks)
+       * Setup database (migration.sql)
+       * bun run test:integration
+       * bun run build
+       * Start gateway + smoke tests
+         - /health → 200
+         - /ready → 200
+         - /metrics → 200
+       * Stop gateway
+
+  4. docker-build
+     - Needs: quality-gate
+     - Steps:
+       * checkout
+       * docker/setup-buildx-action@v3
+       * docker build -t llm-gateway:ci
+       * Test container health
+         - Start container
+         - Wait for /health
+         - Verify /health and /ready return 200
+
+PACKAGE.JSON CHANGES:
+  - test:coverage:check: "bun test --coverage --coverage-threshold=90"
+  - (was: --coverage-threshold=85)
+
+NOTES:
+  - Existing workflows (test.yml, contract.yml, canary.yml) preserved
+  - No K8s deployment added
+  - No release automation added
+  - Coverage threshold check uses inline Node.js for reliability

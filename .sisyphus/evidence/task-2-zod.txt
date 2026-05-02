@@ -1,0 +1,7 @@
+=== Task 2: Zod passthrough + forced stream_options ===
+
+=== Proxy test run ===
+bun test v1.3.13 (bf2e2cec)
+
+=== Chat route test run ===
+bun test v1.3.13 (bf2e2cec)

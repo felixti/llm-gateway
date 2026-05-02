@@ -443,4 +443,72 @@ describe("proxyStreamingChat", () => {
     expect(mockReleaseReservation).toHaveBeenCalledWith("res-no-usage");
     expect(mockReconcileUsage).not.toHaveBeenCalled();
   });
+
+  test("forces stream_options.include_usage=true in upstream body", async () => {
+    let capturedBody: string | null = null;
+    const encoder = new TextEncoder();
+    const streamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode('data: {"id":"c1","choices":[{"index":0,"delta":{"content":"hi"}}]}\n\n')
+        );
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
+
+    global.fetch = vi.fn(async (_url: string, opts: RequestInit) => {
+      capturedBody = opts.body as string;
+      return new Response(streamBody, { status: 200 });
+    }) as unknown as typeof fetch;
+    mockReleaseReservation.mockResolvedValue(undefined);
+
+    await proxyStreamingChat(
+      "https://test.azure.com/chat",
+      {},
+      { model: "gpt-5.4", messages: [], stream: true },
+      baseDeployment,
+      { reservationId: "res-stream-opts", requestId: "req-stream-opts", userId: "user-1" } as any
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(capturedBody).not.toBeNull();
+    const parsed = JSON.parse(capturedBody!);
+    expect(parsed.stream).toBe(true);
+    expect(parsed.stream_options).toEqual({ include_usage: true });
+  });
+
+  test("forces stream_options.include_usage=true even when caller omits it", async () => {
+    let capturedBody: string | null = null;
+    const encoder = new TextEncoder();
+    const streamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode('data: {"id":"c1","choices":[{"index":0,"delta":{"content":"hi"}}]}\n\n')
+        );
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
+
+    global.fetch = vi.fn(async (_url: string, opts: RequestInit) => {
+      capturedBody = opts.body as string;
+      return new Response(streamBody, { status: 200 });
+    }) as unknown as typeof fetch;
+    mockReleaseReservation.mockResolvedValue(undefined);
+
+    await proxyStreamingChat(
+      "https://test.azure.com/chat",
+      {},
+      { model: "gpt-5.4", messages: [], stream: true, stream_options: {} },
+      baseDeployment,
+      { reservationId: "res-stream-opts2", requestId: "req-stream-opts2", userId: "user-1" } as any
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    const parsed = JSON.parse(capturedBody!);
+    expect(parsed.stream_options).toEqual({ include_usage: true });
+  });
 });

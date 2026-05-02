@@ -6,6 +6,7 @@ import { describe, expect, it, vi, beforeEach, beforeAll } from 'bun:test';
 import { Hono } from 'hono';
 import { createRequestHandler } from '@/routes/factories/request-handler.factory';
 import { createRequestHandlerDeps, mockDeployment, testSchema } from './test-helpers';
+import type { DeploymentConfig } from '@/config/deployments';
 
 // Access mocked modules
 const mockGetDeploymentByAlias = vi.fn();
@@ -13,10 +14,12 @@ const mockIsRequestAllowed = vi.fn();
 const mockGetAuthHeaders = vi.fn();
 const mockProxyStreaming = vi.fn();
 const mockProxyNonStreaming = vi.fn();
+const mockGetFallbackChain = vi.fn();
 
 // Set up mocks BEFORE importing the factory
 vi.mock('@/config/deployments', () => ({
   getDeploymentByAlias: (...args: unknown[]) => mockGetDeploymentByAlias(...args),
+  getFallbackChain: (...args: unknown[]) => mockGetFallbackChain(...args),
 }));
 
 vi.mock('@/services/azure-auth', () => ({
@@ -44,6 +47,7 @@ describe('Request Handler Factory', () => {
     mockGetAuthHeaders.mockResolvedValue({ Authorization: 'Bearer test' });
     mockProxyStreaming.mockResolvedValue(new Response());
     mockProxyNonStreaming.mockResolvedValue(new Response());
+    mockGetFallbackChain.mockReturnValue([]);
   });
 
   describe('createRequestHandler', () => {
@@ -228,6 +232,159 @@ describe('Request Handler Factory', () => {
 
       expect(mockProxyStreaming).toHaveBeenCalled();
       expect(mockProxyNonStreaming).not.toHaveBeenCalled();
+    });
+
+    it('should attempt fallback when primary non-streaming proxy returns non-ok response', async () => {
+      const fallbackDeployment: DeploymentConfig = {
+        ...mockDeployment,
+        name: 'test-fallback',
+        modelAlias: 'fallback-model',
+        fallbackDeployment: undefined,
+      };
+      const primaryDeployment: DeploymentConfig = {
+        ...mockDeployment,
+        fallbackDeployment: 'test-fallback',
+      };
+
+      mockGetDeploymentByAlias.mockReturnValue(primaryDeployment);
+      mockGetFallbackChain.mockReturnValue([fallbackDeployment]);
+      mockIsRequestAllowed.mockReturnValue(true);
+      mockGetAuthHeaders.mockResolvedValue({ Authorization: 'Bearer test' });
+
+      const primaryResponse = new Response(
+        JSON.stringify({ error: { message: 'upstream error' } }),
+        { status: 502 }
+      );
+      const fallbackResponse = new Response(
+        JSON.stringify({ choices: [] }),
+        { status: 200 }
+      );
+
+      let proxyCallCount = 0;
+      const proxyFn = vi.fn().mockImplementation(async () => {
+        proxyCallCount++;
+        if (proxyCallCount === 1) return primaryResponse;
+        return fallbackResponse;
+      });
+
+      const app = new Hono();
+      const deps = createRequestHandlerDeps();
+      deps.proxyNonStreaming = proxyFn;
+      deps.proxyStreaming = vi.fn().mockResolvedValue(
+        new Response(null, { status: 500 })
+      );
+      const handler = createRequestHandler(deps);
+      app.post('/', handler);
+
+      const res = await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'test-model', messages: [], stream: false }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(proxyFn).toHaveBeenCalledTimes(2);
+    });
+
+    it('should not attempt fallback for streaming requests', async () => {
+      const fallbackDeployment: DeploymentConfig = {
+        ...mockDeployment,
+        name: 'test-fallback',
+        modelAlias: 'fallback-model',
+        fallbackDeployment: undefined,
+      };
+      const primaryDeployment: DeploymentConfig = {
+        ...mockDeployment,
+        fallbackDeployment: 'test-fallback',
+      };
+
+      mockGetDeploymentByAlias.mockReturnValue(primaryDeployment);
+      mockGetFallbackChain.mockReturnValue([fallbackDeployment]);
+      mockIsRequestAllowed.mockReturnValue(true);
+      mockGetAuthHeaders.mockResolvedValue({ Authorization: 'Bearer test' });
+
+      const failingProxy = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'upstream error' } }), { status: 500 })
+      );
+
+      const app = new Hono();
+      const deps = createRequestHandlerDeps();
+      deps.proxyStreaming = failingProxy;
+      deps.proxyNonStreaming = failingProxy;
+      const handler = createRequestHandler(deps);
+      app.post('/', handler);
+
+      const res = await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'test-model', messages: [], stream: true }),
+      });
+
+      expect(res.status).toBe(500);
+      expect(failingProxy).toHaveBeenCalledTimes(1);
+      expect(mockGetFallbackChain).not.toHaveBeenCalled();
+    });
+
+    it('should return primary error when fallback also fails', async () => {
+      const fallbackDeployment: DeploymentConfig = {
+        ...mockDeployment,
+        name: 'test-fallback',
+        modelAlias: 'fallback-model',
+        fallbackDeployment: undefined,
+      };
+      const primaryDeployment: DeploymentConfig = {
+        ...mockDeployment,
+        fallbackDeployment: 'test-fallback',
+      };
+
+      mockGetDeploymentByAlias.mockReturnValue(primaryDeployment);
+      mockGetFallbackChain.mockReturnValue([fallbackDeployment]);
+      mockIsRequestAllowed.mockReturnValue(true);
+      mockGetAuthHeaders.mockResolvedValue({ Authorization: 'Bearer test' });
+
+      const failingProxy = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'bad gateway' } }), { status: 502 })
+      );
+
+      const app = new Hono();
+      const deps = createRequestHandlerDeps();
+      deps.proxyNonStreaming = failingProxy;
+      const handler = createRequestHandler(deps);
+      app.post('/', handler);
+
+      const res = await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'test-model', messages: [], stream: false }),
+      });
+
+      expect(res.status).toBe(502);
+      expect(failingProxy).toHaveBeenCalledTimes(2);
+    });
+
+    it('should not attempt fallback when primary has no fallback deployment configured', async () => {
+      mockGetDeploymentByAlias.mockReturnValue(mockDeployment);
+      mockIsRequestAllowed.mockReturnValue(true);
+      mockGetAuthHeaders.mockResolvedValue({ Authorization: 'Bearer test' });
+
+      const failingProxy = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'upstream error' } }), { status: 500 })
+      );
+
+      const app = new Hono();
+      const deps = createRequestHandlerDeps();
+      deps.proxyNonStreaming = failingProxy;
+      const handler = createRequestHandler(deps);
+      app.post('/', handler);
+
+      const res = await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'test-model', messages: [], stream: false }),
+      });
+
+      expect(res.status).toBe(500);
+      expect(failingProxy).toHaveBeenCalledTimes(1);
     });
   });
 });

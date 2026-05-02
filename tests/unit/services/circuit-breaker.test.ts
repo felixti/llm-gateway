@@ -197,6 +197,82 @@ describe("Circuit Breaker Service", () => {
     });
   });
 
+  describe("HALF_OPEN single-probe semantics", () => {
+    it("should allow exactly one request in HALF_OPEN state (first allowed, second rejected)", async () => {
+      for (let i = 0; i < 5; i++) {
+        await recordFailure(DEPLOYMENT);
+      }
+      expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.OPEN);
+
+      const key = `circuit:${DEPLOYMENT}`;
+      const { redis } = require("../../../src/db/redis");
+      await redis.hset(key, 'nextAttemptTime', Date.now() - 1);
+
+      const first = await isRequestAllowed(DEPLOYMENT);
+      expect(first).toBe(true);
+
+      const second = await isRequestAllowed(DEPLOYMENT);
+      expect(second).toBe(false);
+    });
+
+    it("should close circuit after successful probe", async () => {
+      for (let i = 0; i < 5; i++) {
+        await recordFailure(DEPLOYMENT);
+      }
+
+      const key = `circuit:${DEPLOYMENT}`;
+      const { redis } = require("../../../src/db/redis");
+      await redis.hset(key, 'nextAttemptTime', Date.now() - 1);
+
+      expect(await isRequestAllowed(DEPLOYMENT)).toBe(true);
+      expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.HALF_OPEN);
+
+      await recordSuccess(DEPLOYMENT);
+      expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.CLOSED);
+
+      expect(await isRequestAllowed(DEPLOYMENT)).toBe(true);
+    });
+
+    it("should re-open circuit when probe fails and allow next probe after timeout", async () => {
+      for (let i = 0; i < 5; i++) {
+        await recordFailure(DEPLOYMENT);
+      }
+
+      const key = `circuit:${DEPLOYMENT}`;
+      const { redis } = require("../../../src/db/redis");
+      await redis.hset(key, 'nextAttemptTime', Date.now() - 1);
+
+      expect(await isRequestAllowed(DEPLOYMENT)).toBe(true);
+
+      await recordFailure(DEPLOYMENT);
+      expect((await getCircuitState(DEPLOYMENT)).state).toBe(CircuitState.OPEN);
+
+      expect(await isRequestAllowed(DEPLOYMENT)).toBe(false);
+
+      await redis.hset(key, 'nextAttemptTime', Date.now() - 1);
+      expect(await isRequestAllowed(DEPLOYMENT)).toBe(true);
+    });
+
+    it("should reject all requests after probe is in progress until probe completes", async () => {
+      for (let i = 0; i < 5; i++) {
+        await recordFailure(DEPLOYMENT);
+      }
+
+      const key = `circuit:${DEPLOYMENT}`;
+      const { redis } = require("../../../src/db/redis");
+      await redis.hset(key, 'nextAttemptTime', Date.now() - 1);
+
+      expect(await isRequestAllowed(DEPLOYMENT)).toBe(true);
+
+      expect(await isRequestAllowed(DEPLOYMENT)).toBe(false);
+      expect(await isRequestAllowed(DEPLOYMENT)).toBe(false);
+      expect(await isRequestAllowed(DEPLOYMENT)).toBe(false);
+
+      await recordSuccess(DEPLOYMENT);
+      expect(await isRequestAllowed(DEPLOYMENT)).toBe(true);
+    });
+  });
+
   describe("CLOSED state behavior", () => {
     it("should reset failure count on success in CLOSED", async () => {
       await recordFailure(DEPLOYMENT);

@@ -1,0 +1,6 @@
+bun test v1.3.13 (bf2e2cec)
+{"level":"info","time":"2026-05-02T21:34:55.166Z","service":"llm-gateway","msg":"Archived monthly usage"}{"level":"info","time":"2026-05-02T21:34:55.167Z","service":"llm-gateway","msg":"Archived monthly usage"}{"level":"info","time":"2026-05-02T21:34:55.168Z","service":"llm-gateway","msg":"Archived monthly usage"}{"level":"info","time":"2026-05-02T21:34:55.168Z","service":"llm-gateway","msg":"Archived monthly usage"}
+ 8 pass
+ 0 fail
+ 9 expect() calls
+Ran 8 tests across 1 file. [239.00ms]

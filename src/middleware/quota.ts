@@ -90,10 +90,11 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<Response 
   const path = c.req.path;
 
   const cached = c.get('parsedBody') as Record<string, unknown> | undefined;
-  const body =
-    cached && typeof cached === 'object'
-      ? cached
-      : ((await c.req.json().catch(() => ({}))) as Record<string, unknown>);
+  if (!cached || typeof cached !== 'object') {
+    const error = errorForProtocol(path, 500, 'internal_error', 'Internal server error');
+    return c.json(error, 500);
+  }
+  const body = cached;
 
   if (!userId) {
     await next();
@@ -139,6 +140,13 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<Response 
 
   if (wouldExceedBudget && !isHardLimit) {
     c.header(HEADER_WARNING, 'Soft quota limit exceeded. Usage is being tracked.');
+    c.set('reservationId', '');
+    c.set('estimatedCost', estimatedCost);
+    c.set('model', model);
+    c.set('releaseQuota', async () => {});
+    c.header(HEADER_QUOTA_REMAINING, '0');
+    await next();
+    return;
   }
 
   const reservation = await checkAndReserve(userId, estimatedCost);

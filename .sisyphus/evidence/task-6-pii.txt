@@ -1,0 +1,44 @@
+Task 6: PII Transport - VERIFIED COMPLETE
+==========================================
+
+Status: ALREADY IMPLEMENTED & PASSING
+
+Files:
+- src/observability/pino-pii-transport.ts (exists, complete)
+- src/observability/logger.ts (imports and uses createPIISanitizeStream)
+- tests/unit/observability/pino-pii-transport.test.ts (exists, comprehensive)
+- tests/unit/observability/logger.test.ts (existing tests pass)
+
+Implementation Details:
+- PinoPIITransform class implements DestinationStream (synchronous, not worker thread)
+  - Reason: Bun worker thread support for pino transports is unreliable
+  - Synchronous stream = zero PII can escape
+  - sanitizePII() is regex-based with negligible overhead
+- write() method: parses JSON, runs sanitizePII recursively, re-serializes
+- Fallback: unparseable entries get string-level sanitization
+- Whitelist approach: only known PII patterns (email, PAT, API key, credit card, phone, SSN) get sanitized
+- logger.ts: createLogger() uses createPIISanitizeStream() wrapping pino.destination({ sync: true })
+- Existing logRequest/logError/logWarning still call sanitizePII (double-safety)
+
+Test Coverage (59 tests across 5 files, 0 failures):
+- Email sanitization in log entries (object fields, nested objects)
+- PAT token sanitization (top-level, nested)
+- API key sanitization
+- Multiple PII types in single entry
+- Non-PII data preservation (model, tokens, cost_usd, protocol, trace_id)
+- Unparseable JSON fallback (string sanitization)
+- No-PII pass-through unchanged
+- createPIISanitizeStream factory
+- pino logger integration (logger.info output through transform)
+- Arrays in log entries
+
+PII Patterns Covered:
+- Email: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g → u***@***.com
+- PAT: /lg_[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+/g → lg_***_***.***
+- API Key: /sk-[a-zA-Z0-9_]{20,}/g → sk-***
+- Credit Card: /\b(?:\d{4}[-\s]?){3}\d{4}\b/g → ****-****-****-****
+- Phone: /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g → ***-***-****
+- SSN: /\b\d{3}-\d{2}-\d{4}\b/g → ***-**-****
+
+Command: bun test tests/unit/observability/
+Result: 59 pass, 0 fail (87 expect() calls)

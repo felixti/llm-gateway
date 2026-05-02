@@ -5,6 +5,9 @@ export type ModelFamily = 'gpt' | 'claude' | 'kimi' | 'glm' | 'minimax';
 export type ProtocolFamily = 'chat-completions' | 'anthropic-messages';
 export type AzureAuthType = 'entra-id' | 'api-key';
 
+// Model families deployed on Azure AI Foundry (vs Azure OpenAI)
+export const FOUNDRY_FAMILIES: ModelFamily[] = ['kimi', 'glm', 'minimax'];
+
 // Azure auth configuration
 export interface AzureAuthConfig {
   type: AzureAuthType;

@@ -19,38 +19,44 @@ import { z } from 'zod';
 import { createRequestHandler } from './factories/request-handler.factory';
 
 // Zod schema for Responses API body validation
-const responsesBodySchema = z.object({
-  model: z.string().min(1, 'model is required'),
-  input: z.union([
-    z.string(),
-    z.array(
-      z.object({
-        role: z.enum(['user']),
-        content: z.string(),
+export const responsesBodySchema = z
+  .object({
+    model: z.string().min(1, 'model is required'),
+    input: z.union([
+      z.string(),
+      z.array(
+        z.object({
+          role: z.enum(['user']),
+          content: z.string(),
+        })
+      ),
+    ]),
+    stream: z.boolean().optional().default(false),
+    tools: z
+      .array(
+        z.object({
+          type: z.literal('function'),
+          name: z.string(),
+          description: z.string().optional(),
+          parameters: z.record(z.unknown()),
+        })
+      )
+      .optional(),
+    reasoning: z
+      .object({
+        effort: z.enum(['low', 'medium', 'high']),
       })
-    ),
-  ]),
-  stream: z.boolean().optional().default(false),
-  tools: z
-    .array(
-      z.object({
-        type: z.literal('function'),
-        name: z.string(),
-        description: z.string().optional(),
-        parameters: z.record(z.unknown()),
-      })
-    )
-    .optional(),
-  reasoning: z
-    .object({
-      effort: z.enum(['low', 'medium', 'high']),
-    })
-    .optional(),
-  max_tokens: z.number().int().positive().optional(),
-  max_completion_tokens: z.number().int().positive().optional(),
-  temperature: z.number().min(0).max(2).optional(),
-  user: z.string().optional(),
-});
+      .optional(),
+    max_tokens: z.number().int().positive().optional(),
+    max_completion_tokens: z.number().int().positive().optional(),
+    temperature: z.number().min(0).max(2).optional(),
+    user: z.string().optional(),
+    stream_options: z.record(z.unknown()).optional(),
+    modalities: z.array(z.string()).optional(),
+    response_format: z.record(z.unknown()).optional(),
+    tool_choice: z.union([z.string(), z.object({})]).optional(),
+  })
+  .passthrough();
 
 export type ResponsesBody = z.infer<typeof responsesBodySchema>;
 

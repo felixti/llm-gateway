@@ -19,7 +19,6 @@ export interface QuotaStatus {
   reserved_usd: number;
   remaining_usd: number;
   reset_date: string;
-  /** Enforced budget policy: false = soft limit (warn), true = hard (429 when over) */
   hard_limit: boolean;
 }
 
@@ -27,12 +26,24 @@ const QUOTA_KEY_PREFIX = 'quota:';
 const RESERVED_KEY_PREFIX = 'reserved:';
 const RESERVATION_KEY_PREFIX = 'reservation:';
 const RESERVATION_HASH_PREFIX = 'reservations_meta:';
+const IDEMPOTENCY_RELEASE_PREFIX = 'released:';
+const IDEMPOTENCY_RECONCILE_PREFIX = 'reconciled:';
+const IDEMPOTENCY_CLEANUP_PREFIX = 'cleanup:';
 
+const MICRODOLLAR_SCALE = 1_000_000;
 const RESERVATION_TTL_SECONDS = env.QUOTA_RESERVATION_TTL_SECONDS;
-const DEFAULT_BUDGET = 50;
+const DEFAULT_BUDGET_USD = 50;
+const DEFAULT_BUDGET_MICRO = toMicrodollars(new Decimal(DEFAULT_BUDGET_USD));
 
-/** How often to re-read Postgres policy into Redis (per user/month key) */
 const DB_POLICY_SYNC_INTERVAL_MS = 60_000;
+
+function toMicrodollars(d: Decimal): string {
+  return d.mul(MICRODOLLAR_SCALE).round().toString();
+}
+
+function fromMicrodollars(s: string): Decimal {
+  return new Decimal(s).div(MICRODOLLAR_SCALE);
+}
 
 function getCurrentMonth(): string {
   const now = new Date();
@@ -65,7 +76,6 @@ function generateReservationId(): string {
   return `res_${crypto.randomUUID()}`;
 }
 
-/** In tests, Postgres sync is off by default to avoid hanging on DB I/O; CI sets QUOTA_PG_SYNC_IN_TESTS=true */
 function shouldSyncQuotaFromPostgres(): boolean {
   if (process.env.NODE_ENV === 'test' && process.env.QUOTA_PG_SYNC_IN_TESTS !== 'true') {
     return false;
@@ -73,10 +83,6 @@ function shouldSyncQuotaFromPostgres(): boolean {
   return true;
 }
 
-/**
- * Postgres is authoritative for monthly budget + hard_limit. Redis holds live spent/reserved.
- * Skips sync if recently synced (see DB_POLICY_SYNC_INTERVAL_MS).
- */
 export async function syncQuotaPolicyFromPostgres(userId: string, month: string): Promise<void> {
   if (!shouldSyncQuotaFromPostgres()) {
     return;
@@ -91,11 +97,12 @@ export async function syncQuotaPolicyFromPostgres(userId: string, month: string)
     }
 
     const policy = await getUserQuotaPolicyByPatSubject(userId);
-    const budget = policy?.monthly_budget_usd ?? String(DEFAULT_BUDGET);
+    const budgetDollars = new Decimal(policy?.monthly_budget_usd ?? DEFAULT_BUDGET_USD);
+    const budgetMicro = toMicrodollars(budgetDollars);
     const hardLimit = policy?.hard_limit !== false;
 
     await redis.hset(quotaKey, {
-      budget,
+      budget: budgetMicro,
       hard_limit: hardLimit ? '1' : '0',
       db_synced_at: String(Date.now()),
     });
@@ -131,6 +138,136 @@ const CHECK_AND_RESERVE_SCRIPT = `
   return {1, 'ok'}
 `;
 
+const RELEASE_RESERVATION_SCRIPT = `
+  local idempotencyKey = KEYS[1]
+  local reservationKey = KEYS[2]
+  local reservationId = ARGV[1]
+
+  if redis.call('exists', idempotencyKey) == 1 then
+    return {0, 'already_released'}
+  end
+
+  local data = redis.call('get', reservationKey)
+  if not data then
+    redis.call('set', idempotencyKey, '0', 'EX', 86400)
+    return {0, 'not_found'}
+  end
+
+  local amountMicro, userId, month
+  local idx = 0
+  for part in string.gmatch(data, '[^|]+') do
+    if idx == 0 then amountMicro = part
+    elseif idx == 1 then userId = part
+    elseif idx == 2 then month = part
+    end
+    idx = idx + 1
+  end
+
+  if not amountMicro or not userId or not month then
+    redis.call('set', idempotencyKey, '0', 'EX', 86400)
+    return {0, 'parse_error'}
+  end
+
+  local reservedKey = 'reserved:' .. userId .. ':' .. month
+  local hashKey = 'reservations_meta:' .. userId .. ':' .. month
+
+  redis.call('incrby', reservedKey, -tonumber(amountMicro))
+  redis.call('del', reservationKey)
+  redis.call('hdel', hashKey, reservationId)
+  redis.call('set', idempotencyKey, amountMicro, 'EX', 86400)
+
+  return {1, 'ok', amountMicro}
+`;
+
+const RECONCILE_USAGE_SCRIPT = `
+  local idempotencyKey = KEYS[1]
+  local reservationKey = KEYS[2]
+  local reservationId = ARGV[1]
+  local costMicro = ARGV[2]
+
+  if redis.call('exists', idempotencyKey) == 1 then
+    return {0, 'already_reconciled'}
+  end
+
+  local data = redis.call('get', reservationKey)
+  if not data then
+    redis.call('set', idempotencyKey, costMicro, 'EX', 86400)
+    return {0, 'not_found'}
+  end
+
+  local reservedAmountMicro, userId, month
+  local idx = 0
+  for part in string.gmatch(data, '[^|]+') do
+    if idx == 0 then reservedAmountMicro = part
+    elseif idx == 1 then userId = part
+    elseif idx == 2 then month = part
+    end
+    idx = idx + 1
+  end
+
+  if not reservedAmountMicro or not userId or not month then
+    redis.call('set', idempotencyKey, costMicro, 'EX', 86400)
+    return {0, 'parse_error'}
+  end
+
+  local quotaKey = 'quota:' .. userId .. ':' .. month
+  local reservedKey = 'reserved:' .. userId .. ':' .. month
+  local hashKey = 'reservations_meta:' .. userId .. ':' .. month
+
+  redis.call('hincrby', quotaKey, 'spent', tonumber(costMicro))
+  redis.call('incrby', reservedKey, -tonumber(reservedAmountMicro))
+  redis.call('del', reservationKey)
+  redis.call('hdel', hashKey, reservationId)
+  redis.call('set', idempotencyKey, costMicro, 'EX', 86400)
+
+  return {1, 'ok', costMicro, reservedAmountMicro}
+`;
+
+const CLEANUP_ORPHAN_SCRIPT = `
+  -- orphan_cleanup
+  local hashKey = KEYS[1]
+  local nowMs = tonumber(ARGV[1])
+  local ttlMs = tonumber(ARGV[2])
+
+  local fields = redis.call('hgetall', hashKey)
+  local cleaned = 0
+
+  for i = 1, #fields, 2 do
+    local reservationId = fields[i]
+    local data = fields[i + 1]
+
+    local amountMicro, userId, month, createdAtStr
+    local idx = 0
+    for part in string.gmatch(data, '[^|]+') do
+      if idx == 0 then amountMicro = part
+      elseif idx == 1 then userId = part
+      elseif idx == 2 then month = part
+      elseif idx == 3 then createdAtStr = part
+      end
+      idx = idx + 1
+    end
+
+    if amountMicro and userId and month and createdAtStr then
+      local createdAt = tonumber(createdAtStr)
+      if createdAt and (nowMs - createdAt) > ttlMs then
+        local reservationKey = 'reservation:' .. reservationId
+        if redis.call('exists', reservationKey) == 0 then
+          local idemKey = '${IDEMPOTENCY_CLEANUP_PREFIX}' .. reservationId
+          if redis.call('exists', idemKey) == 0 then
+            local reservedKey = 'reserved:' .. userId .. ':' .. month
+            redis.call('incrby', reservedKey, -tonumber(amountMicro))
+            redis.call('hdel', hashKey, reservationId)
+            redis.call('set', idemKey, '1', 'EX', 86400)
+            cleaned = cleaned + 1
+          end
+        end
+      end
+    end
+  end
+
+  return cleaned
+`;
+
 export async function checkAndReserve(
   userId: string,
   estimatedCost: Decimal
@@ -139,13 +276,13 @@ export async function checkAndReserve(
   await syncQuotaPolicyFromPostgres(userId, month);
 
   const reservationId = generateReservationId();
-  const costStr = estimatedCost.toString();
+  const costMicro = toMicrodollars(estimatedCost);
 
   const quotaKey = getQuotaKey(userId, month);
   const reservedKey = getReservedKey(userId, month);
   const reservationKey = getReservationKey(reservationId);
   const hashKey = getReservationHashKey(userId, month);
-  const reservationData = `${costStr}|${userId}|${month}|${Date.now()}`;
+  const reservationData = `${costMicro}|${userId}|${month}|${Date.now()}`;
 
   try {
     const result = await redis.eval(
@@ -155,9 +292,9 @@ export async function checkAndReserve(
       reservedKey,
       reservationKey,
       hashKey,
-      costStr,
+      costMicro,
       reservationData,
-      DEFAULT_BUDGET,
+      DEFAULT_BUDGET_MICRO,
       RESERVATION_TTL_SECONDS,
       reservationId
     );
@@ -184,47 +321,49 @@ export async function checkAndReserve(
 }
 
 export async function releaseReservation(reservationId: string): Promise<void> {
+  const idempotencyKey = `${IDEMPOTENCY_RELEASE_PREFIX}${reservationId}`;
   const reservationKey = getReservationKey(reservationId);
 
-  const reservationData = await redis.get(reservationKey);
-  if (!reservationData) {
-    const nullData = await tryRecoverFromHash(reservationId);
-    if (nullData) {
-      logger.warn(
-        { reservationId, userId: nullData.userId, month: nullData.month },
-        'Released expired reservation via hash fallback'
-      );
+  try {
+    const result = (await redis.eval(
+      RELEASE_RESERVATION_SCRIPT,
+      2,
+      idempotencyKey,
+      reservationKey,
+      reservationId
+    )) as (string | number)[];
+
+    if (Array.isArray(result) && result[1] === 'not_found') {
+      const nullData = await tryRecoverFromHash(reservationId);
+      if (nullData) {
+        const reservedKey = getReservedKey(nullData.userId, nullData.month);
+        const hashKey = getReservationHashKey(nullData.userId, nullData.month);
+
+        await redis.incrbyfloat(reservedKey, -Number(nullData.amountMicro));
+        await redis.hdel(hashKey, reservationId);
+
+        logger.warn(
+          { reservationId, userId: nullData.userId, month: nullData.month },
+          'Released expired reservation via hash fallback'
+        );
+      }
     }
-    return;
+  } catch (error) {
+    logger.error({ error, reservationId }, 'Release reservation error');
   }
-
-  const parts = reservationData.split('|');
-  const amountStr = parts[0];
-  const userId = parts[1];
-  const month = parts[2];
-  const reservedKey = getReservedKey(userId, month);
-  const hashKey = getReservationHashKey(userId, month);
-
-  await redis.incrbyfloat(reservedKey, -Number.parseFloat(amountStr));
-  await redis.del(reservationKey);
-  await redis.hdel(hashKey, reservationId);
 }
 
-/**
- * Record actual usage for soft-quota requests that bypassed reservation.
- * Directly increments the user's spent quota without requiring a reservation.
- * Used when QUOTA_SOFT_LIMIT_ENABLED=true and user is over budget but still allowed.
- */
 export async function recordUsageOnly(
   userId: string,
   actualUsage: TokenUsage,
   model: string
 ): Promise<Decimal> {
   const actualCost = calculateCost(actualUsage, model);
+  const costMicro = toMicrodollars(actualCost);
   const month = getCurrentMonth();
   const quotaKey = getQuotaKey(userId, month);
 
-  await redis.hincrbyfloat(quotaKey, 'spent', actualCost.toString());
+  await redis.hincrbyfloat(quotaKey, 'spent', costMicro);
 
   return actualCost;
 }
@@ -234,52 +373,56 @@ export async function reconcileUsage(
   actualUsage: TokenUsage,
   model: string
 ): Promise<Decimal> {
+  const actualCost = calculateCost(actualUsage, model);
+  const costMicro = toMicrodollars(actualCost);
+  const idempotencyKey = `${IDEMPOTENCY_RECONCILE_PREFIX}${reservationId}`;
   const reservationKey = getReservationKey(reservationId);
 
-  const reservationData = await redis.get(reservationKey);
-  if (!reservationData) {
-    const nullData = await tryRecoverFromHash(reservationId);
-    if (nullData) {
-      const actualCost = calculateCost(actualUsage, model);
-      const quotaKey = getQuotaKey(nullData.userId, nullData.month);
-      const reservedKey = getReservedKey(nullData.userId, nullData.month);
-      const hashKey = getReservationHashKey(nullData.userId, nullData.month);
+  try {
+    const result = (await redis.eval(
+      RECONCILE_USAGE_SCRIPT,
+      2,
+      idempotencyKey,
+      reservationKey,
+      reservationId,
+      costMicro
+    )) as (string | number)[];
 
-      const pipeline = redis.pipeline();
-      pipeline.hincrbyfloat(quotaKey, 'spent', actualCost.toString());
-      pipeline.incrbyfloat(reservedKey, -nullData.amount);
-      pipeline.hdel(hashKey, reservationId);
-      await pipeline.exec();
-
-      logger.warn(
-        { reservationId, userId: nullData.userId, month: nullData.month },
-        'Reconciled expired reservation via hash fallback'
-      );
+    if (Array.isArray(result) && result[0] === 1) {
       return actualCost;
     }
+
+    if (Array.isArray(result) && result[1] === 'already_reconciled') {
+      return new Decimal(0);
+    }
+
+    if (Array.isArray(result) && result[1] === 'not_found') {
+      const nullData = await tryRecoverFromHash(reservationId);
+      if (nullData) {
+        const quotaKey = getQuotaKey(nullData.userId, nullData.month);
+        const reservedKey = getReservedKey(nullData.userId, nullData.month);
+        const hashKey = getReservationHashKey(nullData.userId, nullData.month);
+
+        const pipeline = redis.pipeline();
+        pipeline.hincrbyfloat(quotaKey, 'spent', costMicro);
+        pipeline.incrbyfloat(reservedKey, `-${nullData.amountMicro}`);
+        pipeline.hdel(hashKey, reservationId);
+        await pipeline.exec();
+
+        logger.warn(
+          { reservationId, userId: nullData.userId, month: nullData.month },
+          'Reconciled expired reservation via hash fallback'
+        );
+        return actualCost;
+      }
+      return new Decimal(0);
+    }
+
+    return new Decimal(0);
+  } catch (error) {
+    logger.error({ error, reservationId }, 'Reconcile usage error');
     return new Decimal(0);
   }
-
-  const parts = reservationData.split('|');
-  const reservedAmountStr = parts[0];
-  const userId = parts[1];
-  const month = parts[2];
-
-  const actualCost = calculateCost(actualUsage, model);
-  const reservedNum = Number.parseFloat(reservedAmountStr);
-
-  const quotaKey = getQuotaKey(userId, month);
-  const reservedKey = getReservedKey(userId, month);
-  const hashKey = getReservationHashKey(userId, month);
-
-  const pipeline = redis.pipeline();
-  pipeline.hincrbyfloat(quotaKey, 'spent', actualCost.toString());
-  pipeline.incrbyfloat(reservedKey, -reservedNum);
-  pipeline.del(reservationKey);
-  pipeline.hdel(hashKey, reservationId);
-  await pipeline.exec();
-
-  return actualCost;
 }
 
 function parseHardLimitFlag(value: string | null): boolean {
@@ -289,12 +432,6 @@ function parseHardLimitFlag(value: string | null): boolean {
   return true;
 }
 
-/**
- * Safely read a Redis value, returning `null` if the call rejects. Used by
- * `getQuotaStatus` to degrade to defaults instead of erroring when Redis
- * hiccups — callers can still render a 200 with conservative numbers rather
- * than leaking a 500 for a transient read failure.
- */
 async function safeReadOrNull(op: () => Promise<string | null>): Promise<string | null> {
   try {
     return await op();
@@ -318,9 +455,9 @@ export async function getQuotaStatus(userId: string): Promise<QuotaStatus> {
     safeReadOrNull(() => redis.hget(quotaKey, 'hard_limit')),
   ]);
 
-  const budgetDecimal = new Decimal(budget || DEFAULT_BUDGET);
-  const spentDecimal = new Decimal(spent || '0');
-  const reservedDecimal = new Decimal(reserved || '0');
+  const budgetDecimal = fromMicrodollars(budget || DEFAULT_BUDGET_MICRO);
+  const spentDecimal = fromMicrodollars(spent || '0');
+  const reservedDecimal = fromMicrodollars(reserved || '0');
   const remaining = budgetDecimal.minus(spentDecimal).minus(reservedDecimal);
 
   return {
@@ -340,9 +477,10 @@ export async function setMonthlyBudget(
 ): Promise<void> {
   const targetMonth = month || getCurrentMonth();
   const quotaKey = getQuotaKey(userId, targetMonth);
+  const budgetMicro = toMicrodollars(new Decimal(budgetUsd));
 
   await redis.hset(quotaKey, {
-    budget: budgetUsd.toString(),
+    budget: budgetMicro,
     spent: '0',
     reset_date: getResetDate(),
     db_synced_at: String(Date.now()),
@@ -351,7 +489,7 @@ export async function setMonthlyBudget(
 
 async function tryRecoverFromHash(
   reservationId: string
-): Promise<{ userId: string; month: string; amount: number } | null> {
+): Promise<{ userId: string; month: string; amountMicro: string } | null> {
   try {
     let cursor = '0';
     do {
@@ -369,11 +507,11 @@ async function tryRecoverFromHash(
         const data = await redis.hget(hashKey, reservationId);
         if (data) {
           const parts = data.split('|');
-          if (parts.length >= 2) {
-            const amount = Number.parseFloat(parts[0]);
+          if (parts.length >= 3) {
+            const amountMicro = parts[0];
             const userId = parts[1];
             const month = parts[2] || getCurrentMonth();
-            return { userId, month, amount };
+            return { userId, month, amountMicro };
           }
         }
       }
@@ -385,10 +523,9 @@ async function tryRecoverFromHash(
 }
 
 export async function cleanupOrphanedReservations(): Promise<number> {
-  let cleaned = 0;
-
   const nowMs = Date.now();
   const ttlMs = RESERVATION_TTL_SECONDS * 1000;
+  let totalCleaned = 0;
 
   try {
     let cursor = '0';
@@ -404,33 +541,19 @@ export async function cleanupOrphanedReservations(): Promise<number> {
       const hashKeys = scanResult[1];
 
       for (const hashKey of hashKeys) {
-        const fields = await redis.hgetall(hashKey);
-        for (const [reservationId, data] of Object.entries(fields)) {
-          const parts = data.split('|');
-          if (parts.length < 3) continue;
-          const amountStr = parts[0];
-          const userId = parts[1];
-          const month = parts[2];
-          const createdAt = parts.length >= 4 ? Number(parts[3]) : 0;
-
-          if (!createdAt || nowMs - createdAt <= ttlMs) continue;
-
-          const exists = await redis.exists(getReservationKey(reservationId));
-          if (exists > 0) continue;
-
-          const reservedKey = getReservedKey(userId, month);
-          const amount = Number.parseFloat(amountStr);
-          if (!Number.isNaN(amount)) {
-            await redis.incrbyfloat(reservedKey, -amount);
-            cleaned++;
-          }
-          await redis.hdel(hashKey, reservationId);
-        }
+        const cleaned = (await redis.eval(
+          CLEANUP_ORPHAN_SCRIPT,
+          1,
+          hashKey,
+          String(nowMs),
+          String(ttlMs)
+        )) as number;
+        totalCleaned += cleaned;
       }
     } while (cursor !== '0');
   } catch (error) {
     logger.error({ error }, 'Cleanup error');
   }
 
-  return cleaned;
+  return totalCleaned;
 }

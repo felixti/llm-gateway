@@ -68,6 +68,17 @@ const envSchema = z.object({
     .transform((v) => v === 'true'),
   HEALTH_CHECK_INTERVAL_MS: z.coerce.number().int().positive().default(30000),
   HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  HEALTH_CHECK_DEPLOYMENTS_ENABLED: z
+    .enum(['true', 'false'])
+    .optional()
+    .default('true')
+    .transform((v) => v === 'true'),
+
+  // Metrics
+  METRICS_SCRAPE_BEARER: z.string().optional(),
+
+  // OpenTelemetry (HTTP endpoint for metrics)
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
 
   // Security
   /** Comma-separated list of allowed CORS origins, or '*' for all origins */

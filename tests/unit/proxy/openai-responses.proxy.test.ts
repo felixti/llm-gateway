@@ -1,0 +1,195 @@
+import { describe, expect, test } from "bun:test";
+import {
+  transformChatCompletionsToResponse,
+  createResponsesStreamTransformer,
+} from "../../../src/proxy/openai-responses.proxy";
+
+describe("transformChatCompletionsToResponse", () => {
+  test("converts single choice", () => {
+    const chatBody = {
+      id: "chatcmp-123",
+      created: 1700000000,
+      model: "gpt-test",
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content: "Hello" },
+          finish_reason: "stop",
+        },
+      ],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    };
+
+    const result = transformChatCompletionsToResponse(chatBody) as Record<string, any>;
+
+    expect(result.object).toBe("response");
+    expect(result.id).toBe("chatcmp-123");
+    expect(result.created_at).toBe(1700000000);
+    expect(result.model).toBe("gpt-test");
+    expect((result as Record<string, any>).output).toHaveLength(1);
+    expect(result.output[0].type).toBe("message");
+    expect(result.output[0].content).toEqual([
+      { type: "output_text", text: "Hello" },
+    ]);
+    expect(result.usage).toEqual(chatBody.usage);
+  });
+
+  test("handles multiple choices", () => {
+    const chatBody = {
+      id: "chatcmp-456",
+      created: 1700000001,
+      model: "gpt-test",
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content: "A" },
+          finish_reason: "stop",
+        },
+        {
+          index: 1,
+          message: { role: "assistant", content: "B" },
+          finish_reason: "stop",
+        },
+      ],
+    };
+
+    const result = transformChatCompletionsToResponse(chatBody) as Record<string, any>;
+
+    expect((result.output as unknown[])).toHaveLength(2);
+    expect(result.output[0].id).toBe("chatcmp-456-0");
+    expect(result.output[1].id).toBe("chatcmp-456-1");
+  });
+
+  test("defaults missing fields", () => {
+    const result = transformChatCompletionsToResponse({});
+
+    expect(result.id).toBe("");
+    expect(result.object).toBe("response");
+    expect(result.output).toEqual([]);
+    expect(result.model).toBe("");
+  });
+});
+
+describe("createResponsesStreamTransformer", () => {
+  function makeController(chunks: string[]): TransformStreamDefaultController {
+    return {
+      enqueue: (chunk: Uint8Array) => {
+        chunks.push(new TextDecoder().decode(chunk));
+      },
+      terminate: () => {},
+    } as unknown as TransformStreamDefaultController;
+  }
+
+  test("emits response.created on first chunk", () => {
+    const transformer = createResponsesStreamTransformer();
+    const chunks: string[] = [];
+    const controller = makeController(chunks);
+
+    const event = {
+      id: "chatcmp-789",
+      created: 1700000002,
+      model: "gpt-test",
+      choices: [{ index: 0, delta: { content: "H" } }],
+    };
+
+    transformer.transform(
+      new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`),
+      controller
+    );
+
+    expect(chunks.length).toBe(1);
+    const text = chunks[0];
+    expect(text).toContain("response.created");
+    expect(text).toContain('"created_at":1700000002');
+    expect(text).toContain("response.output_item.added");
+    expect(text).toContain("response.content_part.added");
+  });
+
+  test("accumulates delta content across chunks", () => {
+    const transformer = createResponsesStreamTransformer();
+    const chunks: string[] = [];
+    const controller = makeController(chunks);
+    const encoder = new TextEncoder();
+
+    const event1 = {
+      id: "chatcmp-999",
+      created: 1700000003,
+      model: "gpt-test",
+      choices: [{ index: 0, delta: { content: "Hello " } }],
+    };
+    const event2 = {
+      id: "chatcmp-999",
+      choices: [{ index: 0, delta: { content: "world" } }],
+    };
+    const event3 = {
+      id: "chatcmp-999",
+      choices: [{ index: 0, finish_reason: "stop" }],
+      usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+    };
+
+    transformer.transform(encoder.encode(`data: ${JSON.stringify(event1)}\n\n`), controller);
+    chunks.length = 0;
+    transformer.transform(encoder.encode(`data: ${JSON.stringify(event2)}\n\n`), controller);
+    chunks.length = 0;
+    transformer.transform(encoder.encode(`data: ${JSON.stringify(event3)}\n\n`), controller);
+
+    expect(chunks.length).toBe(1);
+    const text = chunks[0];
+    expect(text).toContain("response.content_part.done");
+    expect(text).toContain("response.output_item.done");
+    expect(text).toContain('"text":"Hello world"');
+    expect(text).toContain("response.done");
+    expect(text).toContain('"total_tokens":5');
+  });
+
+  test("handles multi-choice accumulation", () => {
+    const transformer = createResponsesStreamTransformer();
+    const chunks: string[] = [];
+    const controller = makeController(chunks);
+    const encoder = new TextEncoder();
+
+    const event1 = {
+      id: "chatcmp-multi",
+      choices: [
+        { index: 0, delta: { content: "A" } },
+      ],
+    };
+    const event2 = {
+      id: "chatcmp-multi",
+      choices: [
+        { index: 0, delta: { content: "lpha" } },
+      ],
+    };
+    const event3 = {
+      id: "chatcmp-multi",
+      choices: [
+        { index: 0, finish_reason: "stop" },
+      ],
+      usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+    };
+
+    transformer.transform(encoder.encode(`data: ${JSON.stringify(event1)}\n\n`), controller);
+    chunks.length = 0;
+    transformer.transform(encoder.encode(`data: ${JSON.stringify(event2)}\n\n`), controller);
+    chunks.length = 0;
+    transformer.transform(encoder.encode(`data: ${JSON.stringify(event3)}\n\n`), controller);
+
+    const text = chunks[0];
+    expect(text).toContain('"text":"Alpha"');
+    expect(text).toContain("chatcmp-multi-0");
+  });
+
+  test("preserves unrecognized lines", () => {
+    const transformer = createResponsesStreamTransformer();
+    const controller = {
+      enqueue: (chunk: Uint8Array) => {
+        const text = new TextDecoder().decode(chunk);
+        expect(text).toContain("foo: bar");
+      },
+      terminate: () => {},
+    } as unknown as TransformStreamDefaultController;
+
+    transformer.transform(new TextEncoder().encode("foo: bar\n"), controller);
+    expect.assertions(1);
+  });
+});

@@ -13,7 +13,7 @@
     "test:unit": "bun test tests/unit",
     "test:integration": "bun test tests/integration",
     "test:coverage": "bun test --coverage",
-    "test:coverage:check": "bun test --coverage --coverage-threshold=85",
+    "test:coverage:check": "bun test --coverage --coverage-threshold=90",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "typecheck": "tsc --noEmit",

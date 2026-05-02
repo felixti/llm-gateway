@@ -1,0 +1,73 @@
+{
+  "active_plan": "/var/home/felix-powerhouse/Sources/github/llm-gateway/.sisyphus/plans/review-10-10.md",
+  "started_at": "2026-05-02T18:48:00Z",
+  "session_ids": [
+    "ses_216318e45ffegjqYofGpW4ifpK",
+    "ses_215e6d2feffenAuTzMZjQxLKmn",
+    "ses_215e64ea2ffeGnQIcOj6B4I0S2"
+  ],
+  "plan_name": "review-10-10",
+  "worktree_path": null,
+  "completed_tasks": {},
+  "session_origins": {
+    "ses_216318e45ffegjqYofGpW4ifpK": "direct",
+    "ses_215e6d2feffenAuTzMZjQxLKmn": "appended",
+    "ses_215e64ea2ffeGnQIcOj6B4I0S2": "appended"
+  },
+  "task_sessions": {
+    "todo:1": {
+      "task_key": "todo:1",
+      "task_label": "1",
+      "task_title": "Fix Pricing Wildcard Matching — Add Contains Pattern Support",
+      "session_id": "ses_215e64ea2ffeGnQIcOj6B4I0S2",
+      "agent": "explore",
+      "updated_at": "2026-05-02T19:11:56.685Z"
+    },
+    "todo:2": {
+      "task_key": "todo:2",
+      "task_label": "2",
+      "task_title": "Fix Zod Schemas + Force Streaming Usage Billing",
+      "session_id": "ses_215aba68fffeYZx50BfZMn8YAX",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-05-02T20:23:16.742Z"
+    },
+    "todo:5": {
+      "task_key": "todo:5",
+      "task_label": "5",
+      "task_title": "Lua Atomic Quota Rewrite with Integer Microdollars + Idempotency",
+      "session_id": "ses_21585ba22ffeKgl59ensgK5Wuu",
+      "agent": "Sisyphus-Junior",
+      "category": "ultrabrain",
+      "updated_at": "2026-05-02T21:21:38.303Z"
+    },
+    "todo:8": {
+      "task_key": "todo:8",
+      "task_label": "8",
+      "task_title": "Fix Archive Scheduler",
+      "session_id": "ses_2156d18d0ffeAjisWkfq2B3zPi",
+      "agent": "Sisyphus-Junior",
+      "category": "deep",
+      "updated_at": "2026-05-02T21:35:18.593Z"
+    },
+    "todo:10": {
+      "task_key": "todo:10",
+      "task_label": "10",
+      "task_title": "Essential Docs Content (Architecture, Deployment, Operations)",
+      "session_id": "ses_2155cd4f2ffeCcozxiMs6GgmBz",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-05-02T21:45:07.239Z"
+    },
+    "final-wave:f1": {
+      "task_key": "final-wave:f1",
+      "task_label": "F1",
+      "task_title": "**Plan Compliance Audit** — `oracle`",
+      "session_id": "ses_2151ea5baffekH5LF68mpGi2z5",
+      "agent": "general",
+      "updated_at": "2026-05-02T22:57:49.666Z"
+    }
+  },
+  "completed": false,
+  "updated_at": "2026-05-02T18:48:00Z"
+}

@@ -34,6 +34,13 @@ interface UsageArchiveRecord {
   totalCostUsd: string;
 }
 
+export interface AuditStats {
+  totalRequests: number;
+  totalTokensInput: number;
+  totalTokensOutput: number;
+  totalTokensThinking: number;
+}
+
 interface PatRevocationRecord {
   patId: string;
   revokedBy: string;
@@ -154,6 +161,38 @@ export async function archiveMonthlyUsage(record: UsageArchiveRecord): Promise<v
       error,
     });
     throw error;
+  }
+}
+
+export async function getRequestAuditStats(userId: string, month: string): Promise<AuditStats> {
+  const query = `
+    SELECT
+      COUNT(*) AS total_requests,
+      COALESCE(SUM(tokens_input), 0) AS total_tokens_input,
+      COALESCE(SUM(tokens_output), 0) AS total_tokens_output,
+      COALESCE(SUM(tokens_thinking), 0) AS total_tokens_thinking
+    FROM request_audit
+    WHERE user_id = $1 AND to_char(created_at, 'YYYY-MM') = $2
+  `;
+
+  try {
+    const { rows } = await database.execute<{
+      total_requests: string;
+      total_tokens_input: string;
+      total_tokens_output: string;
+      total_tokens_thinking: string;
+    }>({ query, params: [userId, month] });
+
+    const row = rows[0];
+    return {
+      totalRequests: Number(row?.total_requests ?? 0),
+      totalTokensInput: Number(row?.total_tokens_input ?? 0),
+      totalTokensOutput: Number(row?.total_tokens_output ?? 0),
+      totalTokensThinking: Number(row?.total_tokens_thinking ?? 0),
+    };
+  } catch (error) {
+    logger.error('Failed to query request audit stats', { userId, month, error });
+    return { totalRequests: 0, totalTokensInput: 0, totalTokensOutput: 0, totalTokensThinking: 0 };
   }
 }
 

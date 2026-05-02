@@ -130,13 +130,54 @@ function setRateLimitHeaders(c: Context, result: RateLimitResult): void {
 
 function extractTokenCount(c: Context): number {
   const body = c.get('parsedBody');
-  if (body && typeof body === 'object' && body !== null) {
-    const b = body as { max_tokens?: number };
-    if (typeof b.max_tokens === 'number' && b.max_tokens > 0) {
-      return b.max_tokens;
-    }
+  if (!body || typeof body !== 'object' || body === null) {
+    return 0;
   }
-  return 0;
+
+  const b = body as {
+    max_tokens?: number;
+    max_completion_tokens?: number;
+    input?: unknown;
+    messages?: Array<{ content?: unknown }>;
+  };
+
+  // Use max_completion_tokens with precedence over max_tokens
+  const completionTokens = b.max_completion_tokens;
+  const fallbackTokens = b.max_tokens;
+  const maxTokens =
+    typeof completionTokens === 'number' &&
+    Number.isFinite(completionTokens) &&
+    completionTokens > 0
+      ? completionTokens
+      : typeof fallbackTokens === 'number' && Number.isFinite(fallbackTokens) && fallbackTokens > 0
+        ? fallbackTokens
+        : 0;
+
+  const path = c.req.path;
+  if (path === '/v1/responses' && typeof b.input === 'string') {
+    return Math.ceil(b.input.length / 4) + maxTokens;
+  }
+
+  if (path === '/v1/messages' && Array.isArray(b.messages)) {
+    let contentLength = 0;
+    for (const msg of b.messages) {
+      if (msg && typeof msg === 'object' && msg.content !== undefined) {
+        const content = msg.content;
+        if (typeof content === 'string') {
+          contentLength += content.length;
+        } else if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block && typeof block === 'object' && typeof block.text === 'string') {
+              contentLength += block.text.length;
+            }
+          }
+        }
+      }
+    }
+    return Math.ceil(contentLength / 4) + maxTokens;
+  }
+
+  return maxTokens;
 }
 
 export async function rateLimitMiddleware(c: Context, next: Next): Promise<Response | undefined> {

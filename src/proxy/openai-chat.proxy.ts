@@ -193,6 +193,9 @@ export async function proxyStreamingChat(
     contextOrReservationId,
     legacyRequestId
   );
+  const upstreamBody = { ...body, stream: true } as Record<string, unknown>;
+  if (!upstreamBody.stream_options) upstreamBody.stream_options = {};
+  (upstreamBody.stream_options as Record<string, unknown>).include_usage = true;
   const response = await withRetry(
     () =>
       upstreamHttpsFetch(upstreamUrl, {
@@ -203,7 +206,7 @@ export async function proxyStreamingChat(
           Accept: 'text/event-stream',
           'x-ms-client-request-id': requestId,
         },
-        body: JSON.stringify({ ...body, stream: true }),
+        body: JSON.stringify(upstreamBody),
         signal: abortSignal,
       }),
     { signal: abortSignal }

@@ -19,47 +19,53 @@ import { z } from 'zod';
 import { createRequestHandler } from './factories/request-handler.factory';
 
 // Zod schema for chat completions body validation
-const chatCompletionsBodySchema = z.object({
-  model: z.string().min(1, 'model is required'),
-  messages: z
-    .array(
-      z.object({
-        role: z.enum(['system', 'user', 'assistant', 'function']),
-        content: z.union([z.string(), z.null()]),
-        name: z.string().optional(),
-      })
-    )
-    .min(1, 'messages are required'),
-  stream: z.boolean().optional().default(false),
-  max_tokens: z.number().int().positive().optional(),
-  max_completion_tokens: z.number().int().positive().optional(),
-  temperature: z.number().min(0).max(2).optional(),
-  top_p: z.number().min(0).max(1).optional(),
-  n: z.number().int().positive().optional(),
-  stop: z.union([z.string(), z.array(z.string())]).optional(),
-  presence_penalty: z.number().min(-2).max(2).optional(),
-  frequency_penalty: z.number().min(-2).max(2).optional(),
-  logit_bias: z.record(z.number()).optional(),
-  user: z.string().optional(),
-  functions: z
-    .array(
-      z.object({
-        name: z.string(),
-        description: z.string().optional(),
-        parameters: z.record(z.unknown()),
-      })
-    )
-    .optional(),
-  function_call: z
-    .union([
-      z.string(),
-      z.object({
-        name: z.string(),
-        arguments: z.record(z.unknown()),
-      }),
-    ])
-    .optional(),
-});
+export const chatCompletionsBodySchema = z
+  .object({
+    model: z.string().min(1, 'model is required'),
+    messages: z
+      .array(
+        z.object({
+          role: z.enum(['system', 'user', 'assistant', 'function']),
+          content: z.union([z.string(), z.null()]),
+          name: z.string().optional(),
+        })
+      )
+      .min(1, 'messages are required'),
+    stream: z.boolean().optional().default(false),
+    max_tokens: z.number().int().positive().optional(),
+    max_completion_tokens: z.number().int().positive().optional(),
+    temperature: z.number().min(0).max(2).optional(),
+    top_p: z.number().min(0).max(1).optional(),
+    n: z.number().int().positive().optional(),
+    stop: z.union([z.string(), z.array(z.string())]).optional(),
+    presence_penalty: z.number().min(-2).max(2).optional(),
+    frequency_penalty: z.number().min(-2).max(2).optional(),
+    logit_bias: z.record(z.number()).optional(),
+    user: z.string().optional(),
+    functions: z
+      .array(
+        z.object({
+          name: z.string(),
+          description: z.string().optional(),
+          parameters: z.record(z.unknown()),
+        })
+      )
+      .optional(),
+    function_call: z
+      .union([
+        z.string(),
+        z.object({
+          name: z.string(),
+          arguments: z.record(z.unknown()),
+        }),
+      ])
+      .optional(),
+    tools: z.array(z.unknown()).optional(),
+    tool_choice: z.union([z.string(), z.object({ type: z.string() }).passthrough()]).optional(),
+    response_format: z.record(z.unknown()).optional(),
+    stream_options: z.record(z.unknown()).optional(),
+  })
+  .passthrough();
 
 export type ChatCompletionsBody = z.infer<typeof chatCompletionsBodySchema>;
 

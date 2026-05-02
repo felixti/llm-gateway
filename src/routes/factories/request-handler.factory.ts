@@ -14,7 +14,7 @@
  * 7. Streaming vs non-streaming routing
  */
 
-import { getDeploymentByAlias } from '@/config/deployments';
+import { getDeploymentByAlias, getFallbackChain } from '@/config/deployments';
 import { REQUEST_SIGNAL_KEY } from '@/middleware/timeout';
 import { getRequestBodyLogMetadata, logDebugRequestMetadata } from '@/observability/logger';
 import {
@@ -176,6 +176,50 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
             deployment.value,
             proxyContext
           );
+
+          // 8. Fallback: if primary non-streaming request failed, try fallback deployments
+          if (!response.ok && deployment.value.fallbackDeployment) {
+            const fallbackChain = getFallbackChain(deployment.value);
+
+            for (const fallback of fallbackChain) {
+              const fallbackCircuitCheck = await checkCircuitBreaker(fallback);
+              if (!fallbackCircuitCheck.ok) {
+                continue;
+              }
+
+              let fallbackAuthHeaders: Record<string, string>;
+              try {
+                fallbackAuthHeaders = await authManager.getAuthHeadersForDeployment(fallback);
+              } catch {
+                continue;
+              }
+
+              const fallbackUrl = deps.buildUpstreamUrl(fallback);
+              const fallbackBody = deps.transformBody
+                ? deps.transformBody(bodyRecord, fallback)
+                : bodyRecord;
+
+              const fallbackResponse = await deps.proxyNonStreaming(
+                fallbackUrl,
+                fallbackAuthHeaders,
+                fallbackBody,
+                fallback,
+                proxyContext
+              );
+
+              if (fallbackResponse.ok) {
+                span.setAttribute('http.status_code', fallbackResponse.status);
+                span.setAttribute('duration_ms', Date.now() - startTime);
+                span.setAttribute('llm.fallback', fallback.name);
+                logDebugRequestMetadata(
+                  'fallback',
+                  { status: fallbackResponse.status, deployment: fallback.name },
+                  { traceId: getCurrentTraceId(), userId }
+                );
+                return fallbackResponse;
+              }
+            }
+          }
         }
 
         // Record duration and status on span

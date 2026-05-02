@@ -12,7 +12,6 @@ export class MockRedis {
   }
 
   async set(key: string, value: string | number | Buffer, ..._args: unknown[]): Promise<void> {
-    // Support both redis.set(key, value) and redis.set(key, value, 'EX', seconds)
     this.store.set(key, String(value));
   }
 
@@ -21,96 +20,273 @@ export class MockRedis {
   }
 
   async eval(script: string, _numKeys: number, ...args: (string | number)[]): Promise<unknown> {
-    // Rate-limit scripts (use sorted sets)
     if (script.includes('zremrangebyscore') || script.includes('zcard')) {
       return [1, 0];
     }
 
+    if (script.includes('already_released')) {
+      return this.evalRelease(args);
+    }
+
+    if (script.includes('already_reconciled')) {
+      return this.evalReconcile(args);
+    }
+
+    if (script.includes('orphan_cleanup')) {
+      return this.evalCleanup(args);
+    }
+
     if (script.includes('monthly_budget') || script.includes('reserved')) {
-      const quotaKey = args[0] as string;
-      const reservedKey = args[1] as string;
-      const reservationKey = args[2] as string;
-      const hashKey = args[3] as string;
-      const cost = Number(args[4]);
-      const reservationData = args[5] as string;
-      const reservationId = args[8] as string;
-
-      const budgetRaw = this.hashes.get(quotaKey)?.get('budget') || '50';
-      const defaultBudget = Number(args[6]);
-      const budget = Number(budgetRaw) || defaultBudget;
-      const spent = Number(this.hashes.get(quotaKey)?.get('spent') || '0');
-      const reserved = Number(this.store.get(reservedKey) || '0');
-
-      if (spent + reserved + cost > budget) {
-        return [0, 'insufficient_quota'];
-      }
-
-      this.store.set(reservationKey, reservationData);
-      this.incrbyfloat(reservedKey, cost);
-      if (!this.hashes.has(hashKey)) {
-        this.hashes.set(hashKey, new Map());
-      }
-      this.hashes.get(hashKey)!.set(reservationId, reservationData);
-
-      return [1, 'ok'];
+      return this.evalCheckAndReserve(args);
     }
 
-    // Circuit breaker: record failure
     if (script.includes('threshold')) {
-      const key = args[0] as string;
-      const now = Number(args[1]);
-      const threshold = Number(args[2]);
-      const resetTimeout = Number(args[3]);
-
-      const map = this.hashes.get(key);
-      const currentState = map?.get('state') || 'CLOSED';
-      const failureCount = Number(map?.get('failureCount') || 0) + 1;
-
-      this.hset(key, { failureCount: String(failureCount), lastFailureTime: String(now) });
-
-      if (currentState === 'CLOSED' && failureCount >= threshold) {
-        this.hset(key, { state: 'OPEN', nextAttemptTime: String(now + resetTimeout) });
-        return 2;
-      }
-      if (currentState === 'HALF_OPEN') {
-        this.hset(key, { state: 'OPEN', nextAttemptTime: String(now + resetTimeout) });
-        return 2;
-      }
-      return 1;
+      return this.evalCircuitBreakerFailure(args);
     }
 
-    // Circuit breaker: check request allowed
     if (script.includes('nextAttemptTime') && !script.includes('failureCount')) {
-      const key = args[0] as string;
-      const now = Number(args[1]);
+      return this.evalCircuitBreakerCheck(args);
+    }
 
-      const map = this.hashes.get(key);
-      const state = map?.get('state') || 'CLOSED';
+    return this.evalCircuitBreakerSuccess(args);
+  }
 
-      if (state === 'CLOSED') return 1;
-      if (state === 'OPEN') {
-        const nextAttemptTime = Number(map?.get('nextAttemptTime') || 0);
-        if (now >= nextAttemptTime) {
-          this.hset(key, { state: 'HALF_OPEN' });
-          return 1;
-        }
-        return 0;
+  private evalCheckAndReserve(args: (string | number)[]): unknown {
+    const quotaKey = args[0] as string;
+    const reservedKey = args[1] as string;
+    const reservationKey = args[2] as string;
+    const hashKey = args[3] as string;
+    const cost = Number(args[4]);
+    const reservationData = args[5] as string;
+    const reservationId = args[8] as string;
+
+    const budgetRaw = this.hashes.get(quotaKey)?.get('budget') || '50000000';
+    const budget = Number(budgetRaw);
+    const spent = Number(this.hashes.get(quotaKey)?.get('spent') || '0');
+    const reserved = Number(this.store.get(reservedKey) || '0');
+
+    if (spent + reserved + cost > budget) {
+      return [0, 'insufficient_quota'];
+    }
+
+    this.store.set(reservationKey, reservationData);
+    this.incrbyfloat(reservedKey, cost);
+    if (!this.hashes.has(hashKey)) {
+      this.hashes.set(hashKey, new Map());
+    }
+    this.hashes.get(hashKey)!.set(reservationId, reservationData);
+
+    return [1, 'ok'];
+  }
+
+  private evalRelease(args: (string | number)[]): unknown {
+    const idempotencyKey = args[0] as string;
+    const reservationKey = args[1] as string;
+    const reservationId = args[2] as string;
+
+    if (this.store.has(idempotencyKey)) {
+      return [0, 'already_released'];
+    }
+
+    const data = this.store.get(reservationKey);
+    if (!data) {
+      this.store.set(idempotencyKey, '0');
+      return [0, 'not_found'];
+    }
+
+    const parts = data.split('|');
+    const amountMicro = parts[0];
+    const userId = parts[1];
+    const month = parts[2];
+
+    if (!amountMicro || !userId || !month) {
+      this.store.set(idempotencyKey, '0');
+      return [0, 'parse_error'];
+    }
+
+    const reservedKey = `reserved:${userId}:${month}`;
+    const hashKey = `reservations_meta:${userId}:${month}`;
+
+    const currentReserved = Number(this.store.get(reservedKey) || '0');
+    this.store.set(reservedKey, String(currentReserved - Number(amountMicro)));
+
+    this.store.delete(reservationKey);
+    const hash = this.hashes.get(hashKey);
+    if (hash) {
+      hash.delete(reservationId);
+      if (hash.size === 0) this.hashes.delete(hashKey);
+    }
+
+    this.store.set(idempotencyKey, amountMicro);
+
+    return [1, 'ok', amountMicro];
+  }
+
+  private evalReconcile(args: (string | number)[]): unknown {
+    const idempotencyKey = args[0] as string;
+    const reservationKey = args[1] as string;
+    const reservationId = args[2] as string;
+    const costMicro = args[3] as string;
+
+    if (this.store.has(idempotencyKey)) {
+      return [0, 'already_reconciled'];
+    }
+
+    const data = this.store.get(reservationKey);
+    if (!data) {
+      this.store.set(idempotencyKey, costMicro);
+      return [0, 'not_found'];
+    }
+
+    const parts = data.split('|');
+    const reservedAmountMicro = parts[0];
+    const userId = parts[1];
+    const month = parts[2];
+
+    if (!reservedAmountMicro || !userId || !month) {
+      this.store.set(idempotencyKey, costMicro);
+      return [0, 'parse_error'];
+    }
+
+    const quotaKey = `quota:${userId}:${month}`;
+    const reservedKey = `reserved:${userId}:${month}`;
+    const hashKey = `reservations_meta:${userId}:${month}`;
+
+    if (!this.hashes.has(quotaKey)) {
+      this.hashes.set(quotaKey, new Map());
+    }
+    const quotaMap = this.hashes.get(quotaKey)!;
+    const currentSpent = Number(quotaMap.get('spent') || '0');
+    quotaMap.set('spent', String(currentSpent + Number(costMicro)));
+
+    const currentReserved = Number(this.store.get(reservedKey) || '0');
+    this.store.set(reservedKey, String(currentReserved - Number(reservedAmountMicro)));
+
+    this.store.delete(reservationKey);
+    const hash = this.hashes.get(hashKey);
+    if (hash) {
+      hash.delete(reservationId);
+      if (hash.size === 0) this.hashes.delete(hashKey);
+    }
+
+    this.store.set(idempotencyKey, costMicro);
+
+    return [1, 'ok', costMicro, reservedAmountMicro];
+  }
+
+  private evalCleanup(args: (string | number)[]): number {
+    const hashKey = args[0] as string;
+    const nowMs = Number(args[1]);
+    const ttlMs = Number(args[2]);
+
+    const hash = this.hashes.get(hashKey);
+    if (!hash) return 0;
+
+    let cleaned = 0;
+    const entriesToDelete: string[] = [];
+
+    for (const [reservationId, data] of hash) {
+      const parts = data.split('|');
+      if (parts.length < 4) continue;
+
+      const amountMicro = parts[0];
+      const userId = parts[1];
+      const month = parts[2];
+      const createdAtStr = parts[3];
+      const createdAt = Number(createdAtStr);
+
+      if (!createdAt || nowMs - createdAt <= ttlMs) continue;
+
+      const reservationKey = `reservation:${reservationId}`;
+      if (this.store.has(reservationKey)) continue;
+
+      const idemKey = `cleanup:${reservationId}`;
+      if (this.store.has(idemKey)) continue;
+
+      const reservedKey = `reserved:${userId}:${month}`;
+      const currentReserved = Number(this.store.get(reservedKey) || '0');
+      this.store.set(reservedKey, String(currentReserved - Number(amountMicro)));
+
+      entriesToDelete.push(reservationId);
+      this.store.set(idemKey, '1');
+      cleaned++;
+    }
+
+    for (const id of entriesToDelete) {
+      hash.delete(id);
+    }
+    if (hash.size === 0) {
+      this.hashes.delete(hashKey);
+    }
+
+    return cleaned;
+  }
+
+  private evalCircuitBreakerFailure(args: (string | number)[]): number {
+    const key = args[0] as string;
+    const probeKey = args[1] as string;
+    const now = Number(args[2]);
+    const threshold = Number(args[3]);
+    const resetTimeout = Number(args[4]);
+
+    const map = this.hashes.get(key);
+    const currentState = map?.get('state') || 'CLOSED';
+    const failureCount = Number(map?.get('failureCount') || 0) + 1;
+
+    this.hset(key, { failureCount: String(failureCount), lastFailureTime: String(now) });
+
+    if (currentState === 'CLOSED' && failureCount >= threshold) {
+      this.hset(key, { state: 'OPEN', nextAttemptTime: String(now + resetTimeout) });
+      return 2;
+    }
+    if (currentState === 'HALF_OPEN') {
+      this.hset(key, { state: 'OPEN', nextAttemptTime: String(now + resetTimeout) });
+      this.store.delete(probeKey);
+      return 2;
+    }
+    return 1;
+  }
+
+  private evalCircuitBreakerCheck(args: (string | number)[]): number {
+    const key = args[0] as string;
+    const probeKey = args[1] as string;
+    const now = Number(args[2]);
+
+    const map = this.hashes.get(key);
+    const state = map?.get('state') || 'CLOSED';
+
+    if (state === 'CLOSED') return 1;
+    if (state === 'OPEN') {
+      const nextAttemptTime = Number(map?.get('nextAttemptTime') || 0);
+      if (now >= nextAttemptTime) {
+        this.hset(key, { state: 'HALF_OPEN' });
+        this.store.set(probeKey, '1');
+        return 1;
       }
-      if (state === 'HALF_OPEN') return 1;
       return 0;
     }
-
-    // Circuit breaker: record success (default catch-all for circuit breaker scripts)
-    {
-      const key = args[0] as string;
-      const state = this.hashes.get(key)?.get('state');
-      if (state === 'HALF_OPEN') {
-        this.hset(key, { state: 'CLOSED', failureCount: 0, nextAttemptTime: 0 });
-      } else {
-        this.hset(key, { failureCount: 0 });
+    if (state === 'HALF_OPEN') {
+      const probeInProgress = this.store.get(probeKey);
+      if (probeInProgress) {
+        return 0;
       }
+      this.store.set(probeKey, '1');
       return 1;
     }
+    return 0;
+  }
+
+  private evalCircuitBreakerSuccess(args: (string | number)[]): number {
+    const key = args[0] as string;
+    const probeKey = args.length > 1 ? (args[1] as string) : undefined;
+    const state = this.hashes.get(key)?.get('state');
+    if (state === 'HALF_OPEN') {
+      this.hset(key, { state: 'CLOSED', failureCount: 0, nextAttemptTime: 0 });
+      if (probeKey) this.store.delete(probeKey);
+    } else {
+      this.hset(key, { failureCount: 0 });
+    }
+    return 1;
   }
 
   async hget(key: string, field: string): Promise<string | null> {
@@ -135,13 +311,11 @@ export class MockRedis {
     let added = 0;
 
     if (args.length === 1 && typeof args[0] === 'object' && args[0] !== null) {
-      // Object form: hset(key, { field: value })
       for (const [field, value] of Object.entries(args[0] as Record<string, unknown>)) {
         if (!map.has(field)) added++;
         map.set(field, String(value));
       }
     } else if (args.length >= 2) {
-      // Variadic form: hset(key, field, value, field2, value2, ...)
       for (let i = 0; i < args.length; i += 2) {
         const field = String(args[i]);
         const value = String(args[i + 1]);
@@ -195,7 +369,6 @@ export class MockRedis {
             let count = 0;
             for (const k of keys) {
               if (this.store.delete(k)) count++;
-              // Also clean up hashes if any
               for (const [hk] of this.hashes) {
                 if (hk === k) {
                   this.hashes.delete(hk);

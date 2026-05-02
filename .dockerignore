@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+
+# Environment and secrets
+.env
+.env.*
+.envrc
+
+# Node
+node_modules
+bun.lockb
+
+# IDE and editor
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Agent and project metadata
+.agents
+.claude
+.kilocode
+.opencode
+.tmp
+.sisyphus
+http/
+tests/
+docs/
+*.log
+
+# Documentation (except README.md)
+*.md
+!README.md
+
+# Docker
+Dockerfile
+.dockerignore
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml

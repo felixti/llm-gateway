@@ -17,10 +17,12 @@ function getCircuitKey(deploymentName: string): string {
 
 const RECORD_SUCCESS_SCRIPT = `
   local key = KEYS[1]
+  local probeKey = KEYS[2]
   local state = redis.call('hget', key, 'state')
   
   if state == 'HALF_OPEN' then
     redis.call('hset', key, 'state', 'CLOSED', 'failureCount', 0, 'nextAttemptTime', 0)
+    redis.call('del', probeKey)
     return 1
   elseif state == 'CLOSED' or state == false then
     redis.call('hset', key, 'failureCount', 0)
@@ -32,6 +34,7 @@ const RECORD_SUCCESS_SCRIPT = `
 
 const RECORD_FAILURE_SCRIPT = `
   local key = KEYS[1]
+  local probeKey = KEYS[2]
   local now = tonumber(ARGV[1])
   local threshold = tonumber(ARGV[2])
   local resetTimeout = tonumber(ARGV[3])
@@ -52,6 +55,7 @@ const RECORD_FAILURE_SCRIPT = `
     end
   elseif state == 'HALF_OPEN' then
     redis.call('hset', key, 'state', 'OPEN', 'nextAttemptTime', now + resetTimeout)
+    redis.call('del', probeKey)
     return 2
   end
   
@@ -60,33 +64,41 @@ const RECORD_FAILURE_SCRIPT = `
 
 const IS_REQUEST_ALLOWED_SCRIPT = `
   local key = KEYS[1]
+  local probeKey = KEYS[2]
   local now = tonumber(ARGV[1])
   local resetTimeout = tonumber(ARGV[2])
-  
+
   local state = redis.call('hget', key, 'state')
   if state == false or state == 'CLOSED' then
     return 1
   end
-  
+
   if state == 'OPEN' then
     local nextAttemptTime = tonumber(redis.call('hget', key, 'nextAttemptTime') or 0)
     if now >= nextAttemptTime then
       redis.call('hset', key, 'state', 'HALF_OPEN')
+      redis.call('set', probeKey, '1')
       return 1
     end
     return 0
   end
-  
+
   if state == 'HALF_OPEN' then
+    local probeInProgress = redis.call('get', probeKey)
+    if probeInProgress then
+      return 0
+    end
+    redis.call('set', probeKey, '1')
     return 1
   end
-  
+
   return 0
 `;
 
 export async function recordSuccess(deploymentName: string): Promise<void> {
   const key = getCircuitKey(deploymentName);
-  await redis.eval(RECORD_SUCCESS_SCRIPT, 1, key);
+  const probeKey = `${CIRCUIT_KEY_PREFIX}${deploymentName}:half_open_probe`;
+  await redis.eval(RECORD_SUCCESS_SCRIPT, 2, key, probeKey);
   const state = await redis.hget(key, 'state');
   if (state) {
     setCircuitBreakerState(state as 'CLOSED' | 'OPEN' | 'HALF_OPEN');
@@ -95,10 +107,12 @@ export async function recordSuccess(deploymentName: string): Promise<void> {
 
 export async function recordFailure(deploymentName: string): Promise<void> {
   const key = getCircuitKey(deploymentName);
+  const probeKey = `${CIRCUIT_KEY_PREFIX}${deploymentName}:half_open_probe`;
   await redis.eval(
     RECORD_FAILURE_SCRIPT,
-    1,
+    2,
     key,
+    probeKey,
     Date.now(),
     DEFAULT_FAILURE_THRESHOLD,
     DEFAULT_RESET_TIMEOUT
@@ -111,10 +125,12 @@ export async function recordFailure(deploymentName: string): Promise<void> {
 
 export async function isRequestAllowed(deploymentName: string): Promise<boolean> {
   const key = getCircuitKey(deploymentName);
+  const probeKey = `${CIRCUIT_KEY_PREFIX}${deploymentName}:half_open_probe`;
   const result = await redis.eval(
     IS_REQUEST_ALLOWED_SCRIPT,
-    1,
+    2,
     key,
+    probeKey,
     Date.now(),
     DEFAULT_RESET_TIMEOUT
   );
@@ -154,7 +170,8 @@ export async function getCircuitState(deploymentName: string): Promise<{
 
 export async function resetCircuitBreaker(deploymentName: string): Promise<void> {
   const key = getCircuitKey(deploymentName);
-  await redis.del(key);
+  const probeKey = `${CIRCUIT_KEY_PREFIX}${deploymentName}:half_open_probe`;
+  await redis.del(key, probeKey);
 }
 
 export async function resetAllCircuitBreakers(): Promise<void> {

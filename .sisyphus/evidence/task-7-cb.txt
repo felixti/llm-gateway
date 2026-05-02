@@ -1,0 +1,65 @@
+Task 7: Circuit Breaker Half-Open Probe + Fallback on Failure
+
+=== Circuit Breaker Half-Open Single Probe ===
+
+Files changed:
+- src/services/circuit-breaker.ts
+- tests/unit/services/circuit-breaker.test.ts
+- tests/integration/helpers/mock-redis.ts
+
+Changes:
+1. IS_REQUEST_ALLOWED_SCRIPT: Added probe key (KEYS[2]) tracking via Redis string key
+   `cb:{deployment}:half_open_probe`. In HALF_OPEN state, first request sets probe key
+   and returns 1 (allowed). Subsequent requests check probe key and return 0 (rejected).
+
+2. RECORD_SUCCESS_SCRIPT: Added probe key (KEYS[2]). On HALF_OPEN → CLOSED transition,
+   deletes the probe key (`redis.call('del', probeKey)`) so next request can probe.
+
+3. RECORD_FAILURE_SCRIPT: Added probe key (KEYS[2]). On HALF_OPEN → OPEN transition,
+   deletes the probe key so next timeout expiry allows a new probe.
+
+4. TypeScript functions: recordSuccess(), recordFailure(), isRequestAllowed() now pass
+   2 keys (circuit key + probe key) with numKeys=2.
+
+5. resetCircuitBreaker(): Now also deletes the probe key.
+
+6. MockRedis: Updated eval() to handle probe key in circuit breaker scripts.
+   - IS_REQUEST_ALLOWED: probe key stored as string via this.store.set/probeKey
+   - RECORD_FAILURE: clears probe key via this.store.delete(probeKey) on HALF_OPEN→OPEN
+   - RECORD_SUCCESS: clears probe key via this.store.delete(probeKey) on HALF_OPEN→CLOSED
+
+New tests (4):
+- should allow exactly one request in HALF_OPEN state (first allowed, second rejected)
+- should close circuit after successful probe
+- should re-open circuit when probe fails and allow next probe after timeout
+- should reject all requests after probe is progress until probe completes
+
+=== Fallback on Failure ===
+
+Files changed:
+- src/routes/factories/request-handler.factory.ts
+- tests/unit/routes/factories/request-handler.factory.test.ts
+
+Changes:
+1. Added import of getFallbackChain from deployments config.
+
+2. After primary non-streaming proxy returns non-ok response, checks if
+   deployment has fallback chain. For each fallback:
+   - Checks circuit breaker (skip if open)
+   - Gets auth headers (skip on failure)
+   - Builds upstream URL and body
+   - Calls proxyNonStreaming with fallback deployment
+   - Returns first successful fallback response
+   - If all fallbacks fail, returns original primary error response
+
+3. Streaming requests: No fallback attempted (per requirement).
+
+New tests (4):
+- should attempt fallback when primary non-streaming proxy returns non-ok response
+- should not attempt fallback for streaming requests
+- should return primary error when fallback also fails
+- should not attempt fallback when primary has no fallback deployment configured
+
+=== Test Results ===
+$ bun test tests/unit/services/circuit-breaker.test.ts tests/unit/routes/factories/request-handler.factory.test.ts
+34 pass, 0 fail, 90 expect() calls

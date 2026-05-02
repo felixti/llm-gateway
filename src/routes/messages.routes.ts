@@ -18,62 +18,65 @@ import { z } from 'zod';
 import { createRequestHandler } from './factories/request-handler.factory';
 
 // Zod schema for Anthropic messages body validation
-const anthropicMessagesBodySchema = z.object({
-  model: z.string().min(1, 'model is required'),
-  messages: z
-    .array(
-      z.object({
-        role: z.enum(['user', 'assistant']),
-        content: z.union([
-          z.string(),
-          z.array(
-            z.object({
-              type: z.enum(['text', 'tool_use', 'tool_result']),
-              text: z.string().optional(),
-              id: z.string().optional(),
-              name: z.string().optional(),
-              input: z.record(z.unknown()).optional(),
-            })
-          ),
-        ]),
-      })
-    )
-    .min(1, 'messages are required'),
-  stream: z.boolean().optional().default(false),
-  system: z
-    .union([
-      z.string(),
-      z.array(
+export const anthropicMessagesBodySchema = z
+  .object({
+    model: z.string().min(1, 'model is required'),
+    messages: z
+      .array(
         z.object({
-          type: z.literal('text'),
-          text: z.string(),
+          role: z.enum(['user', 'assistant']),
+          content: z.union([
+            z.string(),
+            z.array(
+              z.object({
+                type: z.enum(['text', 'tool_use', 'tool_result']),
+                text: z.string().optional(),
+                id: z.string().optional(),
+                name: z.string().optional(),
+                input: z.record(z.unknown()).optional(),
+              })
+            ),
+          ]),
         })
-      ),
-    ])
-    .optional(),
-  thinking: z
-    .object({
-      type: z.enum(['enabled', 'disabled']),
-      budget_tokens: z.number().int().positive().optional(),
-    })
-    .optional(),
-  tools: z
-    .array(
-      z.object({
-        name: z.string(),
-        description: z.string().optional(),
-        input_schema: z.record(z.unknown()),
+      )
+      .min(1, 'messages are required'),
+    stream: z.boolean().optional().default(false),
+    system: z
+      .union([
+        z.string(),
+        z.array(
+          z.object({
+            type: z.literal('text'),
+            text: z.string(),
+          })
+        ),
+      ])
+      .optional(),
+    thinking: z
+      .object({
+        type: z.enum(['enabled', 'disabled']),
+        budget_tokens: z.number().int().positive().optional(),
       })
-    )
-    .optional(),
-  tool_choice: z
-    .object({
-      type: z.enum(['auto', 'any', 'tool']),
-      name: z.string().optional(),
-    })
-    .optional(),
-  max_tokens: z.number().int().positive().min(1),
-});
+      .optional(),
+    tools: z
+      .array(
+        z.object({
+          name: z.string(),
+          description: z.string().optional(),
+          input_schema: z.record(z.unknown()),
+        })
+      )
+      .optional(),
+    tool_choice: z
+      .object({
+        type: z.enum(['auto', 'any', 'tool']),
+        name: z.string().optional(),
+      })
+      .optional(),
+    max_tokens: z.number().int().positive().min(1),
+    stream_options: z.record(z.unknown()).optional(),
+  })
+  .passthrough();
 
 export type AnthropicMessagesBody = z.infer<typeof anthropicMessagesBodySchema>;
 

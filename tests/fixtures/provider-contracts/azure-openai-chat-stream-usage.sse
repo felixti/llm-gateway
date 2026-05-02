@@ -1,0 +1,7 @@
+data: {"id":"chatcmpl-azure-001","object":"chat.completion.chunk","created":1777737600,"model":"gpt-5.4","system_fingerprint":"fp_azure","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-azure-001","object":"chat.completion.chunk","created":1777737600,"model":"gpt-5.4","system_fingerprint":"fp_azure","choices":[{"index":0,"delta":{"content":"Hello from Azure."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-azure-001","object":"chat.completion.chunk","created":1777737600,"model":"gpt-5.4","system_fingerprint":"fp_azure","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":22,"completion_tokens":9,"total_tokens":31}}
+
+data: [DONE]

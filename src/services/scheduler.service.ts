@@ -1,4 +1,4 @@
-import { archiveMonthlyUsage } from '@/db/data-access';
+import { archiveMonthlyUsage, getRequestAuditStats } from '@/db/data-access';
 import { redis } from '@/db/redis';
 import { logger } from '@/observability/logger';
 import { cleanupOrphanedReservations } from '@/services/quota.service';
@@ -10,6 +10,11 @@ let cleanupInterval: ReturnType<typeof setInterval> | null = null;
 let archiveInterval: ReturnType<typeof setInterval> | null = null;
 let cleanupRunning = false;
 let archiveRunning = false;
+
+function currentMonthKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
 
 async function runCleanupJob(): Promise<void> {
   if (cleanupRunning) return;
@@ -27,14 +32,16 @@ async function runCleanupJob(): Promise<void> {
   }
 }
 
-async function runArchiveJob(): Promise<void> {
+export async function runArchiveJob(): Promise<void> {
   if (archiveRunning) return;
   archiveRunning = true;
+
+  const currentMonth = currentMonthKey();
 
   try {
     const pattern = 'quota:*';
     let cursor = '0';
-    const archivedUsers: string[] = [];
+    const archivedSet = new Set<string>();
 
     do {
       const scanResult = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
@@ -43,31 +50,36 @@ async function runArchiveJob(): Promise<void> {
 
       for (const key of keys) {
         const parts = key.split(':');
-        if (parts.length >= 3) {
-          const userId = parts[1];
-          const month = parts[2];
+        if (parts.length < 3) continue;
 
-          if (!archivedUsers.includes(`${userId}:${month}`)) {
-            const data = await redis.hgetall(key);
-            if (data?.spent) {
-              await archiveMonthlyUsage({
-                userId,
-                month,
-                totalRequests: 0,
-                totalTokensInput: 0,
-                totalTokensOutput: 0,
-                totalTokensThinking: 0,
-                totalCostUsd: data.spent,
-              });
-              archivedUsers.push(`${userId}:${month}`);
-            }
-          }
-        }
+        const userId = parts[1];
+        const month = parts[2];
+        const dedupeKey = `${userId}:${month}`;
+
+        if (month >= currentMonth) continue;
+        if (archivedSet.has(dedupeKey)) continue;
+
+        const data = await redis.hgetall(key);
+        if (!data?.spent) continue;
+
+        const stats = await getRequestAuditStats(userId, month);
+
+        await archiveMonthlyUsage({
+          userId,
+          month,
+          totalRequests: stats.totalRequests,
+          totalTokensInput: stats.totalTokensInput,
+          totalTokensOutput: stats.totalTokensOutput,
+          totalTokensThinking: stats.totalTokensThinking,
+          totalCostUsd: data.spent,
+        });
+
+        archivedSet.add(dedupeKey);
       }
     } while (cursor !== '0');
 
-    if (archivedUsers.length > 0) {
-      logger.info('Archived monthly usage', { count: archivedUsers.length });
+    if (archivedSet.size > 0) {
+      logger.info('Archived monthly usage', { count: archivedSet.size });
     }
   } catch (error) {
     logger.error('Archive job failed', { error });
