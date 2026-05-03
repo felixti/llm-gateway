@@ -67,11 +67,13 @@ describe('checkDeploymentHealth', () => {
     expect(health.error).toBe('network down');
   });
 
-  it('uses Azure OpenAI path for gpt deployments', async () => {
+  it('uses Azure OpenAI deployment status GET for gpt deployments', async () => {
     let capturedUrl = '';
+    let capturedMethod = '';
     globalThis.fetch = Object.assign(
-      async (input: string | URL | Request, _init?: RequestInit) => {
+      async (input: string | URL | Request, init?: RequestInit) => {
         capturedUrl = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        capturedMethod = init?.method ?? 'GET';
         return new Response('{}', { status: 200 });
       },
       { preconnect: originalFetch.preconnect }
@@ -82,14 +84,17 @@ describe('checkDeploymentHealth', () => {
     await checkDeploymentHealth(deployment);
 
     const url = new URL(capturedUrl);
-    expect(url.pathname).toBe('/openai/deployments/gpt-5.4-global/chat/completions');
+    expect(url.pathname).toBe('/openai/deployments/gpt-5.4-global');
+    expect(capturedMethod).toBe('GET');
   });
 
-  it('uses Foundry /models path for kimi deployments', async () => {
+  it('uses Foundry /models GET for kimi deployments', async () => {
     let capturedUrl = '';
+    let capturedMethod = '';
     globalThis.fetch = Object.assign(
-      async (input: string | URL | Request, _init?: RequestInit) => {
+      async (input: string | URL | Request, init?: RequestInit) => {
         capturedUrl = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        capturedMethod = init?.method ?? 'GET';
         return new Response('{}', { status: 200 });
       },
       { preconnect: originalFetch.preconnect }
@@ -100,32 +105,15 @@ describe('checkDeploymentHealth', () => {
     await checkDeploymentHealth(foundryDeployment);
 
     const url = new URL(capturedUrl);
-    expect(url.pathname).toBe('/models/chat/completions');
+    expect(url.pathname).toBe('/models');
+    expect(capturedMethod).toBe('GET');
   });
 
-  it('sends azureModelName for Foundry chat-completions health probes', async () => {
-    let capturedBody = '';
+  it('does not send a request body (non-billing GET)', async () => {
+    let capturedBody: string | null = null;
     globalThis.fetch = Object.assign(
       async (_input: string | URL | Request, init?: RequestInit) => {
-        capturedBody = typeof init?.body === 'string' ? init.body : '';
-        return new Response('{}', { status: 200 });
-      },
-      { preconnect: originalFetch.preconnect }
-    ) as typeof fetch;
-
-    redis.eval = (async () => 'OK') as typeof redis.eval;
-
-    await checkDeploymentHealth(foundryDeployment);
-
-    const body = JSON.parse(capturedBody);
-    expect(body.model).toBe('FW-Kimi-K2.5');
-  });
-
-  it('sends deployment.name for non-Foundry health probes', async () => {
-    let capturedBody = '';
-    globalThis.fetch = Object.assign(
-      async (_input: string | URL | Request, init?: RequestInit) => {
-        capturedBody = typeof init?.body === 'string' ? init.body : '';
+        capturedBody = init?.body ? String(init.body) : null;
         return new Response('{}', { status: 200 });
       },
       { preconnect: originalFetch.preconnect }
@@ -135,8 +123,7 @@ describe('checkDeploymentHealth', () => {
 
     await checkDeploymentHealth(deployment);
 
-    const body = JSON.parse(capturedBody);
-    expect(body.model).toBe('gpt-5.4-global');
+    expect(capturedBody).toBeNull();
   });
 });
 
@@ -154,7 +141,6 @@ describe('health cache', () => {
   });
 
   it('starts empty and is populated after a probe sweep', async () => {
-    // All upstream probes resolve 200 so every deployment looks healthy.
     globalThis.fetch = Object.assign(
       async () => new Response('{}', { status: 200 }),
       { preconnect: originalFetch.preconnect }

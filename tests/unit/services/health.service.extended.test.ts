@@ -39,7 +39,7 @@ describe('health.service - extended coverage', () => {
   });
 
   describe('checkDeploymentHealth - anthropic protocol', () => {
-    it('checks anthropic-messages deployment health', async () => {
+    it('uses Foundry /models GET for anthropic-messages deployments', async () => {
       const anthropicDeployment: DeploymentConfig = {
         ...deployment,
         name: 'claude-opus-4-6',
@@ -50,9 +50,11 @@ describe('health.service - extended coverage', () => {
       };
 
       let capturedUrl = '';
+      let capturedMethod = '';
       globalThis.fetch = Object.assign(
-        async (input: string | URL | Request, _init?: RequestInit) => {
+        async (input: string | URL | Request, init?: RequestInit) => {
           capturedUrl = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+          capturedMethod = init?.method ?? 'GET';
           return new Response('{}', { status: 200 });
         },
         { preconnect: originalFetch.preconnect }
@@ -61,7 +63,8 @@ describe('health.service - extended coverage', () => {
       const health = await checkDeploymentHealth(anthropicDeployment);
       expect(health.healthy).toBe(true);
       expect(health.deploymentName).toBe('claude-opus-4-6');
-      expect(capturedUrl).toContain('/anthropic/v1/messages');
+      expect(capturedUrl).toContain('/models');
+      expect(capturedMethod).toBe('GET');
     });
   });
 

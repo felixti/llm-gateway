@@ -1,6 +1,9 @@
 /**
  * Health Service
- * Periodic deployment health checks with circuit breaker integration
+ * Periodic deployment health checks with circuit breaker integration.
+ *
+ * Uses non-billing Azure endpoints (GET deployment metadata / models listing)
+ * instead of live LLM calls to avoid token costs from health probes.
  */
 
 import {
@@ -24,86 +27,47 @@ export interface DeploymentHealth {
   error?: string;
 }
 
-function buildChatCompletionsHealthBody(deployment: DeploymentConfig): Record<string, unknown> {
-  const model = FOUNDRY_FAMILIES.includes(deployment.modelFamily)
-    ? deployment.azureModelName || deployment.name
-    : deployment.name;
-  return {
-    model,
-    messages: [{ role: 'user', content: 'Health check' }],
-    max_tokens: 1,
-  };
-}
-
-function buildAnthropicHealthBody(deployment: DeploymentConfig): Record<string, unknown> {
-  return {
-    model: deployment.name,
-    max_tokens: 1,
-    messages: [{ role: 'user', content: 'Health check' }],
-  };
-}
-
 /**
- * Perform a lightweight health check for chat-completions (OpenAI-compatible) deployment
+ * Build the non-billing health-check URL for a deployment.
+ *
+ * - Azure OpenAI (GPT): GET /openai/deployments/{name}?api-version=...
+ *   Returns deployment metadata (model, status, SKU) without generating tokens.
+ *
+ * - Azure AI Foundry (Kimi/GLM/MiniMax/Claude): GET /models?api-version=...
+ *   Returns the list of available models — proves endpoint connectivity and
+ *   auth without any token billing.
  */
-async function checkChatCompletionsHealth(
-  deployment: DeploymentConfig
-): Promise<{ latencyMs: number }> {
-  const authManager = getAzureAuthManager();
-  const headers = await authManager.getAuthHeadersForDeployment(deployment);
-
+function buildHealthCheckUrl(deployment: DeploymentConfig): string {
   const url = new URL(deployment.endpoint);
+
   if (FOUNDRY_FAMILIES.includes(deployment.modelFamily)) {
-    url.pathname = '/models/chat/completions';
+    url.pathname = '/models';
+  } else if (deployment.protocolFamily === 'anthropic-messages') {
+    url.pathname = '/models';
   } else {
-    url.pathname = `/openai/deployments/${deployment.name}/chat/completions`;
+    url.pathname = `/openai/deployments/${deployment.name}`;
   }
+
   url.searchParams.set('api-version', deployment.apiVersion);
-
-  const startTime = Date.now();
-
-  const response = await upstreamHttpsFetch(url.toString(), {
-    method: 'POST',
-    headers: {
-      ...headers,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(buildChatCompletionsHealthBody(deployment)),
-    signal: AbortSignal.timeout(env.HEALTH_CHECK_TIMEOUT_MS),
-  });
-
-  const latencyMs = Date.now() - startTime;
-
-  if (!response.ok) {
-    throw new Error(`Upstream returned error: ${response.status}`);
-  }
-
-  return { latencyMs };
+  return url.toString();
 }
 
 /**
- * Perform a lightweight health check for anthropic-messages deployment
+ * Perform a lightweight (non-billing) health check via GET deployment metadata
+ * for Azure OpenAI, or GET models listing for Azure AI Foundry deployments.
  */
-async function checkAnthropicMessagesHealth(
+async function checkDeploymentConnectivity(
   deployment: DeploymentConfig
 ): Promise<{ latencyMs: number }> {
   const authManager = getAzureAuthManager();
   const headers = await authManager.getAuthHeadersForDeployment(deployment);
 
-  const url = new URL(deployment.endpoint);
-  url.pathname = '/anthropic/v1/messages';
-  url.searchParams.set('api-version', deployment.apiVersion);
-
+  const url = buildHealthCheckUrl(deployment);
   const startTime = Date.now();
 
-  const response = await upstreamHttpsFetch(url.toString(), {
-    method: 'POST',
-    headers: {
-      ...headers,
-      'Content-Type': 'application/json',
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify(buildAnthropicHealthBody(deployment)),
+  const response = await upstreamHttpsFetch(url, {
+    method: 'GET',
+    headers,
     signal: AbortSignal.timeout(env.HEALTH_CHECK_TIMEOUT_MS),
   });
 
@@ -125,20 +89,12 @@ export async function checkDeploymentHealth(
   const startTime = Date.now();
 
   try {
-    let latencyMs: number;
-
-    if (deployment.protocolFamily === 'anthropic-messages') {
-      const result = await checkAnthropicMessagesHealth(deployment);
-      latencyMs = result.latencyMs;
-    } else {
-      const result = await checkChatCompletionsHealth(deployment);
-      latencyMs = result.latencyMs;
-    }
+    const result = await checkDeploymentConnectivity(deployment);
 
     return {
       deploymentName: deployment.name,
       healthy: true,
-      latencyMs,
+      latencyMs: result.latencyMs,
       lastCheck: new Date(),
     };
   } catch (error) {
