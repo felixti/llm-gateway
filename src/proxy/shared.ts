@@ -1,6 +1,7 @@
 import type { DeploymentConfig } from '@/config/deployments';
 import { logRequestAudit } from '@/db/data-access';
 import { logger } from '@/observability/logger';
+import { addLlmCost, addLlmTokens, recordLlmRequestDuration } from '@/observability/metrics';
 import { addLLMSpanAttributes } from '@/observability/tracing';
 import type { ProxyRequestContext } from '@/routes/factories/types';
 import type { TokenUsage } from '@/services/pricing.service';
@@ -143,6 +144,15 @@ export async function finalizeProxyUsage({
     totalTokens: usage.prompt_tokens + usage.completion_tokens,
     costUsd: actualCost.toNumber(),
   });
+
+  addLlmTokens(usage.prompt_tokens, usage.completion_tokens, deployment.azureModelName);
+  addLlmCost(actualCost.toNumber(), deployment.azureModelName);
+  recordLlmRequestDuration(
+    Date.now() - startTime,
+    deployment.azureModelName,
+    deployment.protocolFamily
+  );
+
   logRequestAudit({
     userId: userId || 'unknown',
     requestId,
