@@ -55,7 +55,7 @@ async function resolveUserIdToUuid(patSubject: string): Promise<string | null> {
     logger.warn('Cannot resolve non-UUID userId to user UUID', { patSubject });
     return null;
   } catch (error) {
-    logger.error('Failed to resolve userId to UUID', { patSubject, error });
+    logger.error({ patSubject, error }, 'Failed to resolve userId to UUID');
     return null;
   }
 }
@@ -101,7 +101,7 @@ export async function batchResolveUserIds(
       }
     }
   } catch (error) {
-    logger.error('Failed to batch-resolve userIds', { error });
+    logger.error({ error }, 'Failed to batch-resolve userIds');
   }
 
   return result;
@@ -154,7 +154,7 @@ export async function batchGetRequestAuditStats(
       });
     }
   } catch (error) {
-    logger.error('Failed to batch-query request audit stats', { error });
+    logger.error({ error }, 'Failed to batch-query request audit stats');
   }
 
   return result;
@@ -206,10 +206,13 @@ export async function batchArchiveMonthlyUsage(
       ],
     });
   } catch (error) {
-    logger.error('Failed to batch-archive monthly usage', {
-      count: records.length,
-      error,
-    });
+    logger.error(
+      {
+        count: records.length,
+        error,
+      },
+      'Failed to batch-archive monthly usage'
+    );
     throw error;
   }
 }
@@ -294,7 +297,7 @@ export async function getUserQuotaPolicyByPatSubject(
       hard_limit: row.hard_limit,
     };
   } catch (error) {
-    logger.error('Failed to load user quota policy', { patSubject, error });
+    logger.error({ patSubject, error }, 'Failed to load user quota policy');
     return null;
   }
 }
@@ -343,7 +346,7 @@ export async function logRequestAudit(record: RequestAuditRecord): Promise<void>
   try {
     await database.execute({ query, params });
   } catch (error) {
-    logger.error('Failed to log request audit', { requestId: record.requestId, error });
+    logger.error({ requestId: record.requestId, error }, 'Failed to log request audit');
   }
 }
 
@@ -392,11 +395,14 @@ export async function archiveMonthlyUsage(record: UsageArchiveRecord): Promise<v
   try {
     await database.execute({ query, params });
   } catch (error) {
-    logger.error('Failed to archive monthly usage', {
-      userId: record.userId,
-      month: record.month,
-      error,
-    });
+    logger.error(
+      {
+        userId: record.userId,
+        month: record.month,
+        error,
+      },
+      'Failed to archive monthly usage'
+    );
     throw error;
   }
 }
@@ -436,7 +442,7 @@ export async function getRequestAuditStats(userId: string, month: string): Promi
       totalTokensThinking: Number(row?.total_tokens_thinking ?? 0),
     };
   } catch (error) {
-    logger.error('Failed to query request audit stats', { userId, month, error });
+    logger.error({ userId, month, error }, 'Failed to query request audit stats');
     return { totalRequests: 0, totalTokensInput: 0, totalTokensOutput: 0, totalTokensThinking: 0 };
   }
 }
@@ -455,7 +461,7 @@ export async function logPatRevocation(record: PatRevocationRecord): Promise<voi
   try {
     await database.execute({ query, params });
   } catch (error) {
-    logger.error('Failed to log PAT revocation', { patId: record.patId, error });
+    logger.error({ patId: record.patId, error }, 'Failed to log PAT revocation');
     throw error;
   }
 }

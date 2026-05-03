@@ -29,7 +29,7 @@ export const database = {
         rowCount: Array.isArray(rows) ? rows.length : 0,
       };
     } catch (error) {
-      logger.error('Database query failed', { error });
+      logger.error({ error }, 'Database query failed');
       throw error;
     }
   },

@@ -55,7 +55,7 @@ async function runCleanupJob(): Promise<void> {
       logger.info('Cleaned up orphaned reservations', { count: cleaned });
     }
   } catch (error) {
-    logger.error('Cleanup job failed', { error });
+    logger.error({ error }, 'Cleanup job failed');
   } finally {
     await releaseLock(lockKey);
     cleanupRunning = false;
@@ -162,7 +162,7 @@ export async function runArchiveJob(): Promise<void> {
       logger.info('Archived monthly usage', { count: archiveRecords.length });
     }
   } catch (error) {
-    logger.error('Archive job failed', { error });
+    logger.error({ error }, 'Archive job failed');
   } finally {
     await releaseLock(lockKey);
     archiveRunning = false;
