@@ -131,7 +131,7 @@ const CHECK_AND_RESERVE_SCRIPT = `
     return {0, 'insufficient_quota'}
   end
 
-  redis.call('incrbyfloat', reservedKey, cost)
+  redis.call('incrby', reservedKey, math.floor(cost))
   redis.call('set', reservationKey, reservationData, 'EX', ttl)
   redis.call('hset', hashKey, reservationId, reservationData)
 
@@ -363,7 +363,7 @@ export async function recordUsageOnly(
   const month = getCurrentMonth();
   const quotaKey = getQuotaKey(userId, month);
 
-  await redis.hincrbyfloat(quotaKey, 'spent', costMicro);
+  await redis.hincrby(quotaKey, 'spent', Number(costMicro));
 
   return actualCost;
 }
@@ -487,12 +487,20 @@ export async function setMonthlyBudget(
   });
 }
 
+const MAX_SCAN_ITERATIONS = 100;
+
 async function tryRecoverFromHash(
   reservationId: string
 ): Promise<{ userId: string; month: string; amountMicro: string } | null> {
   try {
     let cursor = '0';
+    let iterations = 0;
     do {
+      iterations++;
+      if (iterations > MAX_SCAN_ITERATIONS) {
+        logger.warn({ reservationId, iterations }, 'Max SCAN iterations exceeded in tryRecoverFromHash');
+        break;
+      }
       const scanResult = await redis.scan(
         cursor,
         'MATCH',
