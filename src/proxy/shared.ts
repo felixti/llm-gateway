@@ -4,11 +4,11 @@ import { logger } from '@/observability/logger';
 import { addLLMSpanAttributes } from '@/observability/tracing';
 import type { ProxyRequestContext } from '@/routes/factories/types';
 import type { TokenUsage } from '@/services/pricing.service';
-import { reconcileUsage, releaseReservation } from '@/services/quota.service';
+import { reconcileUsage, recordUsageOnly, releaseReservation } from '@/services/quota.service';
 import { errorForProtocol } from '@/utils/errors';
 
 interface UpstreamErrorResponseOptions {
-  response: Response;
+  response?: Response;
   path: string;
   errorCode: string;
   upstreamName: string;
@@ -69,39 +69,46 @@ export async function createSanitizedUpstreamErrorResponse({
   deploymentName,
 }: UpstreamErrorResponseOptions): Promise<Response> {
   let errorBody = '';
-  const contentType = response.headers.get('content-type');
-  if (contentType && !contentType.includes('application/json')) {
-    errorBody = '[non-JSON upstream response]';
-  } else {
-    try {
-      const text = await response.text();
-      errorBody = redactSensitiveContent(text).slice(0, 1024);
-    } catch (err) {
-      logger.warn(
-        { err, requestId, deployment: deploymentName },
-        'Unable to read upstream error body'
-      );
+  let upstreamStatus = 502;
+
+  if (response) {
+    upstreamStatus = response.status;
+    const contentType = response.headers.get('content-type');
+    if (contentType && !contentType.includes('application/json')) {
+      errorBody = '[non-JSON upstream response]';
+    } else {
+      try {
+        const text = await response.text();
+        errorBody = redactSensitiveContent(text).slice(0, 1024);
+      } catch (err) {
+        logger.warn(
+          { err, requestId, deployment: deploymentName },
+          'Unable to read upstream error body'
+        );
+      }
     }
+  } else {
+    errorBody = '[network error - no upstream response]';
   }
 
   logger.warn(
     {
       requestId,
       deployment: deploymentName,
-      upstreamStatus: response.status,
-      upstreamContentType: response.headers.get('content-type'),
+      upstreamStatus,
+      upstreamContentType: response?.headers?.get('content-type') ?? null,
       upstreamBodyLength: errorBody.length,
     },
     `${upstreamName} upstream request failed`
   );
 
-  const effectiveStatus = response.ok ? 502 : response.status;
+  const effectiveStatus = response ? (response.ok ? 502 : response.status) : 502;
 
   const error = errorForProtocol(
     path,
     effectiveStatus,
     errorCode,
-    `${upstreamName} upstream request failed with status ${response.status}.`
+    `${upstreamName} upstream request failed with status ${upstreamStatus}.`
   );
 
   return new Response(JSON.stringify(error), {
@@ -119,16 +126,17 @@ export async function finalizeProxyUsage({
   startTime,
   thinkingEnabled = false,
 }: FinalizeUsageOptions): Promise<void> {
-  if (!reservationId) {
-    return;
-  }
-
   if (!usage) {
-    await releaseReservedQuota(reservationId, requestId);
+    if (reservationId) {
+      await releaseReservedQuota(reservationId, requestId);
+    }
     return;
   }
 
-  const actualCost = await reconcileUsage(reservationId, usage, deployment.azureModelName);
+  const actualCost = reservationId
+    ? await reconcileUsage(reservationId, usage, deployment.azureModelName)
+    : await recordUsageOnly(userId || 'unknown', usage, deployment.azureModelName);
+
   addLLMSpanAttributes({
     promptTokens: usage.prompt_tokens,
     completionTokens: usage.completion_tokens,
