@@ -3,7 +3,7 @@
  * PAT revocation and administrative operations
  */
 
-import { getApiKeyByJti, getPatExpiryForRevocation, logPatRevocation } from '@/db/data-access';
+import { getApiKeyByJti, logPatRevocation } from '@/db/data-access';
 import { redis } from '@/db/redis';
 import { requireAdminScopeMiddleware } from '@/middleware/admin-scope';
 import { authMiddleware } from '@/middleware/auth';
@@ -16,18 +16,9 @@ import { z } from 'zod';
 
 // Zod schema for PAT revocation request
 const revokePatBodySchema = z.object({
-  pat_id: z.string().uuid('pat_id must be a valid UUID'),
+  pat_id: z.string().min(1, 'pat_id must be a non-empty string'),
   reason: z.string().optional(),
 });
-
-function getBlocklistTtlSeconds(expiresAt: Date | null | undefined): number | null {
-  if (!expiresAt) {
-    return null;
-  }
-
-  const ttlSeconds = Math.ceil((expiresAt.getTime() - Date.now()) / 1000);
-  return ttlSeconds > 0 ? ttlSeconds : null;
-}
 
 export const adminRoutes = new Hono();
 
@@ -88,22 +79,8 @@ adminRoutes.post('/pat/revoke', async (c) => {
     );
   }
 
-  const blocklistKey = `blocklist:pat:${hashJtiForBlocklist(pat_id)}`;
-  let expiry: { expiresAt: Date | null } | null = null;
-  try {
-    expiry = await getPatExpiryForRevocation(pat_id);
-  } catch (error) {
-    logger.warn(
-      { patId: pat_id, error },
-      'Failed to load PAT expiry for revocation TTL, proceeding without TTL'
-    );
-  }
-  const ttlSeconds = getBlocklistTtlSeconds(expiry?.expiresAt);
-  if (ttlSeconds) {
-    await redis.set(blocklistKey, '1', 'EX', ttlSeconds);
-  } else {
-    await redis.set(blocklistKey, '1');
-  }
+  const blocklistKey = `blocklist:pat:${hashJtiForBlocklist(keyRecord.jti)}`;
+  await redis.set(blocklistKey, '1');
 
   incrementPatRevocationsTotal();
   try {

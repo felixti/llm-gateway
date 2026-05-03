@@ -128,7 +128,7 @@ describe('Admin Routes - /admin', () => {
       expect(body.error.code).toBe('invalid_request');
     });
 
-    it('should return 400 for invalid UUID pat_id', async () => {
+    it('should return 400 for empty pat_id', async () => {
       const app = await createTestApp();
       const res = await app.request('/admin/pat/revoke', {
         method: 'POST',
@@ -137,7 +137,7 @@ describe('Admin Routes - /admin', () => {
           Authorization: ADMIN_PAT,
           'X-Operator-Secret': OPERATOR_SECRET,
         },
-        body: JSON.stringify({ pat_id: 'not-a-uuid' }),
+        body: JSON.stringify({ pat_id: '' }),
       });
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: { code: string } };
@@ -205,24 +205,12 @@ describe('Admin Routes - /admin', () => {
       expect(body.success).toBe(true);
     });
 
-    it('should set blocklist TTL from stored PAT expiry when available', async () => {
+    it('should set blocklist entry without TTL', async () => {
       const setCalls: unknown[][] = [];
       const { redis } = await import('../../../src/db/redis');
       const originalSet = redis.set.bind(redis);
-      redis.set = (async (...args: unknown[]) => {
-        setCalls.push(args);
-        return 'OK';
-      }) as typeof redis.set;
       database.execute = async <T extends Record<string, unknown>>({ query }: { query: string }) => {
         const q = String(query);
-        if (q.includes('expires_at')) {
-          return {
-            rows: [
-              { expires_at: new Date(Date.now() + 60_000).toISOString() } as unknown as T,
-            ],
-            rowCount: 1,
-          };
-        }
         if (q.includes('api_keys')) {
           return {
             rows: [{ id: 'key-3', jti: '33333333-3333-3333-3333-333333333333' } as unknown as T],
@@ -251,9 +239,10 @@ describe('Admin Routes - /admin', () => {
         });
 
         expect(res.status).toBe(200);
-        expect(setCalls[0][2]).toBe('EX');
-        expect(Number(setCalls[0][3])).toBeGreaterThan(0);
-        expect(Number(setCalls[0][3])).toBeLessThanOrEqual(60);
+        expect(setCalls.length).toBeGreaterThan(0);
+        expect(setCalls[0]).toHaveLength(2);
+        expect(setCalls[0][0]).toContain('blocklist:pat:');
+        expect(setCalls[0][1]).toBe('1');
       } finally {
         redis.set = originalSet;
       }
@@ -299,13 +288,60 @@ describe('Admin Routes - /admin', () => {
       expect(body.error.code).toBe('internal_error');
     });
 
-    it('revokes PAT by id::text when jti does not match', async () => {
+    it('revokes PAT by id::text and blocklists using the actual token jti', async () => {
       const patId = '66666666-6666-6666-6666-666666666666';
+      const actualJti = 'different-jti-value';
+      const setCalls: unknown[][] = [];
+      const { redis } = await import('../../../src/db/redis');
+      const originalSet = redis.set.bind(redis);
       database.execute = async <T extends Record<string, unknown>>({ query }: { query: string }) => {
         const q = String(query);
         if (q.includes('api_keys')) {
           return {
-            rows: [{ id: patId, jti: 'different-jti-value' } as unknown as T],
+            rows: [{ id: patId, jti: actualJti } as unknown as T],
+            rowCount: 1,
+          };
+        }
+        return { rows: [], rowCount: 0 };
+      };
+
+      try {
+        const app = await createTestApp();
+        redis.set = (async (...args: unknown[]) => {
+          setCalls.push(args);
+          return 'OK';
+        }) as typeof redis.set;
+        const res = await app.request('/admin/pat/revoke', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: ADMIN_PAT,
+            'X-Operator-Secret': OPERATOR_SECRET,
+          },
+          body: JSON.stringify({ pat_id: patId }),
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { success: boolean; pat_id: string };
+        expect(body.success).toBe(true);
+        expect(body.pat_id).toBe(patId);
+
+        expect(setCalls.length).toBeGreaterThan(0);
+        const blocklistKey = setCalls[0][0] as string;
+        expect(blocklistKey).toContain('blocklist:pat:');
+        const expectedHash = (await import('../../../src/utils/auth')).hashJtiForBlocklist(actualJti);
+        expect(blocklistKey).toBe(`blocklist:pat:${expectedHash}`);
+      } finally {
+        redis.set = originalSet;
+      }
+    });
+
+    it('revokes PAT with non-UUID jti', async () => {
+      const nonUuidJti = 'my-custom-jti-12345';
+      database.execute = async <T extends Record<string, unknown>>({ query }: { query: string }) => {
+        const q = String(query);
+        if (q.includes('api_keys')) {
+          return {
+            rows: [{ id: 'key-7', jti: nonUuidJti } as unknown as T],
             rowCount: 1,
           };
         }
@@ -320,12 +356,50 @@ describe('Admin Routes - /admin', () => {
           Authorization: ADMIN_PAT,
           'X-Operator-Secret': OPERATOR_SECRET,
         },
-        body: JSON.stringify({ pat_id: patId }),
+        body: JSON.stringify({ pat_id: nonUuidJti }),
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as { success: boolean; pat_id: string };
       expect(body.success).toBe(true);
-      expect(body.pat_id).toBe(patId);
+      expect(body.pat_id).toBe(nonUuidJti);
+    });
+
+    it('blocks revoked PAT token via auth middleware', async () => {
+      const revokedJti = 'revoked-jti-abc123';
+      const revokedPat = createTestPat('user1', { jti: revokedJti, scope: 'all' });
+      database.execute = async <T extends Record<string, unknown>>({ query }: { query: string }) => {
+        const q = String(query);
+        if (q.includes('api_keys')) {
+          return {
+            rows: [{ id: 'key-8', jti: revokedJti } as unknown as T],
+            rowCount: 1,
+          };
+        }
+        return { rows: [], rowCount: 0 };
+      };
+
+      const app = await createTestApp();
+
+      const revokeRes = await app.request('/admin/pat/revoke', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: ADMIN_PAT,
+          'X-Operator-Secret': OPERATOR_SECRET,
+        },
+        body: JSON.stringify({ pat_id: revokedJti }),
+      });
+      expect(revokeRes.status).toBe(200);
+
+      const protectedRes = await app.request('/v1/models', {
+        headers: {
+          Authorization: revokedPat,
+        },
+      });
+      expect(protectedRes.status).toBe(401);
+      const protectedBody = (await protectedRes.json()) as { error: { code: string; message: string } };
+      expect(protectedBody.error.code).toBe('authentication_error');
+      expect(protectedBody.error.message).toBe('Token has been revoked');
     });
   });
 });
