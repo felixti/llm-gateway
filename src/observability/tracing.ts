@@ -19,7 +19,7 @@ import {
   trace,
 } from '@opentelemetry/api';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
-import { resourceFromAttributes } from '@opentelemetry/resources';
+import { Resource } from '@opentelemetry/resources';
 import {
   BatchSpanProcessor,
   NodeTracerProvider,
@@ -101,7 +101,7 @@ export function initTracing(): void {
     return;
   }
 
-  const resource = resourceFromAttributes({
+  const resource = new Resource({
     [ATTR_SERVICE_NAME]: env.OTEL_SERVICE_NAME,
     [ATTR_SERVICE_VERSION]: '1.0.0',
   });
