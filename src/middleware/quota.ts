@@ -91,8 +91,8 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<Response 
 
   const cached = c.get('parsedBody') as Record<string, unknown> | undefined;
   if (!cached || typeof cached !== 'object') {
-    const error = errorForProtocol(path, 500, 'internal_error', 'Internal server error');
-    return c.json(error, 500);
+    const error = errorForProtocol(path, 400, 'invalid_request', 'Invalid or missing request body');
+    return c.json(error, 400);
   }
   const body = cached;
 

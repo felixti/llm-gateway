@@ -199,6 +199,30 @@ data: {"type":"message_stop"}`;
       expect(chunks).toHaveLength(1);
     });
 
+    it("should pass through a multi-event chunk exactly once", async () => {
+      const transformer = createOpenAIStreamTransformer();
+      const chunks: Uint8Array[] = [];
+
+      const mockController = {
+        enqueue: (chunk: Uint8Array) => chunks.push(chunk),
+        terminate: () => {},
+      };
+
+      const text = [
+        'data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}',
+        "",
+        'data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{"content":" world"},"finish_reason":null}]}',
+        "",
+      ].join("\n");
+      const chunk = new TextEncoder().encode(text);
+
+      // @ts-ignore - testing transform directly
+      transformer.transform(chunk, mockController);
+
+      expect(chunks).toHaveLength(1);
+      expect(new TextDecoder().decode(chunks[0])).toBe(text);
+    });
+
     it("should handle [DONE] chunk", async () => {
       const transformer = createOpenAIStreamTransformer();
       const chunks: Uint8Array[] = [];

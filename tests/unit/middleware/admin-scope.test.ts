@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Context } from 'hono';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { requireAdminScopeMiddleware } from '../../../src/middleware/admin-scope';
 
 function createMockContext(opts: { scope?: string; operatorSecret?: string } = {}) {
@@ -134,5 +136,12 @@ describe('requireAdminScopeMiddleware', () => {
     } finally {
       delete process.env.ADMIN_OPERATOR_SECRET;
     }
+  });
+
+  test('operator secret comparison uses timing-safe comparison', () => {
+    const source = readFileSync(join(process.cwd(), 'src/middleware/admin-scope.ts'), 'utf8');
+
+    expect(source).toContain('timingSafeEqual');
+    expect(source).not.toContain('provided !== operatorSecret');
   });
 });

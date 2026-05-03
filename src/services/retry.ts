@@ -121,6 +121,10 @@ function getStatusFromError(error: unknown): number {
   return 0;
 }
 
+function shouldRetryResponse(response: Response): boolean {
+  return response.status >= 500 && !isNonRetryable(response.status);
+}
+
 /**
  * Execute a function with retry logic
  */
@@ -138,7 +142,11 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions =
     }
 
     try {
-      return await fn();
+      const result = await fn();
+      if (result instanceof Response && shouldRetryResponse(result)) {
+        throw result;
+      }
+      return result;
     } catch (error: unknown) {
       lastError = error;
 

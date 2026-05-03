@@ -20,6 +20,7 @@ function bindMockRedis(mock: MockRedis): void {
   r.hdel = mock.hdel.bind(mock);
   r.exists = mock.exists.bind(mock);
   r.pipeline = mock.pipeline.bind(mock);
+  r.incrby = mock.incrby.bind(mock);
   r.incrbyfloat = mock.incrbyfloat.bind(mock);
   r.del = mock.del.bind(mock);
   r.ping = mock.ping.bind(mock);
@@ -96,6 +97,30 @@ describe('quota atomic release', () => {
   test('releaseReservation is a no-op when key is missing', async () => {
     const { releaseReservation } = await import('../../../src/services/quota.service');
     await expect(releaseReservation('res_never_existed')).resolves.toBeUndefined();
+  });
+
+  test('releaseReservation recovers an expired reservation without float decrement', async () => {
+    const { checkAndReserve, releaseReservation } = await import(
+      '../../../src/services/quota.service'
+    );
+    const result = await checkAndReserve('user-expired-rel', new Decimal('0.05'));
+    expect(result.allowed).toBe(true);
+
+    const reservationId = result.reservationId!;
+    const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    const reservedKey = `reserved:user-expired-rel:${month}`;
+    const reservationKey = `reservation:${reservationId}`;
+    const hashKey = `reservations_meta:user-expired-rel:${month}`;
+
+    await redis.del(reservationKey);
+    (redis as unknown as { incrbyfloat: () => Promise<string> }).incrbyfloat = async () => {
+      throw new Error('float decrement should not be used');
+    };
+
+    await releaseReservation(reservationId);
+
+    expect(Number((await redis.get(reservedKey)) || '0')).toBe(0);
+    expect(await redis.hget(hashKey, reservationId)).toBeNull();
   });
 });
 

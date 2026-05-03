@@ -6,6 +6,10 @@ import { redis } from '@/db/redis';
 import { MockRedis } from '../../integration/helpers/mock-redis';
 import { createTestPat } from '../../integration/helpers/test-pat';
 
+interface ErrorResponseBody {
+  error?: unknown;
+}
+
 function bindMockRedis(mock: MockRedis): void {
   const r = redis as unknown as Record<string, unknown>;
   r.get = mock.get.bind(mock);
@@ -41,7 +45,7 @@ describe('quota.routes - error paths', () => {
       headers: { Authorization: pat },
     });
     expect(res.status).toBe(500);
-    const body = await res.json();
+    const body = (await res.json()) as ErrorResponseBody;
     expect(body.error).toBeDefined();
     spy.mockRestore();
   });

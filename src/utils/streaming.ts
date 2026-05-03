@@ -62,12 +62,10 @@ export function createOpenAIStreamTransformer() {
         const data = line.slice(5).trim();
         if (data === '[DONE]') {
           state.done = true;
-          controller.enqueue(chunk);
           continue;
         }
 
         if (data.length < 10 || !data.includes('usage')) {
-          controller.enqueue(chunk);
           continue;
         }
 
@@ -82,20 +80,12 @@ export function createOpenAIStreamTransformer() {
               total_tokens: parsed.usage.total_tokens,
             };
           }
-
-          // Also check if this is a final chunk with finish_reason
-          const choice = parsed.choices?.[0];
-          if (choice?.finish_reason && !parsed.choices[0].delta) {
-            // This appears to be a final chunk with usage - extract and signal
-            controller.enqueue(chunk);
-          } else {
-            controller.enqueue(chunk);
-          }
         } catch {
-          // Pass through malformed JSON as-is
-          controller.enqueue(chunk);
+          // Pass through malformed JSON as-is after scanning the chunk.
         }
       }
+
+      controller.enqueue(chunk);
     },
 
     flush(controller: TransformStreamDefaultController): void {

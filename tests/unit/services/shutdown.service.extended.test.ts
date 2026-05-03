@@ -9,6 +9,12 @@ import {
 } from '@/services/shutdown.service';
 import { Hono } from 'hono';
 
+interface ErrorResponseBody {
+  error: {
+    code: string;
+  };
+}
+
 describe('shutdown.service - extended coverage', () => {
   beforeEach(() => {
     resetShutdownState();
@@ -69,7 +75,7 @@ describe('shutdown.service - extended coverage', () => {
 
       const res = await app.request('/test');
       expect(res.status).toBe(503);
-      const body = await res.json();
+      const body = (await res.json()) as ErrorResponseBody;
       expect(body.error.code).toBe('shutting_down');
     });
   });

@@ -3,6 +3,7 @@
  * Run after authMiddleware.
  */
 
+import { timingSafeEqual } from 'node:crypto';
 import { errorForProtocol } from '@/utils/errors';
 import type { Context, Next } from 'hono';
 
@@ -15,6 +16,21 @@ function getOperatorSecret(): string {
     throw new Error('ADMIN_OPERATOR_SECRET is not configured or too short');
   }
   return raw;
+}
+
+function isOperatorSecretValid(provided: string | undefined, expected: string): boolean {
+  if (!provided) {
+    return false;
+  }
+
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expected);
+
+  if (providedBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(providedBuffer, expectedBuffer);
 }
 
 export async function requireAdminScopeMiddleware(
@@ -34,7 +50,7 @@ export async function requireAdminScopeMiddleware(
   }
 
   const provided = c.req.header(HEADER_OPERATOR_SECRET);
-  if (provided !== operatorSecret) {
+  if (!isOperatorSecretValid(provided, operatorSecret)) {
     return c.json(
       errorForProtocol(path, 403, 'permission_error', 'Invalid operator credentials'),
       403

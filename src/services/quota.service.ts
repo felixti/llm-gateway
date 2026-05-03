@@ -339,7 +339,7 @@ export async function releaseReservation(reservationId: string): Promise<void> {
         const reservedKey = getReservedKey(nullData.userId, nullData.month);
         const hashKey = getReservationHashKey(nullData.userId, nullData.month);
 
-        await redis.incrbyfloat(reservedKey, -Number(nullData.amountMicro));
+        await redis.incrby(reservedKey, -Number(nullData.amountMicro));
         await redis.hdel(hashKey, reservationId);
 
         logger.warn(

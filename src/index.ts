@@ -45,7 +45,14 @@ app.use(
   })
 );
 
-const allowedOrigins = env.CORS_ALLOWED_ORIGINS.split(/,/ as RegExp).map((s) => s.trim());
+const allowedOrigins = env.CORS_ALLOWED_ORIGINS.split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+if (env.NODE_ENV === 'production' && allowedOrigins.length === 0) {
+  throw new Error('CORS_ALLOWED_ORIGINS must be configured in production');
+}
+
 app.use(
   '*',
   cors({

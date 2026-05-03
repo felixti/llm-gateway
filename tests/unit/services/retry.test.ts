@@ -278,6 +278,23 @@ describe("Retry Service", () => {
       expect(attempts).toBe(2);
     });
 
+    it("should retry when fn resolves a 5xx Response", async () => {
+      let attempts = 0;
+      const fn = async () => {
+        attempts++;
+        if (attempts < 2) {
+          return new Response(JSON.stringify({ error: "bad gateway" }), {
+            status: 502,
+          });
+        }
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      };
+
+      const result = await withRetry(fn, { maxRetries: 3 });
+      expect(result.status).toBe(200);
+      expect(attempts).toBe(2);
+    });
+
     it("should respect Retry-After header override", async () => {
       let attempts = 0;
       const fn = async () => {

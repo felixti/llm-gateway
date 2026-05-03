@@ -7,6 +7,14 @@ import * as healthService from '@/services/health.service';
 import { resetHealthCacheForTests } from '@/services/health.service';
 import { requestIdMiddleware } from '@/middleware/request-id';
 
+interface HealthResponseBody {
+  checks: {
+    redis: boolean;
+    postgres: boolean;
+    deployments: boolean;
+  };
+}
+
 describe('health.routes', () => {
   let originalBearer: string | undefined;
 
@@ -41,7 +49,7 @@ describe('health.routes', () => {
       const app = createApp();
       const res = await app.request('/ready');
       expect(res.status).toBe(503);
-      const body = await res.json();
+      const body = (await res.json()) as HealthResponseBody;
       expect(body.checks.redis).toBe(false);
 
       redis.ping = originalPing;
@@ -54,7 +62,7 @@ describe('health.routes', () => {
       const app = createApp();
       const res = await app.request('/ready');
       expect(res.status).toBe(503);
-      const body = await res.json();
+      const body = (await res.json()) as HealthResponseBody;
       expect(body.checks.postgres).toBe(false);
 
       vi.restoreAllMocks();
@@ -66,7 +74,7 @@ describe('health.routes', () => {
       const app = createApp();
       const res = await app.request('/ready');
       expect(res.status).toBe(503);
-      const body = await res.json();
+      const body = (await res.json()) as HealthResponseBody;
       expect(body.checks.postgres).toBe(false);
 
       vi.restoreAllMocks();
@@ -80,7 +88,7 @@ describe('health.routes', () => {
 
       const app = createApp();
       const res = await app.request('/ready');
-      const body = await res.json();
+      const body = (await res.json()) as HealthResponseBody;
 
       expect(body.checks.deployments).toBe(false);
 
@@ -97,7 +105,7 @@ describe('health.routes', () => {
 
       const app = createApp();
       const res = await app.request('/ready');
-      const body = await res.json();
+      const body = (await res.json()) as HealthResponseBody;
 
       expect(body.checks.deployments).toBe(true);
 

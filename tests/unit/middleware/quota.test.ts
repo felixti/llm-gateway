@@ -98,17 +98,17 @@ describe('quotaMiddleware — missing parsedBody', () => {
     vi.clearAllMocks();
   });
 
-  test('fails explicitly when parsedBody is missing after protocol guard', async () => {
+  test('returns invalid_request when parsedBody is missing after protocol guard', async () => {
     const { quotaMiddleware } = await import('../../../src/middleware/quota');
     const next = vi.fn(async () => undefined) as Next;
 
     const response = await quotaMiddleware(createContextWithoutParsedBody(), next);
 
     expect(response).toBeInstanceOf(Response);
-    expect(response!.status).toBe(500);
+    expect(response!.status).toBe(400);
     const body = (await response!.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe('internal_error');
-    expect(body.error.message).toBe('Internal server error');
+    expect(body.error.code).toBe('invalid_request');
+    expect(body.error.message).toBe('Invalid or missing request body');
     expect(next).not.toHaveBeenCalled();
   });
 });

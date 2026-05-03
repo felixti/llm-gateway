@@ -172,7 +172,9 @@ export async function getRequestAuditStats(userId: string, month: string): Promi
       COALESCE(SUM(tokens_output), 0) AS total_tokens_output,
       COALESCE(SUM(tokens_thinking), 0) AS total_tokens_thinking
     FROM request_audit
-    WHERE user_id = $1 AND to_char(created_at, 'YYYY-MM') = $2
+    WHERE user_id = $1
+      AND created_at >= to_date($2, 'YYYY-MM')
+      AND created_at < to_date($2, 'YYYY-MM') + INTERVAL '1 month'
   `;
 
   try {
