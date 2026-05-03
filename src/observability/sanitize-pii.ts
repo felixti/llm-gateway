@@ -10,6 +10,7 @@ const API_KEY_PREFIX_PATTERN = /sk-[a-zA-Z0-9_]{20,}/g;
 const CREDIT_CARD_PATTERN = /\b(?:\d{4}[-\s]?){3}\d{4}\b/g;
 const PHONE_PATTERN = /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g;
 const SSN_PATTERN = /\b\d{3}-\d{2}-\d{4}\b/g;
+const JWT_PAYLOAD_PATTERN = /eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*/g;
 
 // Sanitization replacements
 const EMAIL_REPLACEMENT = 'u***@***.com';
@@ -18,6 +19,7 @@ const API_KEY_REPLACEMENT = 'sk-***';
 const CREDIT_CARD_REPLACEMENT = '****-****-****-****';
 const PHONE_REPLACEMENT = '***-***-****';
 const SSN_REPLACEMENT = '***-**-****';
+const JWT_PAYLOAD_REPLACEMENT = 'eyJ***.eyJ***';
 
 /**
  * Sanitize PII from string values
@@ -31,7 +33,8 @@ export function sanitizePII(obj: unknown): unknown {
       .replace(API_KEY_PREFIX_PATTERN, API_KEY_REPLACEMENT)
       .replace(CREDIT_CARD_PATTERN, CREDIT_CARD_REPLACEMENT)
       .replace(PHONE_PATTERN, PHONE_REPLACEMENT)
-      .replace(SSN_PATTERN, SSN_REPLACEMENT);
+      .replace(SSN_PATTERN, SSN_REPLACEMENT)
+      .replace(JWT_PAYLOAD_PATTERN, JWT_PAYLOAD_REPLACEMENT);
   }
 
   if (Array.isArray(obj)) {
