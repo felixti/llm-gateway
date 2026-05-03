@@ -209,4 +209,124 @@ describe('rateLimitMiddleware', () => {
     expect(evalCalls).toHaveLength(2);
     expect(evalCalls[1][5]).toBeGreaterThan(0);
   });
+
+  test('fail-closed: Redis error on RPM check returns 429', async () => {
+    mockRedisEval.mockReset();
+    mockRedisEval.mockImplementation(async (...args: unknown[]) => {
+      evalCalls.push(args);
+      throw new Error('Redis connection failed');
+    });
+
+    const { rateLimitMiddleware } = await import('../../../src/middleware/rate-limit');
+    const next = vi.fn(async () => undefined) as Next;
+
+    const response = await rateLimitMiddleware(
+      createContext({ model: 'gpt-5.4', max_tokens: 100 }),
+      next
+    );
+
+    expect(next).not.toHaveBeenCalled();
+    expect(response?.status).toBe(429);
+  });
+
+  test('fail-closed: Redis error on TPM check returns 429', async () => {
+    let callCount = 0;
+    mockRedisEval.mockReset();
+    mockRedisEval.mockImplementation(async (...args: unknown[]) => {
+      evalCalls.push(args);
+      callCount++;
+      if (callCount === 1) return [1, 1];
+      throw new Error('Redis connection failed');
+    });
+
+    const { rateLimitMiddleware } = await import('../../../src/middleware/rate-limit');
+    const next = vi.fn(async () => undefined) as Next;
+
+    const response = await rateLimitMiddleware(
+      createContext({ model: 'gpt-5.4', max_tokens: 100 }),
+      next
+    );
+
+    expect(next).not.toHaveBeenCalled();
+    expect(response?.status).toBe(429);
+  });
+
+  test('burst RPM: multiple same-ms requests all counted via unique member suffix', async () => {
+    const rpmState = new Map<string, Set<string>>();
+    mockRedisEval.mockReset();
+    mockRedisEval.mockImplementation(async (...args: unknown[]) => {
+      evalCalls.push(args);
+      const script = args[0] as string;
+      const key = args[2] as string;
+      const limit = args[5] as number;
+      const member = (args[9] as string) ?? 'unknown';
+
+      if (script.includes('ratelimit:rpm')) {
+        const set = rpmState.get(key) ?? new Set<string>();
+        const count = set.size;
+        if (count >= limit) {
+          return [0, count];
+        }
+        set.add(member);
+        rpmState.set(key, set);
+        return [1, count + 1];
+      }
+      return [1, 1];
+    });
+
+    const { rateLimitMiddleware } = await import('../../../src/middleware/rate-limit');
+    const next = vi.fn(async () => undefined) as Next;
+
+    const context = createContext({ model: 'gpt-5.4', max_tokens: 10 });
+
+    for (let i = 0; i < 3; i++) {
+      await rateLimitMiddleware(context, next);
+    }
+
+    expect(next).toHaveBeenCalledTimes(3);
+    const rpmCalls = evalCalls.filter((c) => (c[2] as string)?.startsWith('ratelimit:rpm'));
+    const suffixes = rpmCalls.map((c) => c[9] as string);
+    expect(new Set(suffixes).size).toBe(3);
+  });
+
+  test('burst TPM: multiple same-ms requests all count tokens via unique member suffix', async () => {
+    const tpmState = new Map<string, Array<{ member: string; tokens: number }>>();
+    mockRedisEval.mockReset();
+    mockRedisEval.mockImplementation(async (...args: unknown[]) => {
+      evalCalls.push(args);
+      const script = args[0] as string;
+      const key = args[2] as string;
+      const tokenCount = args[5] as number;
+      const limit = args[6] as number;
+      const memberSuffix = args[8] as string;
+
+      if (script.includes('ratelimit:tpm')) {
+        const entries = tpmState.get(key) ?? [];
+        const total = entries.reduce((sum, e) => sum + e.tokens, 0);
+        if (total + tokenCount > limit) {
+          return [0, total];
+        }
+        const member = `${args[3]}:${tokenCount}:${memberSuffix}`;
+        entries.push({ member, tokens: tokenCount });
+        tpmState.set(key, entries);
+        return [1, total + tokenCount];
+      }
+
+      return [1, 1];
+    });
+
+    const { rateLimitMiddleware } = await import('../../../src/middleware/rate-limit');
+    const next = vi.fn(async () => undefined) as Next;
+
+    const context = createContext({ model: 'gpt-5.4', max_tokens: 100 });
+
+    for (let i = 0; i < 3; i++) {
+      await rateLimitMiddleware(context, next);
+    }
+
+    expect(next).toHaveBeenCalledTimes(3);
+    const tpmCalls = evalCalls.filter((c) => (c[2] as string)?.startsWith('ratelimit:tpm'));
+    const suffixes = tpmCalls.map((c) => c[8] as string);
+    expect(new Set(suffixes).size).toBe(3);
+  });
 });

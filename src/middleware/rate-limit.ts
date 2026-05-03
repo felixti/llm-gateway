@@ -27,18 +27,19 @@ const CHECK_REQUEST_LIMIT_SCRIPT = `
   local limit = tonumber(ARGV[3])
   local windowSeconds = tonumber(ARGV[4])
   local dedupKey = ARGV[6]
-  
+  local uniqueSuffix = ARGV[7]
+
   redis.call('zremrangebyscore', key, 0, windowStart)
   local count = redis.call('zcard', key)
-  
+
   if count >= limit then
     return {0, count}
   end
-  
-  local member = now .. ':' .. dedupKey
+
+  local member = now .. ':' .. dedupKey .. ':' .. uniqueSuffix
   redis.call('zadd', key, now, member)
   redis.call('expire', key, windowSeconds)
-  
+
   return {1, count + 1}
 `;
 
@@ -49,24 +50,25 @@ const CHECK_TOKEN_LIMIT_SCRIPT = `
   local tokenCount = tonumber(ARGV[3])
   local limit = tonumber(ARGV[4])
   local windowSeconds = tonumber(ARGV[5])
-  
+  local uniqueSuffix = ARGV[6]
+
   redis.call('zremrangebyscore', key, 0, windowStart)
   local entries = redis.call('zrange', key, 0, -1, 'WITHSCORES')
   local total = 0
-  
+
   for i = 1, #entries, 2 do
-    local tokens = tonumber(entries[i]:match(':(%d+)$') or 0)
+    local tokens = tonumber(entries[i]:match(':(%d+):') or 0)
     total = total + tokens
   end
-  
+
   if total + tokenCount > limit then
     return {0, total}
   end
-  
-  local member = now .. ':' .. tokenCount
+
+  local member = now .. ':' .. tokenCount .. ':' .. uniqueSuffix
   redis.call('zadd', key, now, member)
   redis.call('expire', key, windowSeconds)
-  
+
   return {1, total + tokenCount}
 `;
 
@@ -75,27 +77,37 @@ async function checkRequestLimit(userId: string): Promise<RateLimitResult> {
   const now = Date.now();
   const windowStart = now - WINDOW_SECONDS * MS_PER_SECOND;
 
-  const result = await redis.eval(
-    CHECK_REQUEST_LIMIT_SCRIPT,
-    1,
-    key,
-    now,
-    windowStart,
-    RPM_LIMIT,
-    WINDOW_SECONDS,
-    userId,
-    userId
-  );
+  try {
+    const result = await redis.eval(
+      CHECK_REQUEST_LIMIT_SCRIPT,
+      1,
+      key,
+      now,
+      windowStart,
+      RPM_LIMIT,
+      WINDOW_SECONDS,
+      userId,
+      userId,
+      Math.random().toString(36).slice(2)
+    );
 
-  const [allowed, count] = result as [number, number];
-  const remaining = Math.max(0, RPM_LIMIT - count);
+    const [allowed, count] = result as [number, number];
+    const remaining = Math.max(0, RPM_LIMIT - count);
 
-  return {
-    allowed: allowed === 1,
-    remaining,
-    limit: RPM_LIMIT,
-    resetAt: Math.floor((now + WINDOW_SECONDS * MS_PER_SECOND) / MS_PER_SECOND),
-  };
+    return {
+      allowed: allowed === 1,
+      remaining,
+      limit: RPM_LIMIT,
+      resetAt: Math.floor((now + WINDOW_SECONDS * MS_PER_SECOND) / MS_PER_SECOND),
+    };
+  } catch {
+    return {
+      allowed: false,
+      remaining: 0,
+      limit: RPM_LIMIT,
+      resetAt: Math.floor((now + WINDOW_SECONDS * MS_PER_SECOND) / MS_PER_SECOND),
+    };
+  }
 }
 
 async function checkTokenLimit(userId: string, tokenCount: number): Promise<RateLimitResult> {
@@ -103,26 +115,36 @@ async function checkTokenLimit(userId: string, tokenCount: number): Promise<Rate
   const now = Date.now();
   const windowStart = now - WINDOW_SECONDS * MS_PER_SECOND;
 
-  const result = await redis.eval(
-    CHECK_TOKEN_LIMIT_SCRIPT,
-    1,
-    key,
-    now,
-    windowStart,
-    tokenCount,
-    TPM_LIMIT,
-    WINDOW_SECONDS
-  );
+  try {
+    const result = await redis.eval(
+      CHECK_TOKEN_LIMIT_SCRIPT,
+      1,
+      key,
+      now,
+      windowStart,
+      tokenCount,
+      TPM_LIMIT,
+      WINDOW_SECONDS,
+      Math.random().toString(36).slice(2)
+    );
 
-  const [allowed, total] = result as [number, number];
-  const remaining = Math.max(0, Math.floor(TPM_LIMIT - total));
+    const [allowed, total] = result as [number, number];
+    const remaining = Math.max(0, Math.floor(TPM_LIMIT - total));
 
-  return {
-    allowed: allowed === 1,
-    remaining,
-    limit: TPM_LIMIT,
-    resetAt: Math.floor((now + WINDOW_SECONDS * MS_PER_SECOND) / MS_PER_SECOND),
-  };
+    return {
+      allowed: allowed === 1,
+      remaining,
+      limit: TPM_LIMIT,
+      resetAt: Math.floor((now + WINDOW_SECONDS * MS_PER_SECOND) / MS_PER_SECOND),
+    };
+  } catch {
+    return {
+      allowed: false,
+      remaining: 0,
+      limit: TPM_LIMIT,
+      resetAt: Math.floor((now + WINDOW_SECONDS * MS_PER_SECOND) / MS_PER_SECOND),
+    };
+  }
 }
 
 function setRateLimitHeaders(c: Context, result: RateLimitResult): void {
