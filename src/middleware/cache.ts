@@ -11,10 +11,11 @@ interface CacheConfig {
 }
 
 function generateCacheKey(c: Context): string {
+  const userId = (c.get('userId') as string | undefined) || 'anonymous';
   const method = c.req.method;
   const path = c.req.path;
   const query = new URL(c.req.url).search;
-  return `${CACHE_PREFIX}${method}:${path}${query}`;
+  return `${CACHE_PREFIX}${userId}:${method}:${path}${query}`;
 }
 
 export function cacheMiddleware(config: CacheConfig = {}) {
