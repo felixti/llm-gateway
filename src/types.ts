@@ -2,6 +2,8 @@
  * Shared TypeScript Types for Hono Context
  */
 
+import type { Decimal } from 'decimal.js';
+import type { PatToken } from '@/utils/auth';
 import type { ModelFamily } from './config/deployments';
 import type { DeploymentConfig } from './config/deployments';
 
@@ -11,7 +13,7 @@ declare module 'hono' {
     userId: string;
     scope: string;
     jti: string;
-    patToken: unknown;
+    patToken: PatToken;
 
     // Request ID middleware
     requestId: string;
@@ -22,11 +24,11 @@ declare module 'hono' {
 
     // Quota middleware
     reservationId: string;
-    estimatedCost: unknown; // Decimal
+    estimatedCost: Decimal;
     releaseQuota: (() => Promise<void>) | null;
 
     // Parsed body (shared across middleware)
-    parsedBody: unknown;
+    parsedBody: Record<string, unknown>;
 
     // Deployment (used in proxy handlers)
     deployment: DeploymentConfig;
