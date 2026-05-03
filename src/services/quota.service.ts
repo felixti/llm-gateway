@@ -119,8 +119,10 @@ export async function releaseReservation(reservationId: string): Promise<void> {
         const reservedKey = getReservedKey(nullData.userId, nullData.month);
         const hashKey = getReservationHashKey(nullData.userId, nullData.month);
 
-        await redis.incrby(reservedKey, -Number(nullData.amountMicro));
-        await redis.hdel(hashKey, reservationId);
+        const pipeline = redis.pipeline();
+        pipeline.incrby(reservedKey, -Number(nullData.amountMicro));
+        pipeline.hdel(hashKey, reservationId);
+        await pipeline.exec();
 
         logger.warn(
           { reservationId, userId: nullData.userId, month: nullData.month },
@@ -185,8 +187,8 @@ export async function reconcileUsage(
         const hashKey = getReservationHashKey(nullData.userId, nullData.month);
 
         const pipeline = redis.pipeline();
-        pipeline.hincrbyfloat(quotaKey, 'spent', costMicro);
-        pipeline.incrbyfloat(reservedKey, `-${nullData.amountMicro}`);
+        pipeline.hincrby(quotaKey, 'spent', Number(costMicro));
+        pipeline.incrby(reservedKey, -Number(nullData.amountMicro));
         pipeline.hdel(hashKey, reservationId);
         await pipeline.exec();
 
@@ -319,7 +321,13 @@ export async function cleanupOrphanedReservations(): Promise<number> {
 
   try {
     let cursor = '0';
+    let iterations = 0;
     do {
+      iterations++;
+      if (iterations > MAX_SCAN_ITERATIONS) {
+        logger.warn({ iterations }, 'Max SCAN iterations exceeded in cleanupOrphanedReservations');
+        break;
+      }
       const scanResult = await redis.scan(
         cursor,
         'MATCH',

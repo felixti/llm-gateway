@@ -32,20 +32,23 @@ function futureMonth(): string {
 
 describe('runArchiveJob', () => {
   let mockRedis: MockRedis;
-  let archiveSpy: ReturnType<typeof vi.spyOn>;
-  let statsSpy: ReturnType<typeof vi.spyOn>;
+  let batchArchiveSpy: ReturnType<typeof vi.spyOn>;
+  let batchStatsSpy: ReturnType<typeof vi.spyOn>;
+  let batchResolveSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     mockRedis = new MockRedis();
     bindMockRedis(mockRedis);
     vi.restoreAllMocks();
 
-    archiveSpy = vi.spyOn(dataAccess, 'archiveMonthlyUsage').mockResolvedValue(undefined);
-    statsSpy = vi.spyOn(dataAccess, 'getRequestAuditStats').mockResolvedValue({
-      totalRequests: 0,
-      totalTokensInput: 0,
-      totalTokensOutput: 0,
-      totalTokensThinking: 0,
+    batchArchiveSpy = vi.spyOn(dataAccess, 'batchArchiveMonthlyUsage').mockResolvedValue(undefined);
+    batchStatsSpy = vi.spyOn(dataAccess, 'batchGetRequestAuditStats').mockResolvedValue(new Map());
+    batchResolveSpy = vi.spyOn(dataAccess, 'batchResolveUserIds').mockImplementation(async (subjects) => {
+      const map = new Map<string, string | null>();
+      for (const s of subjects) {
+        map.set(s, s);
+      }
+      return map;
     });
   });
 
@@ -54,13 +57,12 @@ describe('runArchiveJob', () => {
   });
 
   test('skips current-month quota keys', async () => {
-    // Arrange: one key for current month with spent
     await mockRedis.hset(`quota:user-1:${currentMonth()}`, { spent: '50000' });
 
     const { runArchiveJob } = await import('../../../src/services/scheduler.service');
     await runArchiveJob();
 
-    expect(archiveSpy).not.toHaveBeenCalled();
+    expect(batchArchiveSpy).not.toHaveBeenCalled();
   });
 
   test('skips future-month quota keys', async () => {
@@ -69,25 +71,35 @@ describe('runArchiveJob', () => {
     const { runArchiveJob } = await import('../../../src/services/scheduler.service');
     await runArchiveJob();
 
-    expect(archiveSpy).not.toHaveBeenCalled();
+    expect(batchArchiveSpy).not.toHaveBeenCalled();
   });
 
   test('processes past-month keys and queries request_audit for real counts', async () => {
     const pm = pastMonth();
     await mockRedis.hset(`quota:user-42:${pm}`, { spent: '123456' });
 
-    statsSpy.mockResolvedValue({
-      totalRequests: 15,
-      totalTokensInput: 30000,
-      totalTokensOutput: 10000,
-      totalTokensThinking: 500,
+    batchStatsSpy.mockImplementation(async (entries: Array<{ resolvedUserId: string; month: string }>) => {
+      const map = new Map<string, { totalRequests: number; totalTokensInput: number; totalTokensOutput: number; totalTokensThinking: number }>();
+      for (const e of entries) {
+        if (e.resolvedUserId === 'user-42' && e.month === pm) {
+          map.set(`${e.resolvedUserId}:${e.month}`, {
+            totalRequests: 15,
+            totalTokensInput: 30000,
+            totalTokensOutput: 10000,
+            totalTokensThinking: 500,
+          });
+        }
+      }
+      return map;
     });
 
     const { runArchiveJob } = await import('../../../src/services/scheduler.service');
     await runArchiveJob();
 
-    expect(statsSpy).toHaveBeenCalledWith('user-42', pm);
-    expect(archiveSpy).toHaveBeenCalledWith({
+    expect(batchArchiveSpy).toHaveBeenCalledTimes(1);
+    const records = batchArchiveSpy.mock.calls[0][0];
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
       userId: 'user-42',
       month: pm,
       totalRequests: 15,
@@ -102,17 +114,13 @@ describe('runArchiveJob', () => {
     const pm = pastMonth();
     await mockRedis.hset(`quota:user-99:${pm}`, { spent: '5000' });
 
-    statsSpy.mockResolvedValue({
-      totalRequests: 0,
-      totalTokensInput: 0,
-      totalTokensOutput: 0,
-      totalTokensThinking: 0,
-    });
-
     const { runArchiveJob } = await import('../../../src/services/scheduler.service');
     await runArchiveJob();
 
-    expect(archiveSpy).toHaveBeenCalledWith({
+    expect(batchArchiveSpy).toHaveBeenCalledTimes(1);
+    const records = batchArchiveSpy.mock.calls[0][0];
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
       userId: 'user-99',
       month: pm,
       totalRequests: 0,
@@ -130,19 +138,19 @@ describe('runArchiveJob', () => {
     const { runArchiveJob } = await import('../../../src/services/scheduler.service');
     await runArchiveJob();
 
-    expect(archiveSpy).not.toHaveBeenCalled();
+    expect(batchArchiveSpy).not.toHaveBeenCalled();
   });
 
   test('deduplicates user:month pairs across scan batches', async () => {
     const pm = pastMonth();
-    // Same key appears twice (SCAN can return duplicates)
     await mockRedis.hset(`quota:user-dup:${pm}`, { spent: '1000' });
 
     const { runArchiveJob } = await import('../../../src/services/scheduler.service');
     await runArchiveJob();
 
-    // archiveMonthlyUsage should be called exactly once for this user:month
-    expect(archiveSpy).toHaveBeenCalledTimes(1);
+    expect(batchArchiveSpy).toHaveBeenCalledTimes(1);
+    const records = batchArchiveSpy.mock.calls[0][0];
+    expect(records).toHaveLength(1);
   });
 
   test('handles multiple users across different past months', async () => {
@@ -157,15 +165,17 @@ describe('runArchiveJob', () => {
     const { runArchiveJob } = await import('../../../src/services/scheduler.service');
     await runArchiveJob();
 
-    expect(archiveSpy).toHaveBeenCalledTimes(2);
+    expect(batchArchiveSpy).toHaveBeenCalledTimes(1);
+    const records = batchArchiveSpy.mock.calls[0][0];
+    expect(records).toHaveLength(2);
   });
 
-  test('does not call getRequestAuditStats for skipped keys', async () => {
+  test('does not call batch operations for skipped keys', async () => {
     await mockRedis.hset(`quota:user-current:${currentMonth()}`, { spent: '99999' });
 
     const { runArchiveJob } = await import('../../../src/services/scheduler.service');
     await runArchiveJob();
 
-    expect(statsSpy).not.toHaveBeenCalled();
+    expect(batchArchiveSpy).not.toHaveBeenCalled();
   });
 });
