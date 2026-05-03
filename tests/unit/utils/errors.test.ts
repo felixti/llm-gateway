@@ -185,6 +185,14 @@ describe("errors utils", () => {
       });
     });
 
+    test("routes mounted /count_tokens to Anthropic format", () => {
+      const error = errorForProtocol("/count_tokens", 400, "invalid_req", "Bad input");
+      expect(error).toEqual({
+        type: "error",
+        error: { type: "invalid_request_error", message: "Bad input" },
+      });
+    });
+
     test("maps 401 to authentication_error for OpenAI", () => {
       const error = errorForProtocol("/v1/chat/completions", 401, "auth_error", "Invalid PAT");
       expect(error.error.type).toBe("authentication_error");

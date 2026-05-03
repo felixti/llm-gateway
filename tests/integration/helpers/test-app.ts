@@ -53,6 +53,27 @@ function bindMockRedis(mock: MockRedis): void {
   r.ttl = mock.ttl.bind(mock);
 }
 
+/** Bun/fetch may pass Headers or a plain header record — tests mirror outbound gateway calls. */
+function readInitHeader(init: RequestInit | undefined, headerName: string): string | undefined {
+  const h = init?.headers;
+  if (!h) return undefined;
+  if (h instanceof Headers) {
+    return h.get(headerName) ?? undefined;
+  }
+  if (Array.isArray(h)) {
+    const lower = headerName.toLowerCase();
+    for (const [k, v] of h) {
+      if (k.toLowerCase() === lower && typeof v === 'string') {
+        return v;
+      }
+    }
+    return undefined;
+  }
+  const record = h as Record<string, string>;
+  const entry = Object.entries(record).find(([k]) => k.toLowerCase() === headerName.toLowerCase());
+  return entry?.[1];
+}
+
 function setupMockFetch(): void {
   if (originalFetch) return;
   originalFetch = globalThis.fetch;
@@ -62,6 +83,18 @@ function setupMockFetch(): void {
     _init?: RequestInit
   ): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
+
+    // Anthropic count_tokens (Azure AI Foundry shape)
+    if (url.includes('/messages/count_tokens')) {
+      const anthropicBeta = readInitHeader(_init, 'anthropic-beta');
+      return new Response(
+        JSON.stringify({
+          input_tokens: 42,
+          _test_echo_beta: anthropicBeta ?? null,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
     // Mock Azure OpenAI / AI Foundry / Anthropic responses
     if (url.includes('azure.com') || url.includes('ai.azure.com')) {

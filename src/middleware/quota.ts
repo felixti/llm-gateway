@@ -89,6 +89,11 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<Response 
   const model = c.get('model');
   const path = c.req.path;
 
+  if (path === '/v1/messages/count_tokens' || path === '/count_tokens') {
+    await next();
+    return;
+  }
+
   const cached = c.get('parsedBody') as Record<string, unknown> | undefined;
   if (!cached || typeof cached !== 'object') {
     const error = errorForProtocol(path, 400, 'invalid_request', 'Invalid or missing request body');

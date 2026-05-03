@@ -9,6 +9,9 @@ let meterProvider: MeterProvider | null = null;
 function normalizePath(path: string): string {
   if (path === '/v1/chat/completions') return '/v1/chat/completions';
   if (path === '/v1/messages') return '/v1/messages';
+  if (path === '/v1/messages/count_tokens' || path === '/count_tokens') {
+    return '/v1/messages/count_tokens';
+  }
   if (path === '/v1/responses') return '/v1/responses';
   if (path === '/v1/models') return '/v1/models';
   if (path === '/health') return '/health';

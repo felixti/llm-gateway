@@ -26,6 +26,7 @@ const CHECK_REQUEST_LIMIT_SCRIPT = `
   local windowStart = tonumber(ARGV[2])
   local limit = tonumber(ARGV[3])
   local windowSeconds = tonumber(ARGV[4])
+  local dedupKey = ARGV[6]
   
   redis.call('zremrangebyscore', key, 0, windowStart)
   local count = redis.call('zcard', key)
@@ -34,7 +35,7 @@ const CHECK_REQUEST_LIMIT_SCRIPT = `
     return {0, count}
   end
   
-  local member = now .. ':' .. math.random()
+  local member = now .. ':' .. dedupKey
   redis.call('zadd', key, now, member)
   redis.call('expire', key, windowSeconds)
   
@@ -81,7 +82,8 @@ async function checkRequestLimit(userId: string): Promise<RateLimitResult> {
     now,
     windowStart,
     RPM_LIMIT,
-    WINDOW_SECONDS
+    WINDOW_SECONDS,
+    userId
   );
 
   const [allowed, count] = result as [number, number];
@@ -158,7 +160,10 @@ function extractTokenCount(c: Context): number {
     return Math.ceil(b.input.length / 4) + maxTokens;
   }
 
-  if (path === '/v1/messages' && Array.isArray(b.messages)) {
+  const isAnthropicMessagesRoute =
+    path === '/v1/messages' || path === '/v1/messages/count_tokens' || path === '/count_tokens';
+
+  if (isAnthropicMessagesRoute && Array.isArray(b.messages)) {
     let contentLength = 0;
     for (const msg of b.messages) {
       if (msg && typeof msg === 'object' && msg.content !== undefined) {

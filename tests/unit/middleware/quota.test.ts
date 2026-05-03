@@ -328,3 +328,49 @@ describe('quotaMiddleware — soft limit over-budget', () => {
     expect(next).not.toHaveBeenCalled();
   });
 });
+
+describe('quotaMiddleware — count_tokens', () => {
+  beforeEach(() => {
+    process.env.NODE_ENV = 'test';
+    process.env.PAT_SECRET = 'test-secret-that-is-at-least-32-chars!!';
+    vi.clearAllMocks();
+  });
+
+  test('skips reservation and calls next for /v1/messages/count_tokens', async () => {
+    const { quotaMiddleware } = await import('../../../src/middleware/quota');
+    const next = vi.fn(async () => undefined) as Next;
+
+    const { context } = createMockContext({
+      path: '/v1/messages/count_tokens',
+      parsedBody: {
+        model: 'claude-opus-4-6',
+        messages: [{ role: 'user', content: 'hello' }],
+      },
+    });
+
+    await quotaMiddleware(context, next);
+
+    expect(mockCheckAndReserve).not.toHaveBeenCalled();
+    expect(mockCalculateEstimatedCost).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  test('skips reservation when sub-app path is /count_tokens', async () => {
+    const { quotaMiddleware } = await import('../../../src/middleware/quota');
+    const next = vi.fn(async () => undefined) as Next;
+
+    const { context } = createMockContext({
+      path: '/count_tokens',
+      parsedBody: {
+        model: 'claude-opus-4-6',
+        messages: [{ role: 'user', content: 'hello' }],
+      },
+    });
+
+    await quotaMiddleware(context, next);
+
+    expect(mockCheckAndReserve).not.toHaveBeenCalled();
+    expect(mockCalculateEstimatedCost).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+});

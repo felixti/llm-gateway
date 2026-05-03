@@ -189,4 +189,24 @@ describe('rateLimitMiddleware', () => {
     expect(evalCalls).toHaveLength(2);
     expect(evalCalls[1][5]).toBeGreaterThan(25);
   });
+
+  test('counts Anthropic messages toward TPM on mounted /count_tokens path', async () => {
+    const { rateLimitMiddleware } = await import('../../../src/middleware/rate-limit');
+    const next = vi.fn(async () => undefined) as Next;
+
+    await rateLimitMiddleware(
+      createContextForPath(
+        {
+          model: 'claude-opus-4-6',
+          messages: [{ role: 'user', content: [{ type: 'text', text: 'Summarize this long input.' }] }],
+        },
+        '/count_tokens'
+      ),
+      next
+    );
+
+    expect(next).toHaveBeenCalled();
+    expect(evalCalls).toHaveLength(2);
+    expect(evalCalls[1][5]).toBeGreaterThan(0);
+  });
 });

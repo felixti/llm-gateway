@@ -70,7 +70,7 @@ export function errorForProtocol(
   code: string,
   message: string
 ): OpenAIError | AnthropicError {
-  const isAnthropic = path.startsWith('/v1/messages');
+  const isAnthropic = path.startsWith('/v1/messages') || path.endsWith('/count_tokens');
   const mapping = ERROR_MAPPINGS[status];
 
   if (!mapping) {

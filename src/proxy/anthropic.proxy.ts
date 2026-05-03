@@ -14,6 +14,7 @@ import type { TokenUsage } from '@/services/pricing.service';
 import { reconcileUsage } from '@/services/quota.service';
 import { withRetry } from '@/services/retry';
 import { upstreamHttpsFetch } from '@/utils/fetch';
+import { AsyncMutex } from '@/utils/mutex';
 import {
   type AnthropicStreamEvent,
   handleStreamAbort,
@@ -32,6 +33,72 @@ import {
 export function buildUpstreamUrlAnthropic(deployment: DeploymentConfig): string {
   const { endpoint, apiVersion } = deployment;
   return `${endpoint}/anthropic/v1/messages?api-version=${apiVersion}`;
+}
+
+/**
+ * Build upstream URL for Anthropic Messages API token counting (Messages API compatible)
+ */
+export function buildUpstreamUrlAnthropicCountTokens(deployment: DeploymentConfig): string {
+  const { endpoint, apiVersion } = deployment;
+  return `${endpoint}/anthropic/v1/messages/count_tokens?api-version=${apiVersion}`;
+}
+
+/**
+ * Proxy token-count request — no quota reconcile (metadata-only upstream call).
+ */
+export async function proxyCountTokensAnthropic(
+  upstreamUrl: string,
+  azureAuthHeaders: Record<string, string>,
+  anthropicClientHeaders: { version?: string | null; beta?: string | null },
+  body: Record<string, unknown>,
+  deployment: DeploymentConfig,
+  context: Pick<ProxyRequestContext, 'requestId' | 'userId' | 'abortSignal'>
+): Promise<Response> {
+  const { requestId, abortSignal } = context;
+  const anthropicVersion = anthropicClientHeaders.version ?? '2023-06-01';
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'anthropic-version': anthropicVersion,
+    ...azureAuthHeaders,
+  };
+  if (anthropicClientHeaders.beta) {
+    headers['anthropic-beta'] = anthropicClientHeaders.beta;
+  }
+
+  const response = await withRetry(
+    () =>
+      upstreamHttpsFetch(upstreamUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: abortSignal,
+      }),
+    { signal: abortSignal }
+  );
+
+  if (!response.ok) {
+    await recordFailure(deployment.name);
+    return createSanitizedUpstreamErrorResponse({
+      response,
+      path: '/v1/messages/count_tokens',
+      errorCode: 'api_error',
+      upstreamName: 'Azure AI Foundry',
+      requestId,
+      deploymentName: deployment.name,
+    });
+  }
+
+  await recordSuccess(deployment.name);
+
+  const responseBody = await response.json();
+  return new Response(JSON.stringify(responseBody), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Request-Id': requestId,
+    },
+  });
 }
 
 /**
@@ -169,13 +236,17 @@ export async function proxyStreamingAnthropic(
 
   let usageExtracted = false;
   let reservationFinalized = false;
+  const finalizeMutex = new AsyncMutex();
   const startTime = Date.now();
   const releaseUnreconciled = async () => {
-    if (reservationFinalized) {
-      return;
+    const release = await finalizeMutex.acquire();
+    try {
+      if (reservationFinalized) return;
+      reservationFinalized = true;
+      await releaseReservedQuota(reservationId, requestId);
+    } finally {
+      release();
     }
-    reservationFinalized = true;
-    await releaseReservedQuota(reservationId, requestId);
   };
   const cleanup = handleStreamAbort(reservationId, releaseUnreconciled, abortSignal);
 
@@ -190,10 +261,19 @@ export async function proxyStreamingAnthropic(
           const usage = extractUsageFromAnthropicEvents(events);
 
           if (usage) {
-            usageExtracted = true;
-            reservationFinalized = true;
-            reconcileUsage(reservationId, usage, deployment.azureModelName)
-              .then((actualCost) => {
+            // Don't block stream - fire-and-forget with mutex
+            (async () => {
+              const release = await finalizeMutex.acquire();
+              try {
+                if (usageExtracted || reservationFinalized) return;
+                usageExtracted = true;
+                reservationFinalized = true;
+
+                const actualCost = await reconcileUsage(
+                  reservationId,
+                  usage,
+                  deployment.azureModelName
+                );
                 addLLMSpanAttributes({
                   promptTokens: usage.prompt_tokens,
                   completionTokens: usage.completion_tokens,
@@ -215,8 +295,10 @@ export async function proxyStreamingAnthropic(
                   durationMs: Date.now() - startTime,
                   statusCode: 200,
                 }).catch((err) => logger.warn({ err, requestId }, 'Failed to log request audit'));
-              })
-              .catch((err) => logger.error({ err, requestId }, 'Quota reconciliation error'));
+              } finally {
+                release();
+              }
+            })();
           }
         }
       },

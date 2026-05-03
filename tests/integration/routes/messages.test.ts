@@ -235,4 +235,75 @@ describe('Messages Routes - /v1/messages', () => {
       expect(res.status).toBe(400);
     });
   });
+
+  describe('POST /v1/messages/count_tokens', () => {
+    function createCountTokensBody(overrides = {}) {
+      return {
+        model: 'claude-opus-4-6',
+        messages: [{ role: 'user', content: 'Hello' }],
+        ...overrides,
+      };
+    }
+
+    it('returns 401 when Authorization is missing', async () => {
+      const app = await createTestApp();
+      const res = await app.request('/v1/messages/count_tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(createCountTokensBody()),
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it('returns 400 when model is missing', async () => {
+      const app = await createTestApp();
+      const res = await app.request('/v1/messages/count_tokens', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: VALID_PAT,
+        },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'Hello' }],
+        }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it('accepts body without max_tokens and proxies token count from upstream', async () => {
+      const app = await createTestApp();
+      const beta = 'token-counting-2024-11-01';
+      const res = await app.request('/v1/messages/count_tokens', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: VALID_PAT,
+          'anthropic-beta': beta,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(createCountTokensBody()),
+      });
+
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as {
+        input_tokens: number;
+        _test_echo_beta: string | null;
+      };
+      expect(json.input_tokens).toBe(42);
+      expect(json._test_echo_beta).toBe(beta);
+    });
+
+    it('rejects non-Claude models', async () => {
+      const app = await createTestApp();
+      const res = await app.request('/v1/messages/count_tokens', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: VALID_PAT,
+        },
+        body: JSON.stringify(createCountTokensBody({ model: 'gpt-5.4' })),
+      });
+      expect(res.status).toBe(400);
+    });
+  });
 });

@@ -14,6 +14,9 @@ const ALLOWED_FAMILIES_PER_PATH: Record<string, ModelFamily[]> = {
   '/v1/chat/completions': ['gpt', 'kimi', 'glm', 'minimax'],
   '/v1/responses': ['gpt'],
   '/v1/messages': ['claude'],
+  '/v1/messages/count_tokens': ['claude'],
+  /** Nested mount under `/v1/messages` (Hono exposes this path to the sub-app) */
+  '/count_tokens': ['claude'],
 };
 
 /**
@@ -83,7 +86,7 @@ export async function protocolGuardMiddleware(
       } else {
         errorMessage = `Model ${model} is not supported on this endpoint`;
       }
-    } else if (path === '/v1/messages') {
+    } else if (path === '/v1/messages' || path.endsWith('/count_tokens')) {
       errorMessage = 'Non-Claude models are only available via POST /v1/chat/completions';
     } else {
       errorMessage = `Model ${model} is not supported on this endpoint`;

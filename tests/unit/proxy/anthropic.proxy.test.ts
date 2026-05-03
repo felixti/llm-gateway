@@ -1,7 +1,9 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'bun:test';
 import {
   buildUpstreamUrlAnthropic,
+  buildUpstreamUrlAnthropicCountTokens,
   extractUsageFromAnthropicEvents,
+  proxyCountTokensAnthropic,
   proxyNonStreamingAnthropic,
   proxyStreamingAnthropic,
 } from '../../../src/proxy/anthropic.proxy';
@@ -54,6 +56,19 @@ describe('Anthropic Proxy', () => {
       };
       const url = buildUpstreamUrlAnthropic(deployment as any);
       expect(url).toBe('https://test.azure.com/anthropic/v1/messages?api-version=2024-06-01');
+    });
+  });
+
+  describe('buildUpstreamUrlAnthropicCountTokens', () => {
+    it('should build count_tokens URL with api-version', () => {
+      const deployment = {
+        endpoint: 'https://test.azure.com',
+        apiVersion: '2024-06-01',
+      };
+      const url = buildUpstreamUrlAnthropicCountTokens(deployment as DeploymentConfig);
+      expect(url).toBe(
+        'https://test.azure.com/anthropic/v1/messages/count_tokens?api-version=2024-06-01'
+      );
     });
   });
 
@@ -345,6 +360,102 @@ describe('Anthropic Proxy', () => {
       expect(response.status).toBe(200);
       expect(mockReleaseReservation).toHaveBeenCalledWith('res-no-usage-ns');
       expect(mockReconcileUsage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('proxyCountTokensAnthropic', () => {
+    let originalFetch: typeof global.fetch;
+
+    beforeEach(() => {
+      originalFetch = global.fetch;
+      mockRecordFailure.mockReset();
+      mockRecordSuccess.mockReset();
+      mockWithRetry.mockImplementation((fn: () => unknown) => fn());
+      mockReconcileUsage.mockReset();
+      mockReleaseReservation.mockReset();
+    });
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    it('POSTs JSON to upstream count_tokens and forwards anthropic-beta', async () => {
+      global.fetch = vi.fn(async (input, init) => {
+        expect(String(input)).toContain('/messages/count_tokens');
+        expect(init?.method).toBe('POST');
+
+        const headers = init?.headers;
+        let anthropicVersion: string | undefined;
+        let anthropicBeta: string | undefined;
+        let contentType: string | undefined;
+        if (headers instanceof Headers) {
+          anthropicVersion = headers.get('anthropic-version') ?? undefined;
+          anthropicBeta = headers.get('anthropic-beta') ?? undefined;
+          contentType = headers.get('content-type') ?? undefined;
+        } else if (headers && typeof headers === 'object' && !Array.isArray(headers)) {
+          const record = headers as Record<string, string>;
+          anthropicVersion = Object.entries(record).find(
+            ([k]) => k.toLowerCase() === 'anthropic-version'
+          )?.[1];
+          anthropicBeta = Object.entries(record).find(
+            ([k]) => k.toLowerCase() === 'anthropic-beta'
+          )?.[1];
+          contentType = Object.entries(record).find(([k]) => k.toLowerCase() === 'content-type')?.[1];
+        }
+
+        expect(anthropicVersion).toBe('2023-06-01');
+        expect(anthropicBeta).toBe('token-counting-2024-11-01');
+        expect(contentType).toBe('application/json');
+
+        return new Response(JSON.stringify({ input_tokens: 99 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as unknown as typeof fetch;
+
+      const response = await proxyCountTokensAnthropic(
+        'https://test.azure.com/anthropic/v1/messages/count_tokens?api-version=2024-06-01',
+        { 'x-api-key': 'k' },
+        { beta: 'token-counting-2024-11-01', version: '2023-06-01' },
+        { model: 'claude-test', messages: [{ role: 'user', content: 'Hi' }] },
+        baseDeployment,
+        { requestId: 'req-ct', userId: 'user-ct', abortSignal: new AbortController().signal }
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ input_tokens: 99 });
+      expect(mockRecordSuccess).toHaveBeenCalledWith('claude-test');
+      expect(mockRecordFailure).not.toHaveBeenCalled();
+      expect(mockReconcileUsage).not.toHaveBeenCalled();
+      expect(mockReleaseReservation).not.toHaveBeenCalled();
+    });
+
+    it('sanitizes upstream errors for count_tokens path', async () => {
+      global.fetch = vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              message: 'upstream-secret-key=x-api-key-leaked details',
+            },
+          }),
+          { status: 502, headers: { 'content-type': 'application/json' } }
+        )) as unknown as typeof fetch;
+
+      const response = await proxyCountTokensAnthropic(
+        'https://test.azure.com/anthropic/v1/messages/count_tokens?api-version=2024-06-01',
+        {},
+        {},
+        { model: 'claude-test', messages: [{ role: 'user', content: 'Hi' }] },
+        baseDeployment,
+        { requestId: 'req-ct-err', userId: 'user-ct', abortSignal: new AbortController().signal }
+      );
+
+      expect(response.status).toBe(502);
+      const text = await response.text();
+      expect(text).toContain('Azure AI Foundry upstream request failed');
+      expect(text).not.toContain('x-api-key-leaked');
+      expect(mockRecordFailure).toHaveBeenCalledWith('claude-test');
+      expect(mockReleaseReservation).not.toHaveBeenCalled();
     });
   });
 });
