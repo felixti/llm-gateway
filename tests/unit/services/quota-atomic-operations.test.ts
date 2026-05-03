@@ -94,6 +94,19 @@ describe('quota atomic release', () => {
     expect(flag).not.toBeNull();
   });
 
+  test('releaseReservation passes configured idempotency TTL to Redis script', async () => {
+    process.env.QUOTA_IDEMPOTENCY_TTL_SECONDS = '172800';
+    const evalSpy = vi.fn(async () => [1, 'ok']);
+    const r = redis as unknown as { eval: (...args: unknown[]) => Promise<unknown> };
+    r.eval = evalSpy;
+
+    const { releaseReservation } = await import('../../../src/services/quota.service');
+    await releaseReservation('res_ttl_release');
+
+    const args = evalSpy.mock.calls[0] as unknown[];
+    expect(args[5]).toBe(172800);
+  });
+
   test('releaseReservation is a no-op when key is missing', async () => {
     const { releaseReservation } = await import('../../../src/services/quota.service');
     await expect(releaseReservation('res_never_existed')).resolves.toBeUndefined();
@@ -166,6 +179,19 @@ describe('quota atomic reconcile', () => {
     const idempotencyKey = `reconciled:${reservationId}`;
     const flag = await redis.get(idempotencyKey);
     expect(flag).not.toBeNull();
+  });
+
+  test('reconcileUsage passes configured idempotency TTL to Redis script', async () => {
+    process.env.QUOTA_IDEMPOTENCY_TTL_SECONDS = '172800';
+    const evalSpy = vi.fn(async () => [0, 'not_found']);
+    const r = redis as unknown as { eval: (...args: unknown[]) => Promise<unknown> };
+    r.eval = evalSpy;
+
+    const { reconcileUsage } = await import('../../../src/services/quota.service');
+    await reconcileUsage('res_ttl_reconcile', { prompt_tokens: 1, completion_tokens: 1 }, 'gpt-5.4');
+
+    const args = evalSpy.mock.calls[0] as unknown[];
+    expect(args[6]).toBe(172800);
   });
 
   test('reconcileUsage records exact microdollar cost to spent', async () => {
@@ -286,6 +312,23 @@ describe('quota atomic cleanup', () => {
 
     const hashData = await redis.hget(hashKey, reservationId);
     expect(hashData).toBeNull();
+  });
+
+  test('cleanupOrphanedReservations passes configured idempotency TTL to Redis script', async () => {
+    process.env.QUOTA_IDEMPOTENCY_TTL_SECONDS = '172800';
+    const evalSpy = vi.fn(async () => 0);
+    const r = redis as unknown as {
+      scan: (...args: unknown[]) => Promise<[string, string[]]>;
+      eval: (...args: unknown[]) => Promise<unknown>;
+    };
+    r.scan = async () => ['0', ['reservations_meta:user-cleanup-ttl:2026-05']];
+    r.eval = evalSpy;
+
+    const { cleanupOrphanedReservations } = await import('../../../src/services/quota.service');
+    await cleanupOrphanedReservations();
+
+    const args = evalSpy.mock.calls[0] as unknown[];
+    expect(args[5]).toBe('172800');
   });
 
   test('cleanupOrphanedReservations skips active reservations', async () => {

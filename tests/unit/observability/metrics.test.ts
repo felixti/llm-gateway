@@ -14,6 +14,8 @@ import {
   recordHttpRequestDuration,
   recordLlmRequestDuration,
   getPrometheusMetrics,
+  normalizeMetricModel,
+  llmTokensTotal,
 } from '@/observability/metrics';
 
 describe('Metrics', () => {
@@ -29,6 +31,27 @@ describe('Metrics', () => {
       addLlmTokens(100, 200, 'gpt-4o');
       addLlmTokens(50, 50, 'claude-3.5-sonnet');
     }).not.toThrow();
+  });
+
+  it('normalizes model labels before recording LLM token metrics', () => {
+    const calls: Array<[number, Record<string, string>]> = [];
+    const originalAdd = llmTokensTotal.add;
+    llmTokensTotal.add = ((value: number, attributes: Record<string, string>) => {
+      calls.push([value, attributes]);
+    }) as typeof llmTokensTotal.add;
+
+    try {
+      addLlmTokens(100, 200, 'gpt-5.4-experimental-user-supplied');
+    } finally {
+      llmTokensTotal.add = originalAdd;
+    }
+
+    expect(calls[0][1].model).toBe('gpt');
+    expect(calls[1][1].model).toBe('gpt');
+  });
+
+  it('maps unknown model metric labels to other', () => {
+    expect(normalizeMetricModel('unregistered-model-from-client')).toBe('other');
   });
 
   it('should add LLM cost', () => {

@@ -11,37 +11,20 @@ import { addLLMSpanAttributes } from '@/observability/tracing';
 import type { ProxyRequestContext } from '@/routes/factories/types';
 import { recordFailure, recordSuccess } from '@/services/circuit-breaker';
 import type { TokenUsage } from '@/services/pricing.service';
-import { reconcileUsage, releaseReservation } from '@/services/quota.service';
+import { reconcileUsage } from '@/services/quota.service';
 import { withRetry } from '@/services/retry';
-import { errorForProtocol } from '@/utils/errors';
 import { upstreamHttpsFetch } from '@/utils/fetch';
 import {
   type AnthropicStreamEvent,
   handleStreamAbort,
   parseAnthropicEvents,
 } from '@/utils/streaming';
-
-function normalizeProxyContext(
-  contextOrReservationId: ProxyRequestContext | string,
-  requestId?: string
-): ProxyRequestContext {
-  if (typeof contextOrReservationId === 'string') {
-    return { reservationId: contextOrReservationId, requestId: requestId || '' };
-  }
-  return contextOrReservationId;
-}
-
-async function releaseReservedQuota(reservationId: string, requestId: string): Promise<void> {
-  if (!reservationId) {
-    return;
-  }
-
-  try {
-    await releaseReservation(reservationId);
-  } catch (err) {
-    logger.warn({ err, requestId, reservationId }, 'Failed to release quota reservation');
-  }
-}
+import {
+  createSanitizedUpstreamErrorResponse,
+  finalizeProxyUsage,
+  normalizeProxyContext,
+  releaseReservedQuota,
+} from './shared';
 
 /**
  * Build upstream URL for Anthropic Messages API
@@ -103,16 +86,13 @@ export async function proxyNonStreamingAnthropic(
   if (!response.ok) {
     await recordFailure(deployment.name);
     await releaseReservedQuota(reservationId, requestId);
-    const errorBody = await response.text();
-    const error = errorForProtocol(
-      '/v1/messages',
-      response.status,
-      'api_error',
-      `Azure AI Foundry error: ${response.status} ${errorBody}`
-    );
-    return new Response(JSON.stringify(error), {
-      status: response.status,
-      headers: { 'Content-Type': 'application/json' },
+    return createSanitizedUpstreamErrorResponse({
+      response,
+      path: '/v1/messages',
+      errorCode: 'api_error',
+      upstreamName: 'Azure AI Foundry',
+      requestId,
+      deploymentName: deployment.name,
     });
   }
 
@@ -126,32 +106,7 @@ export async function proxyNonStreamingAnthropic(
   };
   const usage = responseBody?.usage;
 
-  if (usage && reservationId) {
-    const actualCost = await reconcileUsage(reservationId, usage, deployment.azureModelName);
-    addLLMSpanAttributes({
-      promptTokens: usage.prompt_tokens,
-      completionTokens: usage.completion_tokens,
-      totalTokens: usage.prompt_tokens + usage.completion_tokens,
-      costUsd: actualCost.toNumber(),
-    });
-    logRequestAudit({
-      userId: userId || 'unknown',
-      requestId,
-      model: deployment.azureModelName,
-      deployment: deployment.name,
-      protocolFamily: deployment.protocolFamily,
-      tokensInput: usage.prompt_tokens,
-      tokensOutput: usage.completion_tokens,
-      tokensThinking: usage.thinking_tokens || 0,
-      costUsd: actualCost.toString(),
-      thinkingEnabled: false,
-      azureAuthType: deployment.authConfig.type,
-      durationMs: Date.now() - startTime,
-      statusCode: 200,
-    }).catch((err) => logger.warn({ err, requestId }, 'Failed to log request audit'));
-  } else if (reservationId) {
-    await releaseReservedQuota(reservationId, requestId);
-  }
+  await finalizeProxyUsage({ usage, reservationId, requestId, userId, deployment, startTime });
 
   return new Response(JSON.stringify(responseBody), {
     status: 200,
@@ -195,16 +150,13 @@ export async function proxyStreamingAnthropic(
   if (!response.ok) {
     await recordFailure(deployment.name);
     await releaseReservedQuota(reservationId, requestId);
-    const errorBody = await response.text();
-    const error = errorForProtocol(
-      '/v1/messages',
-      response.status,
-      'api_error',
-      `Azure AI Foundry error: ${response.status} ${errorBody}`
-    );
-    return new Response(JSON.stringify(error), {
-      status: response.status,
-      headers: { 'Content-Type': 'application/json' },
+    return createSanitizedUpstreamErrorResponse({
+      response,
+      path: '/v1/messages',
+      errorCode: 'api_error',
+      upstreamName: 'Azure AI Foundry',
+      requestId,
+      deploymentName: deployment.name,
     });
   }
 

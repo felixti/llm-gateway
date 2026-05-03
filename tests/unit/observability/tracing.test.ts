@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from 'bun:test';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'bun:test';
 import {
   initTracing,
   shutdownTracing,
@@ -17,9 +17,25 @@ import {
   ATTR_LLM_COST_USD,
   ATTR_LLM_PROTOCOL,
   ATTR_AZURE_AUTH_TYPE,
+  createLoggingTraceExporterForTests,
 } from '../../../src/observability/tracing';
 
+const warnEntries: unknown[] = [];
+
+vi.mock('../../../src/observability/logger', () => ({
+  logger: {
+    warn: (...args: unknown[]) => warnEntries.push(args),
+    error: () => undefined,
+    info: () => undefined,
+    debug: () => undefined,
+  },
+}));
+
 describe('Tracing', () => {
+  beforeEach(() => {
+    warnEntries.length = 0;
+  });
+
   beforeEach(() => {
     initTracing();
   });
@@ -36,6 +52,23 @@ describe('Tracing', () => {
     it('should shutdown without errors', async () => {
       initTracing();
       await expect(shutdownTracing()).resolves.toBeUndefined();
+    });
+  });
+
+  describe('OTLP exporter warnings', () => {
+    it('logs a warning when trace export fails', async () => {
+      const exporter = createLoggingTraceExporterForTests({
+        export: (_spans, callback) => {
+          callback({ code: 1, error: new Error('collector unavailable') });
+        },
+        shutdown: async () => undefined,
+      });
+
+      exporter.export([], () => undefined);
+      await Promise.resolve();
+
+      expect(JSON.stringify(warnEntries)).toContain('Trace export failed');
+      expect(JSON.stringify(warnEntries)).toContain('collector unavailable');
     });
   });
 

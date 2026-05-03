@@ -203,6 +203,34 @@ describe("proxyNonStreamingChat", () => {
     expect(body.error.code).toBe("bad_gateway");
   });
 
+  test("does not expose upstream error body to clients", async () => {
+    global.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          error: {
+            message: "provider stack trace api-key=secret-provider-key prompt=private",
+          },
+        }),
+        { status: 502, headers: { "content-type": "application/json" } }
+      )) as unknown as typeof fetch;
+
+    const response = await proxyNonStreamingChat(
+      "https://test.azure.com/chat",
+      {},
+      { model: "gpt-5.4", messages: [] },
+      baseDeployment,
+      "res-123",
+      "req-123"
+    );
+
+    expect(response.status).toBe(502);
+    const text = await response.text();
+    expect(text).toContain("Azure OpenAI upstream request failed with status 502.");
+    expect(text).not.toContain("secret-provider-key");
+    expect(text).not.toContain("private");
+    expect(text).not.toContain("stack trace");
+  });
+
   test("releases quota reservation on upstream failure", async () => {
     global.fetch = vi.fn(async () =>
       new Response(JSON.stringify({ error: "server error" }), { status: 500 })) as unknown as typeof fetch;
@@ -345,6 +373,30 @@ describe("proxyStreamingChat", () => {
     );
 
     expect(mockReleaseReservation).toHaveBeenCalledWith("res-stream-failure");
+  });
+
+  test("does not expose streaming upstream error body to clients", async () => {
+    global.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          error: "provider stream error authorization=Bearer secret-provider-token",
+        }),
+        { status: 503, headers: { "content-type": "application/json" } }
+      )) as unknown as typeof fetch;
+
+    const response = await proxyStreamingChat(
+      "https://test.azure.com/chat",
+      {},
+      { model: "gpt-5.4", messages: [], stream: true },
+      baseDeployment,
+      { reservationId: "res-stream-secret", requestId: "req-stream-secret", userId: "user-123" } as any
+    );
+
+    expect(response.status).toBe(503);
+    const text = await response.text();
+    expect(text).toContain("Azure OpenAI upstream request failed with status 503.");
+    expect(text).not.toContain("secret-provider-token");
+    expect(text).not.toContain("provider stream error");
   });
 
   test("returns 500 and releases reservation when upstream has no response body", async () => {

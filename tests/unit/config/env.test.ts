@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from "bun:test";
+import { describe, it, expect, vi } from "bun:test";
 import { z } from "zod";
+import { parseEnvForTests } from "../../../src/config/env";
 
 // Mock the env module before importing it
 vi.mock("../src/config/env", () => ({
@@ -102,6 +103,66 @@ describe("Environment Configuration", () => {
         DATABASE_URL: "postgresql://localhost:5432/test"
       }).success).toBe(true);
       expect(schema.safeParse({ REDIS_URL: "invalid-url", DATABASE_URL: "postgresql://localhost:5432/test" }).success).toBe(false);
+    });
+  });
+
+  describe("Production hardening", () => {
+    const validProductionEnv = {
+      NODE_ENV: "production",
+      PAT_SECRET: "production-secret-minimum-32-characters",
+      DATABASE_URL: "postgresql://gateway:secret@postgres.internal:5432/llm_gateway",
+      REDIS_HOST: "redis.internal",
+      CORS_ALLOWED_ORIGINS: "https://gateway.example.com,https://cli.example.com",
+      AZURE_OPENAI_ENDPOINT: "https://prod-openai.openai.azure.com",
+      AZURE_OPENAI_KEY: "prod-openai-key",
+      AZURE_AI_FOUNDRY_ENDPOINT: "https://prod-foundry.ai.azure.com",
+      AZURE_AI_FOUNDRY_KEY: "prod-foundry-key",
+    };
+
+    it("rejects wildcard CORS in production", () => {
+      expect(() =>
+        parseEnvForTests({
+          ...validProductionEnv,
+          CORS_ALLOWED_ORIGINS: "*",
+        })
+      ).toThrow(/CORS_ALLOWED_ORIGINS/);
+    });
+
+    it("requires explicit provider endpoints in production", () => {
+      expect(() =>
+        parseEnvForTests({
+          ...validProductionEnv,
+          AZURE_OPENAI_ENDPOINT: undefined,
+        })
+      ).toThrow(/AZURE_OPENAI_ENDPOINT/);
+
+      expect(() =>
+        parseEnvForTests({
+          ...validProductionEnv,
+          AZURE_AI_FOUNDRY_ENDPOINT: undefined,
+        })
+      ).toThrow(/AZURE_AI_FOUNDRY_ENDPOINT/);
+    });
+
+    it("requires provider credentials or Entra ID in production", () => {
+      expect(() =>
+        parseEnvForTests({
+          ...validProductionEnv,
+          AZURE_OPENAI_KEY: undefined,
+          AZURE_AI_FOUNDRY_KEY: undefined,
+        })
+      ).toThrow(/AZURE_OPENAI_KEY|AZURE_AI_FOUNDRY_KEY|AZURE_ENTRA/);
+    });
+
+    it("accepts production config with explicit safe origins, endpoints, and provider keys", () => {
+      const parsed = parseEnvForTests(validProductionEnv);
+
+      expect(parsed.NODE_ENV).toBe("production");
+      expect(parsed.CORS_ALLOWED_ORIGINS).toBe(
+        "https://gateway.example.com,https://cli.example.com"
+      );
+      expect(parsed.AZURE_OPENAI_ENDPOINT).toBe("https://prod-openai.openai.azure.com");
+      expect(parsed.AZURE_AI_FOUNDRY_ENDPOINT).toBe("https://prod-foundry.ai.azure.com");
     });
   });
 });

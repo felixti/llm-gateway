@@ -84,7 +84,7 @@ sequenceDiagram
     Note over Gateway: 1. request-id.ts<br/>Generate UUID, set X-Request-Id
 
     Gateway->>Gateway: 2. auth.ts<br/>Validate PAT token
-    Gateway->>Redis: Check blocklist:pat:{jti}
+    Gateway->>Redis: Check blocklist:pat:{hash(jti)}
     Redis-->>Gateway: Not found
 
     Note over Gateway: 3. protocol-guard.ts<br/>Map model → deployment

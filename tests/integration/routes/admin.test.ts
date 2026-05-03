@@ -184,5 +184,52 @@ describe('Admin Routes - /admin', () => {
       const body = (await res.json()) as { success: boolean };
       expect(body.success).toBe(true);
     });
+
+    it('should set blocklist TTL from stored PAT expiry when available', async () => {
+      const setCalls: unknown[][] = [];
+      const { redis } = await import('../../../src/db/redis');
+      const originalSet = redis.set.bind(redis);
+      redis.set = (async (...args: unknown[]) => {
+        setCalls.push(args);
+        return 'OK';
+      }) as typeof redis.set;
+      database.execute = async <T extends Record<string, unknown>>({ query }: { query: string }) => {
+        if (String(query).includes('expires_at')) {
+          return {
+            rows: [
+              { expires_at: new Date(Date.now() + 60_000).toISOString() } as unknown as T,
+            ],
+            rowCount: 1,
+          };
+        }
+        return { rows: [], rowCount: 0 };
+      };
+
+      try {
+        const app = await createTestApp();
+        redis.set = (async (...args: unknown[]) => {
+          setCalls.push(args);
+          return 'OK';
+        }) as typeof redis.set;
+        const res = await app.request('/admin/pat/revoke', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: ADMIN_PAT,
+            'X-Operator-Secret': OPERATOR_SECRET,
+          },
+          body: JSON.stringify({
+            pat_id: '33333333-3333-3333-3333-333333333333',
+          }),
+        });
+
+        expect(res.status).toBe(200);
+        expect(setCalls[0][2]).toBe('EX');
+        expect(Number(setCalls[0][3])).toBeGreaterThan(0);
+        expect(Number(setCalls[0][3])).toBeLessThanOrEqual(60);
+      } finally {
+        redis.set = originalSet;
+      }
+    });
   });
 });

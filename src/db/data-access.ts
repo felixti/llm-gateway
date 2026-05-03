@@ -47,6 +47,10 @@ interface PatRevocationRecord {
   reason?: string;
 }
 
+export interface PatExpiryRecord {
+  expiresAt: Date | null;
+}
+
 /** Monthly quota policy from Postgres (authoritative); keyed by PAT user id / pat_subject / users.id */
 export interface UserQuotaPolicy {
   monthly_budget_usd: string;
@@ -214,5 +218,33 @@ export async function logPatRevocation(record: PatRevocationRecord): Promise<voi
   } catch (error) {
     logger.error('Failed to log PAT revocation', { patId: record.patId, error });
     throw error;
+  }
+}
+
+export async function getPatExpiryForRevocation(patId: string): Promise<PatExpiryRecord | null> {
+  const query = `
+    SELECT expires_at
+    FROM api_keys
+    WHERE jti = $1 OR id::text = $1
+    LIMIT 1
+  `;
+
+  try {
+    const { rows } = await database.execute<{ expires_at: Date | string | null }>({
+      query,
+      params: [patId],
+    });
+
+    if (!rows.length) {
+      return null;
+    }
+
+    const expiresAt = rows[0].expires_at;
+    return {
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+    };
+  } catch (error) {
+    logger.warn({ patId, error }, 'Failed to load PAT expiry for revocation TTL');
+    return null;
   }
 }

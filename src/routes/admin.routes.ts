@@ -3,7 +3,7 @@
  * PAT revocation and administrative operations
  */
 
-import { logPatRevocation } from '@/db/data-access';
+import { getPatExpiryForRevocation, logPatRevocation } from '@/db/data-access';
 import { redis } from '@/db/redis';
 import { requireAdminScopeMiddleware } from '@/middleware/admin-scope';
 import { authMiddleware } from '@/middleware/auth';
@@ -19,6 +19,15 @@ const revokePatBodySchema = z.object({
   pat_id: z.string().uuid('pat_id must be a valid UUID'),
   reason: z.string().optional(),
 });
+
+function getBlocklistTtlSeconds(expiresAt: Date | null | undefined): number | null {
+  if (!expiresAt) {
+    return null;
+  }
+
+  const ttlSeconds = Math.ceil((expiresAt.getTime() - Date.now()) / 1000);
+  return ttlSeconds > 0 ? ttlSeconds : null;
+}
 
 export const adminRoutes = new Hono();
 
@@ -61,9 +70,14 @@ adminRoutes.post('/pat/revoke', async (c) => {
     return c.json(error);
   }
 
-  // Persist until deleted — aligns with JWT exp / explicit unblock flows
   const blocklistKey = `blocklist:pat:${hashJtiForBlocklist(pat_id)}`;
-  await redis.set(blocklistKey, '1');
+  const expiry = await getPatExpiryForRevocation(pat_id);
+  const ttlSeconds = getBlocklistTtlSeconds(expiry?.expiresAt);
+  if (ttlSeconds) {
+    await redis.set(blocklistKey, '1', 'EX', ttlSeconds);
+  } else {
+    await redis.set(blocklistKey, '1');
+  }
 
   incrementPatRevocationsTotal();
   try {

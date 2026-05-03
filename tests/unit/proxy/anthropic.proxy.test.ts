@@ -120,6 +120,33 @@ describe('Anthropic Proxy', () => {
       expect(mockReleaseReservation).toHaveBeenCalledWith('res-failure');
     });
 
+    it('does not expose upstream error body to clients', async () => {
+      global.fetch = vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              message: 'foundry internal details x-api-key=secret-foundry-key prompt=private',
+            },
+          }),
+          { status: 502, headers: { 'content-type': 'application/json' } }
+        )) as unknown as typeof fetch;
+
+      const response = await proxyNonStreamingAnthropic(
+        'https://test.azure.com/messages',
+        {},
+        { model: 'claude-test', messages: [], max_tokens: 100 },
+        baseDeployment,
+        { reservationId: 'res-secret', requestId: 'req-secret', userId: 'user-123' } as any
+      );
+
+      expect(response.status).toBe(502);
+      const text = await response.text();
+      expect(text).toContain('Azure AI Foundry upstream request failed with status 502.');
+      expect(text).not.toContain('secret-foundry-key');
+      expect(text).not.toContain('private');
+      expect(text).not.toContain('internal details');
+    });
+
     it('logs authenticated user id in request audit', async () => {
       global.fetch = vi.fn(async () =>
         new Response(
@@ -177,6 +204,30 @@ describe('Anthropic Proxy', () => {
       );
 
       expect(mockReleaseReservation).toHaveBeenCalledWith('res-stream-failure');
+    });
+
+    it('does not expose streaming upstream error body to clients', async () => {
+      global.fetch = vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            error: 'foundry stream failure authorization=Bearer secret-foundry-token',
+          }),
+          { status: 503, headers: { 'content-type': 'application/json' } }
+        )) as unknown as typeof fetch;
+
+      const response = await proxyStreamingAnthropic(
+        'https://test.azure.com/messages',
+        {},
+        { model: 'claude-test', messages: [], max_tokens: 100, stream: true },
+        baseDeployment,
+        { reservationId: 'res-stream-secret', requestId: 'req-stream-secret', userId: 'user-123' } as any
+      );
+
+      expect(response.status).toBe(503);
+      const text = await response.text();
+      expect(text).toContain('Azure AI Foundry upstream request failed with status 503.');
+      expect(text).not.toContain('secret-foundry-token');
+      expect(text).not.toContain('foundry stream failure');
     });
 
     it('returns 500 and releases reservation when upstream has no body', async () => {

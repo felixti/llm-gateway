@@ -78,6 +78,78 @@ async function checkCircuitBreaker(
   return ok(undefined);
 }
 
+async function tryFallbacks(options: {
+  deps: RequestHandlerDeps;
+  bodyRecord: Record<string, unknown>;
+  deployment: import('@/config/deployments').DeploymentConfig;
+  proxyContext: {
+    reservationId: string;
+    requestId: string;
+    userId: string | undefined;
+    abortSignal: AbortSignal;
+  };
+  authManager: ReturnType<typeof getAzureAuthManager>;
+  useStreaming: boolean;
+  span: import('@opentelemetry/api').Span;
+  startTime: number;
+  userId: string | undefined;
+}): Promise<Response | null> {
+  if (!options.deployment.fallbackDeployment) {
+    return null;
+  }
+
+  const fallbackChain = getFallbackChain(options.deployment);
+
+  for (const fallback of fallbackChain) {
+    const fallbackCircuitCheck = await checkCircuitBreaker(fallback);
+    if (!fallbackCircuitCheck.ok) {
+      continue;
+    }
+
+    let fallbackAuthHeaders: Record<string, string>;
+    try {
+      fallbackAuthHeaders = await options.authManager.getAuthHeadersForDeployment(fallback);
+    } catch {
+      continue;
+    }
+
+    const fallbackUrl = options.deps.buildUpstreamUrl(fallback);
+    const fallbackBody = options.deps.transformBody
+      ? options.deps.transformBody(options.bodyRecord, fallback)
+      : options.bodyRecord;
+
+    const fallbackResponse = await (options.useStreaming
+      ? options.deps.proxyStreaming(
+          fallbackUrl,
+          fallbackAuthHeaders,
+          fallbackBody,
+          fallback,
+          options.proxyContext
+        )
+      : options.deps.proxyNonStreaming(
+          fallbackUrl,
+          fallbackAuthHeaders,
+          fallbackBody,
+          fallback,
+          options.proxyContext
+        ));
+
+    if (fallbackResponse.ok) {
+      options.span.setAttribute('http.status_code', fallbackResponse.status);
+      options.span.setAttribute('duration_ms', Date.now() - options.startTime);
+      options.span.setAttribute('llm.fallback', fallback.name);
+      logDebugRequestMetadata(
+        'fallback',
+        { status: fallbackResponse.status, deployment: fallback.name },
+        { traceId: getCurrentTraceId(), userId: options.userId }
+      );
+      return fallbackResponse;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Create a unified request handler factory
  * Replaces ~170 lines of duplicated handler code per route
@@ -160,7 +232,9 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         let response: Response;
         const proxyContext = { reservationId, requestId, userId, abortSignal };
 
-        if (bodyRecord.stream === true) {
+        const useStreaming = bodyRecord.stream === true;
+
+        if (useStreaming) {
           response = await deps.proxyStreaming(
             upstreamUrl,
             authHeaders,
@@ -176,49 +250,23 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
             deployment.value,
             proxyContext
           );
+        }
 
-          // 8. Fallback: if primary non-streaming request failed, try fallback deployments
-          if (!response.ok && deployment.value.fallbackDeployment) {
-            const fallbackChain = getFallbackChain(deployment.value);
-
-            for (const fallback of fallbackChain) {
-              const fallbackCircuitCheck = await checkCircuitBreaker(fallback);
-              if (!fallbackCircuitCheck.ok) {
-                continue;
-              }
-
-              let fallbackAuthHeaders: Record<string, string>;
-              try {
-                fallbackAuthHeaders = await authManager.getAuthHeadersForDeployment(fallback);
-              } catch {
-                continue;
-              }
-
-              const fallbackUrl = deps.buildUpstreamUrl(fallback);
-              const fallbackBody = deps.transformBody
-                ? deps.transformBody(bodyRecord, fallback)
-                : bodyRecord;
-
-              const fallbackResponse = await deps.proxyNonStreaming(
-                fallbackUrl,
-                fallbackAuthHeaders,
-                fallbackBody,
-                fallback,
-                proxyContext
-              );
-
-              if (fallbackResponse.ok) {
-                span.setAttribute('http.status_code', fallbackResponse.status);
-                span.setAttribute('duration_ms', Date.now() - startTime);
-                span.setAttribute('llm.fallback', fallback.name);
-                logDebugRequestMetadata(
-                  'fallback',
-                  { status: fallbackResponse.status, deployment: fallback.name },
-                  { traceId: getCurrentTraceId(), userId }
-                );
-                return fallbackResponse;
-              }
-            }
+        // 8. Fallback: if primary request failed, try same-protocol fallback deployments.
+        if (!response.ok) {
+          const fallbackResponse = await tryFallbacks({
+            deps,
+            bodyRecord,
+            deployment: deployment.value,
+            proxyContext,
+            authManager,
+            useStreaming,
+            span,
+            startTime,
+            userId,
+          });
+          if (fallbackResponse) {
+            return fallbackResponse;
           }
         }
 

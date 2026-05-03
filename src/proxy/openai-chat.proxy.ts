@@ -12,40 +12,19 @@ import { addLLMSpanAttributes, injectTraceContext } from '@/observability/tracin
 import type { ProxyRequestContext } from '@/routes/factories/types';
 import { recordFailure, recordSuccess } from '@/services/circuit-breaker';
 import type { TokenUsage } from '@/services/pricing.service';
-import { reconcileUsage, releaseReservation } from '@/services/quota.service';
+import { reconcileUsage } from '@/services/quota.service';
 import { withRetry } from '@/services/retry';
-import { errorForProtocol } from '@/utils/errors';
 import { upstreamHttpsFetch } from '@/utils/fetch';
+import { createOpenAIStreamTransformer, handleStreamAbort } from '@/utils/streaming';
 import {
-  createOpenAIStreamTransformer,
-  extractOpenAIUsage,
-  handleStreamAbort,
-} from '@/utils/streaming';
+  createSanitizedUpstreamErrorResponse,
+  finalizeProxyUsage,
+  normalizeProxyContext,
+  releaseReservedQuota,
+} from './shared';
 
 // Model families that use Foundry OpenAI-compatible endpoint
 const FOUNDRY_FAMILIES = ['kimi', 'glm', 'minimax'];
-
-function normalizeProxyContext(
-  contextOrReservationId: ProxyRequestContext | string,
-  requestId?: string
-): ProxyRequestContext {
-  if (typeof contextOrReservationId === 'string') {
-    return { reservationId: contextOrReservationId, requestId: requestId || '' };
-  }
-  return contextOrReservationId;
-}
-
-async function releaseReservedQuota(reservationId: string, requestId: string): Promise<void> {
-  if (!reservationId) {
-    return;
-  }
-
-  try {
-    await releaseReservation(reservationId);
-  } catch (err) {
-    logger.warn({ err, requestId, reservationId }, 'Failed to release quota reservation');
-  }
-}
 
 /**
  * Build upstream URL based on model family
@@ -115,16 +94,13 @@ export async function proxyNonStreamingChat(
   if (!response.ok) {
     await recordFailure(deployment.name);
     await releaseReservedQuota(reservationId, requestId);
-    const errorBody = await response.text();
-    const error = errorForProtocol(
-      '/v1/chat/completions',
-      response.status,
-      'bad_gateway',
-      `Azure OpenAI error: ${response.status} ${errorBody}`
-    );
-    return new Response(JSON.stringify(error), {
-      status: response.status,
-      headers: { 'Content-Type': 'application/json' },
+    return createSanitizedUpstreamErrorResponse({
+      response,
+      path: '/v1/chat/completions',
+      errorCode: 'bad_gateway',
+      upstreamName: 'Azure OpenAI',
+      requestId,
+      deploymentName: deployment.name,
     });
   }
 
@@ -145,32 +121,7 @@ export async function proxyNonStreamingChat(
   };
   const usage = responseBody?.usage;
 
-  if (usage && reservationId) {
-    const actualCost = await reconcileUsage(reservationId, usage, deployment.azureModelName);
-    addLLMSpanAttributes({
-      promptTokens: usage.prompt_tokens,
-      completionTokens: usage.completion_tokens,
-      totalTokens: usage.prompt_tokens + usage.completion_tokens,
-      costUsd: actualCost.toNumber(),
-    });
-    logRequestAudit({
-      userId: userId || 'unknown',
-      requestId,
-      model: deployment.azureModelName,
-      deployment: deployment.name,
-      protocolFamily: deployment.protocolFamily,
-      tokensInput: usage.prompt_tokens,
-      tokensOutput: usage.completion_tokens,
-      tokensThinking: usage.thinking_tokens || 0,
-      costUsd: actualCost.toString(),
-      thinkingEnabled: false,
-      azureAuthType: deployment.authConfig.type,
-      durationMs: Date.now() - startTime,
-      statusCode: 200,
-    }).catch((err) => logger.warn({ err, requestId }, 'Failed to log request audit'));
-  } else if (reservationId) {
-    await releaseReservedQuota(reservationId, requestId);
-  }
+  await finalizeProxyUsage({ usage, reservationId, requestId, userId, deployment, startTime });
 
   return new Response(JSON.stringify(responseBody), {
     status: 200,
@@ -215,16 +166,13 @@ export async function proxyStreamingChat(
   if (!response.ok) {
     await recordFailure(deployment.name);
     await releaseReservedQuota(reservationId, requestId);
-    const errorBody = await response.text();
-    const error = errorForProtocol(
-      '/v1/chat/completions',
-      response.status,
-      'bad_gateway',
-      `Azure OpenAI error: ${response.status} ${errorBody}`
-    );
-    return new Response(JSON.stringify(error), {
-      status: response.status,
-      headers: { 'Content-Type': 'application/json' },
+    return createSanitizedUpstreamErrorResponse({
+      response,
+      path: '/v1/chat/completions',
+      errorCode: 'bad_gateway',
+      upstreamName: 'Azure OpenAI',
+      requestId,
+      deploymentName: deployment.name,
     });
   }
 
@@ -235,7 +183,6 @@ export async function proxyStreamingChat(
     return new Response('Internal Server Error: No response body', { status: 500 });
   }
 
-  const transformer = createOpenAIStreamTransformer();
   let reservationFinalized = false;
   const startTime = Date.now();
   const releaseUnreconciled = async () => {
@@ -247,55 +194,42 @@ export async function proxyStreamingChat(
   };
   handleStreamAbort(reservationId, releaseUnreconciled, abortSignal);
 
-  const [clientStream, monitorStream] = response.body.tee();
-
-  const stream = clientStream.pipeThrough(new TransformStream(transformer));
-
-  (async () => {
-    const reader = monitorStream.getReader();
-    let fullText = '';
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        fullText += new TextDecoder().decode(value, { stream: true });
+  const transformer = createOpenAIStreamTransformer({
+    onUsage: (usage) => {
+      if (!reservationId || reservationFinalized) {
+        return;
       }
-    } finally {
-      reader.releaseLock();
-    }
-
-    const usage = extractOpenAIUsage(fullText);
-    if (usage && reservationId) {
       reservationFinalized = true;
-      try {
-        const actualCost = await reconcileUsage(reservationId, usage, deployment.azureModelName);
-        addLLMSpanAttributes({
-          promptTokens: usage.prompt_tokens,
-          completionTokens: usage.completion_tokens,
-          totalTokens: usage.prompt_tokens + usage.completion_tokens,
-          costUsd: actualCost.toNumber(),
-        });
-        logRequestAudit({
-          userId: userId || 'unknown',
-          requestId,
-          model: deployment.azureModelName,
-          deployment: deployment.name,
-          protocolFamily: deployment.protocolFamily,
-          tokensInput: usage.prompt_tokens,
-          tokensOutput: usage.completion_tokens,
-          tokensThinking: usage.thinking_tokens || 0,
-          costUsd: actualCost.toString(),
-          thinkingEnabled: false,
-          azureAuthType: deployment.authConfig.type,
-          durationMs: Date.now() - startTime,
-          statusCode: 200,
-        }).catch((err) => logger.warn({ err, requestId }, 'Failed to log request audit'));
-      } catch (err) {
-        logger.error({ err, requestId }, 'Quota reconciliation error');
-      }
-    }
-    await releaseUnreconciled();
-  })();
+      reconcileUsage(reservationId, usage, deployment.azureModelName)
+        .then((actualCost) => {
+          addLLMSpanAttributes({
+            promptTokens: usage.prompt_tokens,
+            completionTokens: usage.completion_tokens,
+            totalTokens: usage.prompt_tokens + usage.completion_tokens,
+            costUsd: actualCost.toNumber(),
+          });
+          logRequestAudit({
+            userId: userId || 'unknown',
+            requestId,
+            model: deployment.azureModelName,
+            deployment: deployment.name,
+            protocolFamily: deployment.protocolFamily,
+            tokensInput: usage.prompt_tokens,
+            tokensOutput: usage.completion_tokens,
+            tokensThinking: usage.thinking_tokens || 0,
+            costUsd: actualCost.toString(),
+            thinkingEnabled: false,
+            azureAuthType: deployment.authConfig.type,
+            durationMs: Date.now() - startTime,
+            statusCode: 200,
+          }).catch((err) => logger.warn({ err, requestId }, 'Failed to log request audit'));
+        })
+        .catch((err) => logger.error({ err, requestId }, 'Quota reconciliation error'));
+    },
+    onEnd: releaseUnreconciled,
+  });
+
+  const stream = response.body.pipeThrough(new TransformStream(transformer));
 
   return new Response(stream, {
     status: 200,

@@ -104,6 +104,16 @@ export async function shutdownMetrics(): Promise<void> {
 
 const meter = metrics.getMeter('llm-gateway');
 
+const METRIC_MODEL_FAMILIES = ['gpt', 'claude', 'kimi', 'glm', 'minimax'] as const;
+
+export function normalizeMetricModel(model: string): string {
+  const normalized = model.trim().toLowerCase();
+  const family = METRIC_MODEL_FAMILIES.find(
+    (candidate) => normalized === candidate || normalized.startsWith(`${candidate}-`)
+  );
+  return family ?? 'other';
+}
+
 export const httpRequestsTotal = meter.createCounter('http_requests_total', {
   description: 'Total number of HTTP requests',
 });
@@ -161,13 +171,14 @@ export function incrementHttpRequests(method: string, path: string, status: numb
 }
 
 export function addLlmTokens(promptTokens: number, completionTokens: number, model: string): void {
-  llmTokensTotal.add(promptTokens, { type: 'input', model });
-  llmTokensTotal.add(completionTokens, { type: 'output', model });
+  const metricModel = normalizeMetricModel(model);
+  llmTokensTotal.add(promptTokens, { type: 'input', model: metricModel });
+  llmTokensTotal.add(completionTokens, { type: 'output', model: metricModel });
   incrementCounter('llm_tokens_total', promptTokens + completionTokens);
 }
 
 export function addLlmCost(costUsd: number, model: string): void {
-  llmCostUsdTotal.add(costUsd, { model });
+  llmCostUsdTotal.add(costUsd, { model: normalizeMetricModel(model) });
   incrementCounter('llm_cost_usd_total', costUsd);
 }
 
@@ -228,7 +239,7 @@ export function recordLlmRequestDuration(
   model: string,
   protocol: string
 ): void {
-  llmRequestDuration.record(durationMs, { model, protocol });
+  llmRequestDuration.record(durationMs, { model: normalizeMetricModel(model), protocol });
   inMemoryHistograms.llm_request_duration_ms.count++;
   inMemoryHistograms.llm_request_duration_ms.sum += durationMs;
 }

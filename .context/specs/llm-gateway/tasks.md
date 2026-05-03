@@ -45,7 +45,7 @@
     - Create `src/middleware/auth.ts` with HMAC-SHA256 signature verification
     - Parse `lg_{userId}_{header}.{payload}.{signature}` format
     - Check expiry from `exp` claim
-    - Check Redis blocklist `blocklist:pat:{jti}` for revocation
+    - Check Redis blocklist `blocklist:pat:{hash(jti)}` for revocation
     - Set `userId`, `scope`, `jti` on Hono context
     - Create `generatePAT()` utility for tests/admin
     - Write unit tests for: valid token, expired token, invalid signature, revoked token, missing header

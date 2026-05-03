@@ -4,13 +4,40 @@ import {
   extractAnthropicUsage,
   parseAnthropicEvents,
   createOpenAIStreamTransformer,
+  createOpenAIUsageObserver,
   createAnthropicStreamTransformer,
   handleStreamAbort,
   type OpenAIStreamChunk,
   type AnthropicStreamEvent,
+  isAnthropicStreamEvent,
+  isOpenAIStreamChunk,
 } from "../../../src/utils/streaming";
 
 describe("Streaming Utilities", () => {
+  describe("SSE event validation", () => {
+    it("rejects OpenAI chunks with malformed usage token fields", () => {
+      expect(
+        isOpenAIStreamChunk({
+          id: "chatcmpl-123",
+          object: "chat.completion.chunk",
+          created: 1,
+          model: "gpt-5.4",
+          choices: [],
+          usage: { prompt_tokens: "10", completion_tokens: 5, total_tokens: 15 },
+        })
+      ).toBe(false);
+    });
+
+    it("rejects Anthropic events with malformed usage token fields", () => {
+      expect(
+        isAnthropicStreamEvent({
+          type: "message_delta",
+          usage: { input_tokens: 10, output_tokens: "5" },
+        })
+      ).toBe(false);
+    });
+  });
+
   describe("extractOpenAIUsage", () => {
     it("should extract usage from final OpenAI chunk", () => {
       const text = `data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677858242,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
@@ -239,6 +266,52 @@ data: {"type":"message_stop"}`;
 
       expect(chunks).toHaveLength(1);
       expect(new TextDecoder().decode(chunks[0])).toBe("data: [DONE]\n\n");
+    });
+  });
+
+  describe("createOpenAIUsageObserver", () => {
+    it("extracts usage incrementally across split SSE frames", () => {
+      const observed: unknown[] = [];
+      const observer = createOpenAIUsageObserver((usage) => observed.push(usage));
+      const encoder = new TextEncoder();
+
+      observer.observe(
+        encoder.encode(
+          'data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{"content":"hello"}}]}\n\n'
+        )
+      );
+      observer.observe(
+        encoder.encode(
+          'data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],'
+        )
+      );
+      observer.observe(
+        encoder.encode('"usage":{"prompt_tokens":13,"completion_tokens":8,"total_tokens":21}}\n\n')
+      );
+      observer.observe(encoder.encode("data: [DONE]\n\n"));
+
+      expect(observed).toEqual([
+        {
+          prompt_tokens: 13,
+          completion_tokens: 8,
+          thinking_tokens: undefined,
+          cache_creation_input_tokens: undefined,
+          cache_read_input_tokens: undefined,
+        },
+      ]);
+    });
+
+    it("does not emit usage more than once", () => {
+      const observed: unknown[] = [];
+      const observer = createOpenAIUsageObserver((usage) => observed.push(usage));
+      const encoder = new TextEncoder();
+      const event =
+        'data: {"id":"chatcmpl-123","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}\n\n';
+
+      observer.observe(encoder.encode(event));
+      observer.observe(encoder.encode(event));
+
+      expect(observed).toHaveLength(1);
     });
   });
 

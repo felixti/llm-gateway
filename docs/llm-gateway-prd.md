@@ -155,7 +155,7 @@ Example: lg_user_123_abc123def_signature
 
 ```
 1. Admin/API call: POST /admin/pat/revoke { tokenId }
-2. Add to Redis blocklist: blocklist:pat:<tokenId> = 1 [TTL: until token expiry]
+2. Add to Redis blocklist: blocklist:pat:{hash(jti)} = hash(jti) [no TTL]
 3. All auth middleware checks blocklist before signature verification
 4. Revoked tokens return 401 with "Token revoked" message
 ```
@@ -611,8 +611,8 @@ reservation:{reservation_id} → String
   └─ amount: string (USD) [TTL: 300s]
 
 # PAT Revocation Blocklist
-blocklist:pat:{token_id} → String
-  └─ "1" [TTL: until token expiry]
+blocklist:pat:{hash(jti)} → String
+  └─ hash(jti) [no TTL]
 
 # Rate limiting
 ratelimit:{user_id}:requests → String [TTL: 60s]

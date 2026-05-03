@@ -24,9 +24,9 @@ The gateway enforces USD-based quota management, real-time cost tracking, and pr
 #### Acceptance Criteria
 
 1. WHEN a request arrives with a valid `Authorization: Bearer {pat}` header THEN the gateway SHALL verify the HMAC-SHA256 signature and extract the user identity.
-2. WHEN a PAT has the prefix format `lg_{env}_{userId}_{random}_{signature}` THEN the gateway SHALL parse the environment (prod/test) and user ID from the prefix.
+2. WHEN a PAT has the format `lg_{userId}_{header}.{payload}.{signature}` THEN the gateway SHALL parse the user ID from the prefixed header segment.
 3. WHEN a PAT has expired (current time > `exp` claim) THEN the gateway SHALL return HTTP 401 with `{"error": {"type": "authentication_error", "message": "Token expired"}}`.
-4. WHEN a PAT has been revoked via the admin endpoint THEN the gateway SHALL check the Redis blocklist (`blocklist:pat:{jti}`) and return HTTP 401 with `"Token has been revoked"`.
+4. WHEN a PAT has been revoked via the admin endpoint THEN the gateway SHALL check the Redis blocklist (`blocklist:pat:{hash(jti)}`) and return HTTP 401 with `"Token has been revoked"`.
 5. WHEN a user has multiple active PATs THEN the gateway SHALL validate each independently based on its own signature and expiry.
 6. WHEN a PAT includes a scope claim (`all`, `read`, `models:<name>`) THEN the gateway SHALL enforce the scope against the requested operation.
 7. IF no `Authorization` header is present or the header does not start with `Bearer ` THEN the gateway SHALL return HTTP 401 with `"Missing or invalid Authorization header"`.
@@ -195,7 +195,7 @@ The gateway enforces USD-based quota management, real-time cost tracking, and pr
 
 #### Acceptance Criteria
 
-1. WHEN `POST /admin/pat/revoke` is called with `{ pat_id, reason }` THEN the gateway SHALL add the token to the Redis blocklist with a TTL matching the token's remaining lifetime.
+1. WHEN `POST /admin/pat/revoke` is called with `{ pat_id, reason }` THEN the gateway SHALL add the `pat_id`/`jti` to the Redis blocklist as `blocklist:pat:{hash(jti)}` with no TTL.
 2. WHEN a PAT is revoked THEN the gateway SHALL log the revocation to the `pat_revocation_log` PostgreSQL table with `revoked_by`, `revoked_at`, and `reason`.
 3. WHEN the revocation completes THEN the gateway SHALL return `{ success: true, revoked_at, message }`.
 4. WHEN a revoked token is used in subsequent requests THEN the gateway SHALL reject it within 1 second of the revocation call.

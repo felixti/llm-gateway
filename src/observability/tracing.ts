@@ -6,6 +6,7 @@
  */
 
 import { env } from '@/config/env';
+import { logger } from '@/observability/logger';
 import {
   type Attributes,
   type Link,
@@ -76,6 +77,29 @@ export const ATTR_AZURE_AUTH_TYPE = 'azure.auth_type';
 // Provider instance
 let provider: NodeTracerProvider | null = null;
 
+type TraceExporterLike = Pick<OTLPTraceExporter, 'export' | 'shutdown'>;
+
+function createLoggingTraceExporter(exporter: TraceExporterLike): TraceExporterLike {
+  return {
+    export: (spans, callback) => {
+      exporter.export(spans, (result) => {
+        if (result.code !== 0) {
+          logger.warn(
+            { err: result.error, errorMessage: result.error?.message },
+            'Trace export failed'
+          );
+        }
+        callback(result);
+      });
+    },
+    shutdown: () => exporter.shutdown(),
+  };
+}
+
+export function createLoggingTraceExporterForTests(exporter: TraceExporterLike): TraceExporterLike {
+  return createLoggingTraceExporter(exporter);
+}
+
 /**
  * Create OTLP gRPC trace exporter
  */
@@ -83,9 +107,11 @@ function createTraceExporter(): OTLPTraceExporter | null {
   if (!env.OTEL_EXPORTER_OTLP_GRPC_ENDPOINT) {
     return null;
   }
-  return new OTLPTraceExporter({
-    url: env.OTEL_EXPORTER_OTLP_GRPC_ENDPOINT,
-  });
+  return createLoggingTraceExporter(
+    new OTLPTraceExporter({
+      url: env.OTEL_EXPORTER_OTLP_GRPC_ENDPOINT,
+    })
+  ) as OTLPTraceExporter;
 }
 
 /**

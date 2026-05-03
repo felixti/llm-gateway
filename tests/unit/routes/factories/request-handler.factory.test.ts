@@ -286,7 +286,7 @@ describe('Request Handler Factory', () => {
       expect(proxyFn).toHaveBeenCalledTimes(2);
     });
 
-    it('should not attempt fallback for streaming requests', async () => {
+    it('should attempt fallback when primary streaming proxy returns non-ok response', async () => {
       const fallbackDeployment: DeploymentConfig = {
         ...mockDeployment,
         name: 'test-fallback',
@@ -303,14 +303,21 @@ describe('Request Handler Factory', () => {
       mockIsRequestAllowed.mockReturnValue(true);
       mockGetAuthHeaders.mockResolvedValue({ Authorization: 'Bearer test' });
 
-      const failingProxy = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: { message: 'upstream error' } }), { status: 500 })
-      );
+      let proxyCallCount = 0;
+      const proxyFn = vi.fn().mockImplementation(async () => {
+        proxyCallCount++;
+        if (proxyCallCount === 1) {
+          return new Response(JSON.stringify({ error: { message: 'upstream error' } }), {
+            status: 500,
+          });
+        }
+        return new Response('data: [DONE]\n\n', { status: 200 });
+      });
 
       const app = new Hono();
       const deps = createRequestHandlerDeps();
-      deps.proxyStreaming = failingProxy;
-      deps.proxyNonStreaming = failingProxy;
+      deps.proxyStreaming = proxyFn;
+      deps.proxyNonStreaming = vi.fn().mockResolvedValue(new Response(null, { status: 500 }));
       const handler = createRequestHandler(deps);
       app.post('/', handler);
 
@@ -320,9 +327,9 @@ describe('Request Handler Factory', () => {
         body: JSON.stringify({ model: 'test-model', messages: [], stream: true }),
       });
 
-      expect(res.status).toBe(500);
-      expect(failingProxy).toHaveBeenCalledTimes(1);
-      expect(mockGetFallbackChain).not.toHaveBeenCalled();
+      expect(res.status).toBe(200);
+      expect(proxyFn).toHaveBeenCalledTimes(2);
+      expect(mockGetFallbackChain).toHaveBeenCalledWith(primaryDeployment);
     });
 
     it('should return primary error when fallback also fails', async () => {

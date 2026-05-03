@@ -1,6 +1,10 @@
+import type { DeploymentConfig } from '@/config/deployments';
+import { logRequestAudit } from '@/db/data-access';
 import { logger } from '@/observability/logger';
+import { addLLMSpanAttributes } from '@/observability/tracing';
 import type { ProxyRequestContext } from '@/routes/factories/types';
-import { releaseReservation } from '@/services/quota.service';
+import type { TokenUsage } from '@/services/pricing.service';
+import { reconcileUsage, releaseReservation } from '@/services/quota.service';
 import { errorForProtocol } from '@/utils/errors';
 
 interface UpstreamErrorResponseOptions {
@@ -10,6 +14,16 @@ interface UpstreamErrorResponseOptions {
   upstreamName: string;
   requestId: string;
   deploymentName: string;
+}
+
+interface FinalizeUsageOptions {
+  usage: TokenUsage | undefined;
+  reservationId: string;
+  requestId: string;
+  userId: string | undefined;
+  deployment: DeploymentConfig;
+  startTime: number;
+  thinkingEnabled?: boolean;
 }
 
 export function normalizeProxyContext(
@@ -85,4 +99,46 @@ export async function createSanitizedUpstreamErrorResponse({
     status: effectiveStatus,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+export async function finalizeProxyUsage({
+  usage,
+  reservationId,
+  requestId,
+  userId,
+  deployment,
+  startTime,
+  thinkingEnabled = false,
+}: FinalizeUsageOptions): Promise<void> {
+  if (!reservationId) {
+    return;
+  }
+
+  if (!usage) {
+    await releaseReservedQuota(reservationId, requestId);
+    return;
+  }
+
+  const actualCost = await reconcileUsage(reservationId, usage, deployment.azureModelName);
+  addLLMSpanAttributes({
+    promptTokens: usage.prompt_tokens,
+    completionTokens: usage.completion_tokens,
+    totalTokens: usage.prompt_tokens + usage.completion_tokens,
+    costUsd: actualCost.toNumber(),
+  });
+  logRequestAudit({
+    userId: userId || 'unknown',
+    requestId,
+    model: deployment.azureModelName,
+    deployment: deployment.name,
+    protocolFamily: deployment.protocolFamily,
+    tokensInput: usage.prompt_tokens,
+    tokensOutput: usage.completion_tokens,
+    tokensThinking: usage.thinking_tokens || 0,
+    costUsd: actualCost.toString(),
+    thinkingEnabled,
+    azureAuthType: deployment.authConfig.type,
+    durationMs: Date.now() - startTime,
+    statusCode: 200,
+  }).catch((err) => logger.warn({ err, requestId }, 'Failed to log request audit'));
 }

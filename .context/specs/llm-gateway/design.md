@@ -250,7 +250,7 @@ interface TokenUsage {
 - Extracts `Authorization: Bearer {token}` header
 - Parses token format: `lg_{userId}_{base64header}.{base64payload}.{signature}`
 - Verifies HMAC-SHA256 signature against `PAT_SECRET`
-- Checks Redis blocklist: `GET blocklist:pat:{jti}` — if present, return 401
+- Checks Redis blocklist: `GET blocklist:pat:{hash(jti)}` — if present, return 401
 - Checks `exp` claim — if expired, return 401
 - Sets `c.set("userId", ...)`, `c.set("scope", ...)`, `c.set("jti", ...)` on Hono context
 
@@ -394,7 +394,7 @@ reserved:{user_id}:{YYYY-MM} → String (total reserved USD)
 reservation:{reservation_id} → String (reserved amount) [TTL: 300s]
 
 # PAT Revocation Blocklist
-blocklist:pat:{jti} → "1" [TTL: seconds until token expiry]
+blocklist:pat:{hash(jti)} → hash(jti) [no TTL]
 
 # Rate Limiting (sliding window)
 ratelimit:rpm:{user_id} → String (request count) [TTL: 60s]

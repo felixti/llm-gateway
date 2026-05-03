@@ -41,15 +41,158 @@ export interface OpenAIStreamState {
   done: boolean;
 }
 
+export interface OpenAIUsageObserver {
+  observe(chunk: Uint8Array): void;
+  flush(): void;
+}
+
+interface OpenAIStreamTransformerOptions {
+  onUsage?: (usage: TokenUsage) => void;
+  onEnd?: () => void | Promise<void>;
+}
+
+function toTokenUsage(usage: OpenAIStreamChunk['usage']): TokenUsage | null {
+  if (!usage) {
+    return null;
+  }
+
+  return {
+    prompt_tokens: usage.prompt_tokens,
+    completion_tokens: usage.completion_tokens,
+    thinking_tokens: undefined,
+    cache_creation_input_tokens: undefined,
+    cache_read_input_tokens: undefined,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function hasValidOpenAIUsage(value: unknown): value is OpenAIStreamChunk['usage'] {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isNumber(value.prompt_tokens) &&
+    isNumber(value.completion_tokens) &&
+    isNumber(value.total_tokens)
+  );
+}
+
+function hasValidAnthropicUsage(
+  value: unknown
+): value is NonNullable<AnthropicStreamEvent['usage']> {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isNumber(value.input_tokens) &&
+    isNumber(value.output_tokens) &&
+    (value.thinking_tokens === undefined || isNumber(value.thinking_tokens))
+  );
+}
+
+export function isOpenAIStreamChunk(value: unknown): value is OpenAIStreamChunk {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return value.usage === undefined || hasValidOpenAIUsage(value.usage);
+}
+
+function parseOpenAIUsageFromData(data: string): TokenUsage | null {
+  if (data === '[DONE]' || data.length < 10 || !data.includes('usage')) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(data) as unknown;
+    if (!isOpenAIStreamChunk(parsed)) {
+      return null;
+    }
+    return toTokenUsage(parsed.usage);
+  } catch {
+    return null;
+  }
+}
+
+export function createOpenAIUsageObserver(
+  onUsage: (usage: TokenUsage) => void
+): OpenAIUsageObserver {
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let emitted = false;
+
+  const processLine = (line: string) => {
+    if (emitted || !line.startsWith('data:')) {
+      return;
+    }
+
+    const usage = parseOpenAIUsageFromData(line.slice(5).trim());
+    if (!usage) {
+      return;
+    }
+
+    emitted = true;
+    onUsage(usage);
+  };
+
+  const processBuffer = () => {
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      processLine(line);
+    }
+  };
+
+  return {
+    observe(chunk: Uint8Array): void {
+      if (emitted) {
+        return;
+      }
+
+      buffer += decoder.decode(chunk, { stream: true });
+      processBuffer();
+    },
+
+    flush(): void {
+      if (emitted) {
+        return;
+      }
+
+      buffer += decoder.decode();
+      if (buffer) {
+        processLine(buffer);
+        buffer = '';
+      }
+    },
+  };
+}
+
 /**
  * Create a TransformStream for OpenAI SSE that intercepts usage from final chunk
  * Usage is extracted and passed via custom header, all chunks pass through
  */
-export function createOpenAIStreamTransformer() {
+export function createOpenAIStreamTransformer(options: OpenAIStreamTransformerOptions = {}) {
   const state: OpenAIStreamState = {
     usage: null,
     done: false,
   };
+  const observer = createOpenAIUsageObserver((usage) => {
+    state.usage = {
+      prompt_tokens: usage.prompt_tokens,
+      completion_tokens: usage.completion_tokens,
+      total_tokens: usage.prompt_tokens + usage.completion_tokens,
+    };
+    options.onUsage?.(usage);
+  });
 
   return {
     transform(chunk: Uint8Array, controller: TransformStreamDefaultController): void {
@@ -65,31 +208,16 @@ export function createOpenAIStreamTransformer() {
           continue;
         }
 
-        if (data.length < 10 || !data.includes('usage')) {
-          continue;
-        }
-
-        try {
-          const parsed = JSON.parse(data) as OpenAIStreamChunk;
-
-          // Intercept usage from final chunk
-          if (parsed.usage) {
-            state.usage = {
-              prompt_tokens: parsed.usage.prompt_tokens,
-              completion_tokens: parsed.usage.completion_tokens,
-              total_tokens: parsed.usage.total_tokens,
-            };
-          }
-        } catch {
-          // Pass through malformed JSON as-is after scanning the chunk.
-        }
+        observer.observe(chunk);
+        break;
       }
 
       controller.enqueue(chunk);
     },
 
-    flush(controller: TransformStreamDefaultController): void {
-      // Ensure usage is available after stream ends
+    async flush(controller: TransformStreamDefaultController): Promise<void> {
+      observer.flush();
+      await options.onEnd?.();
       controller.terminate();
     },
   };
@@ -108,15 +236,13 @@ export function extractOpenAIUsage(text: string): TokenUsage | null {
     if (data === '[DONE]') continue;
 
     try {
-      const parsed = JSON.parse(data) as OpenAIStreamChunk;
-      if (parsed.usage) {
-        return {
-          prompt_tokens: parsed.usage.prompt_tokens,
-          completion_tokens: parsed.usage.completion_tokens,
-          thinking_tokens: undefined,
-          cache_creation_input_tokens: undefined,
-          cache_read_input_tokens: undefined,
-        };
+      const parsed = JSON.parse(data) as unknown;
+      if (!isOpenAIStreamChunk(parsed)) {
+        continue;
+      }
+      const usage = toTokenUsage(parsed.usage);
+      if (usage) {
+        return usage;
       }
     } catch {
       // Continue searching
@@ -148,6 +274,14 @@ export interface AnthropicStreamEvent {
   };
 }
 
+export function isAnthropicStreamEvent(value: unknown): value is AnthropicStreamEvent {
+  if (!isRecord(value) || typeof value.type !== 'string') {
+    return false;
+  }
+
+  return value.usage === undefined || hasValidAnthropicUsage(value.usage);
+}
+
 /**
  * Create a TransformStream for Anthropic SSE that intercepts message_delta for usage
  * All other events pass through natively
@@ -177,7 +311,10 @@ export function extractAnthropicUsage(text: string): TokenUsage | null {
 
     const data = line.slice(5).trim();
     try {
-      const event = JSON.parse(data) as AnthropicStreamEvent;
+      const event = JSON.parse(data) as unknown;
+      if (!isAnthropicStreamEvent(event)) {
+        continue;
+      }
       if (event.type === 'message_delta' && event.usage) {
         return {
           prompt_tokens: event.usage.input_tokens,
@@ -207,7 +344,10 @@ export function parseAnthropicEvents(text: string): AnthropicStreamEvent[] {
 
     const data = line.slice(5).trim();
     try {
-      events.push(JSON.parse(data) as AnthropicStreamEvent);
+      const parsed = JSON.parse(data) as unknown;
+      if (isAnthropicStreamEvent(parsed)) {
+        events.push(parsed);
+      }
     } catch {
       // Skip malformed
     }
