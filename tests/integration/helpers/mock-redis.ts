@@ -266,8 +266,8 @@ export class MockRedis {
       return 0;
     }
     if (state === 'HALF_OPEN') {
-      const probeInProgress = this.store.get(probeKey);
-      if (probeInProgress) {
+      const probeSet = this.store.has(probeKey) ? null : 'OK';
+      if (!probeSet) {
         return 0;
       }
       this.store.set(probeKey, '1');

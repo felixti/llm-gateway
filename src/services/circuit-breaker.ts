@@ -84,11 +84,10 @@ const IS_REQUEST_ALLOWED_SCRIPT = `
   end
 
   if state == 'HALF_OPEN' then
-    local probeInProgress = redis.call('get', probeKey)
-    if probeInProgress then
+    local probeSet = redis.call('set', probeKey, '1', 'NX')
+    if not probeSet then
       return 0
     end
-    redis.call('set', probeKey, '1')
     return 1
   end
 

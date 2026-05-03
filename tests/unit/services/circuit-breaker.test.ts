@@ -271,6 +271,24 @@ describe("Circuit Breaker Service", () => {
       await recordSuccess(DEPLOYMENT);
       expect(await isRequestAllowed(DEPLOYMENT)).toBe(true);
     });
+
+    it("should allow only one concurrent request in HALF_OPEN state", async () => {
+      for (let i = 0; i < 5; i++) {
+        await recordFailure(DEPLOYMENT);
+      }
+
+      const key = `circuit:${DEPLOYMENT}`;
+      const { redis } = require("../../../src/db/redis");
+      await redis.hset(key, 'nextAttemptTime', Date.now() - 1);
+
+      const [first, second] = await Promise.all([
+        isRequestAllowed(DEPLOYMENT),
+        isRequestAllowed(DEPLOYMENT),
+      ]);
+
+      const allowedCount = [first, second].filter(Boolean).length;
+      expect(allowedCount).toBe(1);
+    });
   });
 
   describe("CLOSED state behavior", () => {
