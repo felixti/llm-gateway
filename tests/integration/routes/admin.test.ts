@@ -147,6 +147,16 @@ describe('Admin Routes - /admin', () => {
 
   describe('Success', () => {
     it('should revoke PAT with valid request', async () => {
+      database.execute = async <T extends Record<string, unknown>>({ query }: { query: string }) => {
+        if (String(query).includes('api_keys')) {
+          return {
+            rows: [{ id: 'key-1', jti: '11111111-1111-1111-1111-111111111111' } as unknown as T],
+            rowCount: 1,
+          };
+        }
+        return { rows: [], rowCount: 0 };
+      };
+
       const app = await createTestApp();
       const res = await app.request('/admin/pat/revoke', {
         method: 'POST',
@@ -168,6 +178,16 @@ describe('Admin Routes - /admin', () => {
     });
 
     it('should revoke PAT without reason', async () => {
+      database.execute = async <T extends Record<string, unknown>>({ query }: { query: string }) => {
+        if (String(query).includes('api_keys')) {
+          return {
+            rows: [{ id: 'key-2', jti: '22222222-2222-2222-2222-222222222222' } as unknown as T],
+            rowCount: 1,
+          };
+        }
+        return { rows: [], rowCount: 0 };
+      };
+
       const app = await createTestApp();
       const res = await app.request('/admin/pat/revoke', {
         method: 'POST',
@@ -194,11 +214,18 @@ describe('Admin Routes - /admin', () => {
         return 'OK';
       }) as typeof redis.set;
       database.execute = async <T extends Record<string, unknown>>({ query }: { query: string }) => {
-        if (String(query).includes('expires_at')) {
+        const q = String(query);
+        if (q.includes('expires_at')) {
           return {
             rows: [
               { expires_at: new Date(Date.now() + 60_000).toISOString() } as unknown as T,
             ],
+            rowCount: 1,
+          };
+        }
+        if (q.includes('api_keys')) {
+          return {
+            rows: [{ id: 'key-3', jti: '33333333-3333-3333-3333-333333333333' } as unknown as T],
             rowCount: 1,
           };
         }
@@ -230,6 +257,75 @@ describe('Admin Routes - /admin', () => {
       } finally {
         redis.set = originalSet;
       }
+    });
+
+    it('should return 404 for non-existent PAT', async () => {
+      const app = await createTestApp();
+      const res = await app.request('/admin/pat/revoke', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: ADMIN_PAT,
+          'X-Operator-Secret': OPERATOR_SECRET,
+        },
+        body: JSON.stringify({
+          pat_id: '44444444-4444-4444-4444-444444444444',
+        }),
+      });
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('not_found');
+    });
+
+    it('returns 500 when DB error occurs during PAT lookup', async () => {
+      database.execute = async () => {
+        throw new Error('connection refused');
+      };
+
+      const app = await createTestApp();
+      const res = await app.request('/admin/pat/revoke', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: ADMIN_PAT,
+          'X-Operator-Secret': OPERATOR_SECRET,
+        },
+        body: JSON.stringify({
+          pat_id: '55555555-5555-5555-5555-555555555555',
+        }),
+      });
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('internal_error');
+    });
+
+    it('revokes PAT by id::text when jti does not match', async () => {
+      const patId = '66666666-6666-6666-6666-666666666666';
+      database.execute = async <T extends Record<string, unknown>>({ query }: { query: string }) => {
+        const q = String(query);
+        if (q.includes('api_keys')) {
+          return {
+            rows: [{ id: patId, jti: 'different-jti-value' } as unknown as T],
+            rowCount: 1,
+          };
+        }
+        return { rows: [], rowCount: 0 };
+      };
+
+      const app = await createTestApp();
+      const res = await app.request('/admin/pat/revoke', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: ADMIN_PAT,
+          'X-Operator-Secret': OPERATOR_SECRET,
+        },
+        body: JSON.stringify({ pat_id: patId }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { success: boolean; pat_id: string };
+      expect(body.success).toBe(true);
+      expect(body.pat_id).toBe(patId);
     });
   });
 });

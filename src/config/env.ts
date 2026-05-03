@@ -64,6 +64,7 @@ const envSchema = z
       .optional()
       .default('false')
       .transform((v) => v === 'true'),
+    OTEL_TRACING_SAMPLER_RATIO: z.coerce.number().min(0).max(1).default(0.1),
 
     // Rate limiting defaults
     RATE_LIMIT_RPM: z.coerce.number().int().positive().default(100),
@@ -93,6 +94,11 @@ const envSchema = z
     HEALTH_CHECK_INTERVAL_MS: z.coerce.number().int().positive().default(30000),
     HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
     HEALTH_CHECK_DEPLOYMENTS_ENABLED: z
+      .enum(['true', 'false'])
+      .optional()
+      .default('true')
+      .transform((v) => v === 'true'),
+    HEALTH_CHECK_OTEL_ENABLED: z
       .enum(['true', 'false'])
       .optional()
       .default('true')

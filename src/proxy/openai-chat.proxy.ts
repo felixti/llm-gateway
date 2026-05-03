@@ -15,6 +15,7 @@ import type { TokenUsage } from '@/services/pricing.service';
 import { reconcileUsage } from '@/services/quota.service';
 import { withRetry } from '@/services/retry';
 import { upstreamHttpsFetch } from '@/utils/fetch';
+import { AsyncMutex } from '@/utils/mutex';
 import { createOpenAIStreamTransformer, handleStreamAbort } from '@/utils/streaming';
 import {
   createSanitizedUpstreamErrorResponse,
@@ -184,13 +185,17 @@ export async function proxyStreamingChat(
   }
 
   let reservationFinalized = false;
+  const finalizeMutex = new AsyncMutex();
   const startTime = Date.now();
   const releaseUnreconciled = async () => {
-    if (reservationFinalized) {
-      return;
+    const release = await finalizeMutex.acquire();
+    try {
+      if (reservationFinalized) return;
+      reservationFinalized = true;
+      await releaseReservedQuota(reservationId, requestId);
+    } finally {
+      release();
     }
-    reservationFinalized = true;
-    await releaseReservedQuota(reservationId, requestId);
   };
   handleStreamAbort(reservationId, releaseUnreconciled, abortSignal);
 
@@ -199,9 +204,12 @@ export async function proxyStreamingChat(
       if (!reservationId || reservationFinalized) {
         return;
       }
-      reservationFinalized = true;
-      reconcileUsage(reservationId, usage, deployment.azureModelName)
-        .then((actualCost) => {
+      (async () => {
+        const release = await finalizeMutex.acquire();
+        try {
+          if (reservationFinalized) return;
+          reservationFinalized = true;
+          const actualCost = await reconcileUsage(reservationId, usage, deployment.azureModelName);
           addLLMSpanAttributes({
             promptTokens: usage.prompt_tokens,
             completionTokens: usage.completion_tokens,
@@ -223,8 +231,10 @@ export async function proxyStreamingChat(
             durationMs: Date.now() - startTime,
             statusCode: 200,
           }).catch((err) => logger.warn({ err, requestId }, 'Failed to log request audit'));
-        })
-        .catch((err) => logger.error({ err, requestId }, 'Quota reconciliation error'));
+        } finally {
+          release();
+        }
+      })().catch((err) => logger.error({ err, requestId }, 'Unhandled error in usage finalization'));
     },
     onEnd: releaseUnreconciled,
   });

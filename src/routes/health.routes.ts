@@ -9,6 +9,7 @@ import { env } from '@/config/env';
 import { isPostgresHealthy } from '@/db/client';
 import { isRedisHealthy } from '@/db/redis';
 import { getPrometheusMetrics } from '@/observability/metrics';
+import { isOtelHealthy } from '@/observability/tracing';
 import { getCachedDeploymentHealth } from '@/services/health.service';
 import { Scalar } from '@scalar/hono-api-reference';
 import { Hono } from 'hono';
@@ -72,6 +73,7 @@ healthRoutes.get('/ready', async (c) => {
   const checks: Record<string, boolean> = {
     redis: false,
     postgres: false,
+    otel: false,
     deployments: false,
   };
 
@@ -87,6 +89,16 @@ healthRoutes.get('/ready', async (c) => {
     checks.postgres = false;
   }
 
+  if (env.HEALTH_CHECK_OTEL_ENABLED) {
+    try {
+      checks.otel = await isOtelHealthy();
+    } catch {
+      checks.otel = false;
+    }
+  } else {
+    checks.otel = true;
+  }
+
   if (env.HEALTH_CHECK_DEPLOYMENTS_ENABLED) {
     const cachedHealth = getCachedDeploymentHealth();
     checks.deployments = Array.from(cachedHealth.values()).some((h) => h.healthy);
@@ -94,7 +106,7 @@ healthRoutes.get('/ready', async (c) => {
     checks.deployments = true;
   }
 
-  const isReady = checks.redis && checks.postgres && checks.deployments;
+  const isReady = checks.redis && checks.postgres && checks.otel && checks.deployments;
 
   if (!isReady) {
     return c.json(

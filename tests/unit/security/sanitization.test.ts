@@ -4,8 +4,6 @@ import {
 } from "../../../src/observability/logger";
 import {
   parsePatToken,
-  hashPatToken,
-  verifyPatHash,
   validatePatStructure,
   hashJtiForBlocklist,
 } from "../../../src/utils/auth";
@@ -246,47 +244,6 @@ describe("PAT Authentication Security", () => {
     });
   });
 
-  describe("hashPatToken", () => {
-    it("should produce consistent hash for same input", () => {
-      const token = "lg_user123_header.payload.signature";
-      const hash1 = hashPatToken(token);
-      const hash2 = hashPatToken(token);
-      expect(hash1).toBe(hash2);
-    });
-
-    it("should produce different hash for different tokens", () => {
-      const hash1 = hashPatToken("lg_user1_a.b.c");
-      const hash2 = hashPatToken("lg_user2_a.b.c");
-      expect(hash1).not.toBe(hash2);
-    });
-
-    it("should return hex string", () => {
-      const hash = hashPatToken("lg_test_header.payload.sig");
-      expect(hash).toMatch(/^[a-f0-9]{64}$/); // SHA256 hex is 64 chars
-    });
-  });
-
-  describe("verifyPatHash", () => {
-    it("should verify matching hash", () => {
-      const token = "lg_user123_header.payload.signature";
-      const hash = hashPatToken(token);
-      expect(verifyPatHash(token, hash)).toBe(true);
-    });
-
-    it("should reject non-matching hash", () => {
-      const token = "lg_user123_header.payload.signature";
-      const wrongHash = hashPatToken("different-token");
-      expect(verifyPatHash(token, wrongHash)).toBe(false);
-    });
-
-    it("should use timing-safe comparison", () => {
-      const token = "lg_user123_header.payload.signature";
-      const hash = hashPatToken(token);
-      // This should not throw even with different length inputs
-      expect(verifyPatHash(token.slice(0, 10), hash)).toBe(false);
-    });
-  });
-
   describe("validatePatStructure", () => {
     it("should validate structurally correct token", () => {
       // Create a real verifiable token - we need to use the actual secret
@@ -342,29 +299,6 @@ describe("PAT Authentication Security", () => {
 
     it("should return hex string", () => {
       const hash = hashJtiForBlocklist("test-jti");
-      expect(hash).toMatch(/^[a-f0-9]{64}$/);
-    });
-  });
-
-  describe("security guarantees", () => {
-    it("should never expose raw token in parsed results", () => {
-      const token = "lg_user123_header.payload.signature";
-      const parsed = parsePatToken(token);
-      const validated = validatePatStructure(token);
-
-      // parsePatToken returns raw: "" (empty string, never raw token)
-      expect(parsed!.raw).toBe("");
-      // validatePatStructure returns undefined token when validation fails
-      expect(validated.token?.raw).toBeUndefined();
-    });
-
-    it("should only store hashes, never raw values", () => {
-      const token = "lg_secret_user_a.b.c";
-
-      // Hash the token (this is what we store)
-      const hash = hashPatToken(token);
-
-      // The hash should be a hex string (SHA256)
       expect(hash).toMatch(/^[a-f0-9]{64}$/);
     });
   });

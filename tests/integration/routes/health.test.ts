@@ -3,9 +3,11 @@
  * Tests for GET /health and GET /ready endpoints
  */
 
-import { describe, expect, it, beforeEach, afterEach } from 'bun:test';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'bun:test';
 import { createTestApp } from '../helpers/test-app';
 import { redis } from '../../../src/db/redis';
+import * as tracing from '../../../src/observability/tracing';
+import { resetEnvForTests } from '../../../src/config/env';
 
 interface HealthResponse {
   version: string;
@@ -16,6 +18,8 @@ interface ReadyResponse {
   status: 'ready' | 'not_ready';
   checks: {
     redis: boolean;
+    postgres: boolean;
+    otel: boolean;
     deployments: boolean;
   };
   timestamp: string;
@@ -105,6 +109,70 @@ describe('Health Routes', () => {
       expect(body.checks.redis).toBe(false);
 
       redis.ping = originalPing;
+    });
+
+    it('returns ready when OTel disabled and unhealthy', async () => {
+      const originalOtelEnv = process.env.HEALTH_CHECK_OTEL_ENABLED;
+      const originalDeploymentsEnv = process.env.HEALTH_CHECK_DEPLOYMENTS_ENABLED;
+
+      process.env.HEALTH_CHECK_OTEL_ENABLED = 'false';
+      process.env.HEALTH_CHECK_DEPLOYMENTS_ENABLED = 'false';
+      resetEnvForTests();
+
+      vi.spyOn(tracing, 'isOtelHealthy').mockResolvedValue(false);
+
+      const app = await createTestApp();
+      const res = await app.request('/ready');
+      const body = (await res.json()) as ReadyResponse;
+
+      expect(res.status).toBe(200);
+      expect(body.status).toBe('ready');
+      expect(body.checks.otel).toBe(true);
+
+      if (originalOtelEnv === undefined) {
+        delete process.env.HEALTH_CHECK_OTEL_ENABLED;
+      } else {
+        process.env.HEALTH_CHECK_OTEL_ENABLED = originalOtelEnv;
+      }
+      if (originalDeploymentsEnv === undefined) {
+        delete process.env.HEALTH_CHECK_DEPLOYMENTS_ENABLED;
+      } else {
+        process.env.HEALTH_CHECK_DEPLOYMENTS_ENABLED = originalDeploymentsEnv;
+      }
+      resetEnvForTests();
+      vi.restoreAllMocks();
+    });
+
+    it('returns not_ready when OTel enabled and unhealthy', async () => {
+      const originalOtelEnv = process.env.HEALTH_CHECK_OTEL_ENABLED;
+      const originalDeploymentsEnv = process.env.HEALTH_CHECK_DEPLOYMENTS_ENABLED;
+
+      process.env.HEALTH_CHECK_OTEL_ENABLED = 'true';
+      process.env.HEALTH_CHECK_DEPLOYMENTS_ENABLED = 'false';
+      resetEnvForTests();
+
+      vi.spyOn(tracing, 'isOtelHealthy').mockResolvedValue(false);
+
+      const app = await createTestApp();
+      const res = await app.request('/ready');
+      const body = (await res.json()) as ReadyResponse;
+
+      expect(res.status).toBe(503);
+      expect(body.status).toBe('not_ready');
+      expect(body.checks.otel).toBe(false);
+
+      if (originalOtelEnv === undefined) {
+        delete process.env.HEALTH_CHECK_OTEL_ENABLED;
+      } else {
+        process.env.HEALTH_CHECK_OTEL_ENABLED = originalOtelEnv;
+      }
+      if (originalDeploymentsEnv === undefined) {
+        delete process.env.HEALTH_CHECK_DEPLOYMENTS_ENABLED;
+      } else {
+        process.env.HEALTH_CHECK_DEPLOYMENTS_ENABLED = originalDeploymentsEnv;
+      }
+      resetEnvForTests();
+      vi.restoreAllMocks();
     });
   });
 

@@ -3,7 +3,7 @@
  * PAT revocation and administrative operations
  */
 
-import { getPatExpiryForRevocation, logPatRevocation } from '@/db/data-access';
+import { getApiKeyByJti, getPatExpiryForRevocation, logPatRevocation } from '@/db/data-access';
 import { redis } from '@/db/redis';
 import { requireAdminScopeMiddleware } from '@/middleware/admin-scope';
 import { authMiddleware } from '@/middleware/auth';
@@ -70,8 +70,31 @@ adminRoutes.post('/pat/revoke', async (c) => {
     return c.json(error);
   }
 
+  let keyRecord: { id: string; jti: string } | null;
+  try {
+    keyRecord = await getApiKeyByJti(pat_id);
+  } catch (error) {
+    logger.error({ patId: pat_id, error }, 'Database error during PAT lookup');
+    return c.json(
+      errorForProtocol(c.req.path, 500, 'internal_error', 'Internal server error'),
+      500
+    );
+  }
+
+  if (!keyRecord) {
+    return c.json(
+      errorForProtocol(c.req.path, 404, 'not_found', 'PAT not found or already revoked'),
+      404
+    );
+  }
+
   const blocklistKey = `blocklist:pat:${hashJtiForBlocklist(pat_id)}`;
-  const expiry = await getPatExpiryForRevocation(pat_id);
+  let expiry: { expiresAt: Date | null } | null = null;
+  try {
+    expiry = await getPatExpiryForRevocation(pat_id);
+  } catch (error) {
+    logger.warn({ patId: pat_id, error }, 'Failed to load PAT expiry for revocation TTL, proceeding without TTL');
+  }
   const ttlSeconds = getBlocklistTtlSeconds(expiry?.expiresAt);
   if (ttlSeconds) {
     await redis.set(blocklistKey, '1', 'EX', ttlSeconds);

@@ -175,13 +175,13 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         }
 
         // 2. Validate body with Zod schema
-        const validatedBody = validateBody(body, deps.schema);
+        const validatedBody = validateBody<{ [key: string]: unknown }>(body, deps.schema);
         if (!validatedBody.ok) {
           return createRequestErrorResponse(c, path, validatedBody.error);
         }
 
-        // Cast to record for downstream use
-        const bodyRecord = validatedBody.value as Record<string, unknown>;
+        // Use validated body directly - type is inferred from Zod schema
+        const bodyRecord = validatedBody.value;
 
         logDebugRequestMetadata('request', getRequestBodyLogMetadata(bodyRecord), {
           traceId: getCurrentTraceId(),

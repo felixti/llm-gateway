@@ -18,15 +18,6 @@ export interface PatToken {
 }
 
 /**
- * PAT blocklist entry (stores hash only, never raw token)
- */
-export interface PatBlocklistEntry {
-  jti: string;
-  hash: string;
-  revokedAt: Date;
-}
-
-/**
  * Parse PAT token without validation
  * Does NOT return the raw token - only parsed components
  */
@@ -57,40 +48,9 @@ export function parsePatToken(rawToken: string): PatToken | null {
 }
 
 /**
- * Create HMAC-SHA256 hash of a PAT token
- * This is what we STORE - never the raw token
- */
-export function hashPatToken(rawToken: string): string {
-  const hmac = createHmac('sha256', env.PAT_SECRET);
-  hmac.update(rawToken);
-  return hmac.digest('hex');
-}
-
-/**
- * Verify PAT token against stored hash
- * Uses timing-safe comparison to prevent timing attacks
- */
-export function verifyPatHash(rawToken: string, storedHash: string): boolean {
-  const computedHash = hashPatToken(rawToken);
-
-  // Timing-safe comparison
-  try {
-    const a = Buffer.from(computedHash, 'hex');
-    const b = Buffer.from(storedHash, 'hex');
-
-    if (a.length !== b.length) {
-      return false;
-    }
-
-    return timingSafeEqual(a, b);
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Verify PAT token structure and signature
- * Does NOT return the raw token - returns parsed components only
+ * Uses HMAC-SHA256 signature verification (not stored-hash comparison)
+ * because the PAT format embeds the signature in the token itself
  */
 export function validatePatStructure(rawToken: string): {
   valid: boolean;

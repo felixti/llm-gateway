@@ -36,6 +36,8 @@ const mockWithRetry = vi.fn();
 const mockGetDeploymentByAlias = vi.fn();
 const mockRecordFailure = vi.fn();
 const mockRecordSuccess = vi.fn();
+const mockLoggerError = vi.fn();
+const mockLoggerWarn = vi.fn();
 
 vi.mock("../../../src/services/quota.service", () => ({
   reconcileUsage: (...args: unknown[]) => mockReconcileUsage(...args),
@@ -58,6 +60,13 @@ vi.mock("../../../src/services/circuit-breaker", () => ({
   recordFailure: (...args: unknown[]) => mockRecordFailure(...args),
   recordSuccess: (...args: unknown[]) => mockRecordSuccess(...args),
   resetCircuitBreaker: () => undefined,
+}));
+
+vi.mock("../../../src/observability/logger", () => ({
+  logger: {
+    error: (...args: unknown[]) => mockLoggerError(...args),
+    warn: (...args: unknown[]) => mockLoggerWarn(...args),
+  },
 }));
 
 
@@ -562,5 +571,50 @@ describe("proxyStreamingChat", () => {
 
     const parsed = JSON.parse(capturedBody!);
     expect(parsed.stream_options).toEqual({ include_usage: true });
+  });
+
+  test("catches and logs error when reconcileUsage throws in onUsage IIFE", async () => {
+    const chunks = [
+      'data: {"id":"c1","choices":[{"index":0,"delta":{"content":"hi"}}]}\n\n',
+      'data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}\n\n',
+      "data: [DONE]\n\n",
+    ];
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(encoder.encode(chunk));
+        }
+        controller.close();
+      },
+    });
+
+    global.fetch = vi.fn(async () =>
+      new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })) as unknown as typeof fetch;
+
+    const testError = new Error("reconcileUsage failed");
+    mockReconcileUsage.mockRejectedValue(testError);
+    mockLoggerError.mockReset();
+
+    const response = await proxyStreamingChat(
+      "https://test.azure.com/chat",
+      {},
+      { model: "gpt-5.4", messages: [], stream: true },
+      baseDeployment,
+      { reservationId: "res-stream-error", requestId: "req-stream-error", userId: "user-error" } as any
+    );
+
+    expect(response.status).toBe(200);
+    // Drain the stream so the transform runs to completion.
+    await response.text();
+
+    // Allow microtasks for the async onUsage IIFE to settle.
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(mockLoggerError).toHaveBeenCalledTimes(1);
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.objectContaining({ err: testError, requestId: "req-stream-error" }),
+      "Unhandled error in usage finalization"
+    );
   });
 });

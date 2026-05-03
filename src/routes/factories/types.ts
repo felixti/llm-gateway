@@ -24,9 +24,9 @@ export interface ValidatedRequest<T> {
 /**
  * Dependencies for request handler factory
  */
-export interface RequestHandlerDeps {
+export interface RequestHandlerDeps<T = Record<string, unknown>> {
   /** Zod schema for body validation */
-  schema: ZodSchema;
+  schema: ZodSchema<T>;
   /** Protocol type for error formatting */
   protocol: ProtocolType;
   /** Route path for error context */
@@ -36,14 +36,11 @@ export interface RequestHandlerDeps {
   /** Non-streaming proxy function */
   proxyNonStreaming: ProxyNonStreamingFn;
   /** Extract model from validated body */
-  getModel: (body: Record<string, unknown>) => string;
+  getModel: (body: T) => string;
   /** Build upstream URL for deployment */
   buildUpstreamUrl: (deployment: DeploymentConfig) => string;
   /** Transform body for upstream (optional) */
-  transformBody?: (
-    body: Record<string, unknown>,
-    deployment: DeploymentConfig
-  ) => Record<string, unknown>;
+  transformBody?: (body: T, deployment: DeploymentConfig) => Record<string, unknown>;
 }
 
 export interface ProxyRequestContext {

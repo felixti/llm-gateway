@@ -229,22 +229,37 @@ export async function getPatExpiryForRevocation(patId: string): Promise<PatExpir
     LIMIT 1
   `;
 
-  try {
-    const { rows } = await database.execute<{ expires_at: Date | string | null }>({
-      query,
-      params: [patId],
-    });
+  const { rows } = await database.execute<{ expires_at: Date | string | null }>({
+    query,
+    params: [patId],
+  });
 
-    if (!rows.length) {
-      return null;
-    }
-
-    const expiresAt = rows[0].expires_at;
-    return {
-      expiresAt: expiresAt ? new Date(expiresAt) : null,
-    };
-  } catch (error) {
-    logger.warn({ patId, error }, 'Failed to load PAT expiry for revocation TTL');
+  if (!rows.length) {
     return null;
   }
+
+  const expiresAt = rows[0].expires_at;
+  return {
+    expiresAt: expiresAt ? new Date(expiresAt) : null,
+  };
+}
+
+/**
+ * Look up a PAT by its jti or id.
+ * Returns the api_keys record with id and jti if found.
+ */
+export async function getApiKeyByJti(jti: string): Promise<{ id: string; jti: string } | null> {
+  const query = `
+    SELECT id::text AS id, jti
+    FROM api_keys
+    WHERE jti = $1 OR id::text = $1
+    LIMIT 1
+  `;
+
+  const { rows } = await database.execute<{ id: string; jti: string }>({
+    query,
+    params: [jti],
+  });
+
+  return rows[0] || null;
 }

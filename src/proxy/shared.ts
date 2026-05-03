@@ -51,6 +51,15 @@ export async function releaseReservedQuota(
   }
 }
 
+export function redactSensitiveContent(text: string): string {
+  return text
+    .replace(/"key"\s*:\s*"[^"]+"/gi, '"key":"[REDACTED]"')
+    .replace(/"api[_-]?key"\s*:\s*"[^"]+"/gi, '"api_key":"[REDACTED]"')
+    .replace(/Bearer\s+[a-zA-Z0-9_-]+/gi, 'Bearer [REDACTED]')
+    .replace(/sk-[a-zA-Z0-9]{20,}/g, '[API_KEY]')
+    .replace(/\b[a-f0-9]{32}\b/gi, '[AZURE_KEY]');
+}
+
 export async function createSanitizedUpstreamErrorResponse({
   response,
   path,
@@ -66,7 +75,7 @@ export async function createSanitizedUpstreamErrorResponse({
   } else {
     try {
       const text = await response.text();
-      errorBody = text.slice(0, 4096);
+      errorBody = redactSensitiveContent(text).slice(0, 1024);
     } catch (err) {
       logger.warn(
         { err, requestId, deployment: deploymentName },

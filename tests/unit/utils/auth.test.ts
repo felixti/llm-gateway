@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
   parsePatToken,
-  hashPatToken,
-  verifyPatHash,
   validatePatStructure,
   isJtiBlocklisted,
   hashJtiForBlocklist,
@@ -25,36 +23,6 @@ describe('Auth utilities', () => {
       expect(token!.header).toBe('lg_user1_header');
       expect(token!.payload).toBe('payload');
       expect(token!.signature).toBe('sig');
-    });
-  });
-
-  describe('hashPatToken', () => {
-    it('should return consistent hash for same token', () => {
-      const hash1 = hashPatToken('test-token');
-      const hash2 = hashPatToken('test-token');
-      expect(hash1).toBe(hash2);
-      expect(hash1).toBeTruthy();
-    });
-  });
-
-  describe('verifyPatHash', () => {
-    it('should return true for matching hash', () => {
-      const token = 'test-token';
-      const hash = hashPatToken(token);
-      expect(verifyPatHash(token, hash)).toBe(true);
-    });
-
-    it('should return false for non-matching hash', () => {
-      const hash = hashPatToken('test-token');
-      expect(verifyPatHash('different-token', hash)).toBe(false);
-    });
-
-    it('should return false for invalid hex hash', () => {
-      expect(verifyPatHash('test', 'not-hex')).toBe(false);
-    });
-
-    it('should return false for hash of different length', () => {
-      expect(verifyPatHash('test', 'aa')).toBe(false);
     });
   });
 

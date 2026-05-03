@@ -3,7 +3,8 @@
  * Run after authMiddleware.
  */
 
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import { env } from '@/config/env';
 import { errorForProtocol } from '@/utils/errors';
 import type { Context, Next } from 'hono';
 
@@ -19,18 +20,14 @@ function getOperatorSecret(): string {
 }
 
 function isOperatorSecretValid(provided: string | undefined, expected: string): boolean {
-  if (!provided) {
-    return false;
-  }
+  if (!provided) return false;
 
-  const providedBuffer = Buffer.from(provided);
-  const expectedBuffer = Buffer.from(expected);
+  // Use HMAC with PAT_SECRET as key for constant-time comparison
+  // This avoids timing side channels regardless of input length
+  const providedHash = createHmac('sha256', env.PAT_SECRET).update(provided).digest();
+  const expectedHash = createHmac('sha256', env.PAT_SECRET).update(expected).digest();
 
-  if (providedBuffer.length !== expectedBuffer.length) {
-    return false;
-  }
-
-  return timingSafeEqual(providedBuffer, expectedBuffer);
+  return timingSafeEqual(providedHash, expectedHash);
 }
 
 export async function requireAdminScopeMiddleware(
