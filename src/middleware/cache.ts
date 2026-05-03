@@ -34,6 +34,12 @@ export function cacheMiddleware(config: CacheConfig = {}) {
       const cached = await redis.get(cacheKey);
       if (cached) {
         const data = JSON.parse(cached);
+        if (typeof data.body === 'string') {
+          return new Response(data.body, {
+            status: data.status,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
         return c.json(data.body, data.status);
       }
     } catch (error) {
@@ -44,7 +50,7 @@ export function cacheMiddleware(config: CacheConfig = {}) {
 
     if (c.res.status === 200) {
       try {
-        const body = await c.res.clone().json();
+        const body = await c.res.clone().text();
         await redis.setex(cacheKey, ttl, JSON.stringify({ body, status: 200 }));
       } catch (error) {
         logger.warn({ cacheKey, error }, 'Cache write error');
