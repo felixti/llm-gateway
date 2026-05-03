@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir=dist --target=bun --external '@opentelemetry/*'",
     "setup:local": "bash scripts/run-local.sh",
     "db:migrate": "bash scripts/db-migrate.sh",
     "test:curl": "bash scripts/curl-tests.sh",
@@ -43,11 +44,14 @@
     "uuid": "^14.0.0",
     "zod": "^3.22.4"
   },
+  "overrides": {
+    "uuid": "^14.0.0"
+  },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@types/bun": "^1.0.0",
     "@types/uuid": "^9.0.7",
-    "testcontainers": "^11.0.0",
+    "testcontainers": "^11.14.0",
     "typescript": "^5.3.3"
   },
   "engines": {

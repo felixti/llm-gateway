@@ -8,6 +8,7 @@ import { type DeploymentConfig, getAllDeployments } from '@/config/deployments';
 import { authMiddleware } from '@/middleware/auth';
 import { cacheMiddleware } from '@/middleware/cache';
 import { scopeMiddleware } from '@/middleware/scope';
+import { filterDeploymentsForScope } from '@/utils/model-scope';
 import { Hono } from 'hono';
 
 // Create models routes
@@ -33,14 +34,7 @@ modelsRoutes.use(
 modelsRoutes.get('/', (c) => {
   const scope = c.get('scope') || 'all';
 
-  // Get all enabled deployments
-  let deployments = getAllDeployments();
-
-  // Filter by scope if not admin
-  if (scope !== 'all' && scope !== 'models') {
-    // User scope filtering - in production, this would check user permissions
-    deployments = deployments.filter((d) => d.name.includes(scope));
-  }
+  const deployments = filterDeploymentsForScope(getAllDeployments(), scope);
 
   // Build response in OpenAI format
   const response = {

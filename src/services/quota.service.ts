@@ -1,5 +1,6 @@
 import { redis } from '@/db/redis';
 import { logger } from '@/observability/logger';
+import { incrementQuotaOrphanCleaned } from '@/observability/metrics';
 import { Decimal } from 'decimal.js';
 import { type TokenUsage, calculateCost } from './pricing.service';
 import {
@@ -352,6 +353,12 @@ export async function cleanupOrphanedReservations(): Promise<number> {
     } while (cursor !== '0');
   } catch (error) {
     logger.error({ error }, 'Cleanup error');
+  }
+
+  if (totalCleaned > 0) {
+    for (let i = 0; i < totalCleaned; i++) {
+      incrementQuotaOrphanCleaned();
+    }
   }
 
   return totalCleaned;

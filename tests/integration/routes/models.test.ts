@@ -75,7 +75,7 @@ describe('Models Routes - /v1/models', () => {
       expect(res.status).toBe(200);
     });
 
-    it('should not serve an all-scope cached model list to a restricted scope', async () => {
+    it('should filter models by scope', async () => {
       const app = await createTestApp();
 
       const allRes = await app.request('/v1/models', {
@@ -90,7 +90,16 @@ describe('Models Routes - /v1/models', () => {
       });
       expect(readRes.status).toBe(200);
       const readBody = (await readRes.json()) as { data: unknown[] };
-      expect(readBody.data.length).toBe(0);
+      expect(readBody.data.length).toBe(allBody.data.length);
+
+      const modelPat = createTestPat('user1', { scope: 'models:gpt-5.4' });
+      const modelRes = await app.request('/v1/models', {
+        headers: { Authorization: modelPat },
+      });
+      expect(modelRes.status).toBe(200);
+      const modelBody = (await modelRes.json()) as { data: Array<{ id: string }> };
+      expect(modelBody.data.length).toBe(1);
+      expect(modelBody.data[0].id).toBe('gpt-5.4');
     });
   });
 });

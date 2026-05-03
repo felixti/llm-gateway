@@ -83,37 +83,9 @@ jobs:
           CI: true
 
       - name: Check coverage thresholds
-        run: |
-          node -e "
-            const fs = require('fs');
-            const path = 'coverage/bun/index.html';
-            if (!fs.existsSync(path)) {
-              console.log('⚠️  Coverage report not found, skipping threshold check');
-              process.exit(0);
-            }
-            const html = fs.readFileSync(path, 'utf8');
-            const matches = html.match(/\d+\.\d+(?=%)/g) || [];
-            const lineCoverage = parseFloat(matches[0] || 0);
-            const funcCoverage = parseFloat(matches[1] || lineCoverage);
-
-            console.log('Line Coverage: ' + lineCoverage + '%');
-            console.log('Function Coverage: ' + funcCoverage + '%');
-
-            let failed = false;
-            if (lineCoverage < 90) {
-              console.log('❌ Line coverage (' + lineCoverage + '%) is below threshold (90%)');
-              failed = true;
-            }
-            if (funcCoverage < 90) {
-              console.log('❌ Function coverage (' + funcCoverage + '%) is below threshold (90%)');
-              failed = true;
-            }
-
-            if (!failed) {
-              console.log('✅ Coverage thresholds met (lines: ' + lineCoverage + '%, functions: ' + funcCoverage + '%)');
-            }
-            process.exit(failed ? 1 : 0);
-          "
+        run: bun run test:coverage:check
+        env:
+          CI: true
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4

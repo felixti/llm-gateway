@@ -9,15 +9,31 @@ import { database } from './client';
 // UUID validation regex (v4 + generic 8-4-4-4-12 hex pattern)
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+import { redis } from './redis';
+
+const PAT_SUBJECT_CACHE_TTL_SECONDS = 300;
+const PAT_SUBJECT_CACHE_PREFIX = 'pat_subject:';
+
 /**
  * Resolve a PAT subject (userId) to a UUID for PostgreSQL columns.
  * If already a valid UUID, returns it directly.
  * Otherwise, looks up users.pat_subject to find the corresponding user UUID.
+ * Caches non-UUID resolutions in Redis to avoid repeated Postgres hits.
  * Returns null if resolution fails (non-UUID with no pat_subject match).
  */
 async function resolveUserIdToUuid(patSubject: string): Promise<string | null> {
   if (UUID_REGEX.test(patSubject)) {
     return patSubject;
+  }
+
+  const cacheKey = `${PAT_SUBJECT_CACHE_PREFIX}${patSubject}`;
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+  } catch {
+    void 0;
   }
 
   try {
@@ -27,7 +43,13 @@ async function resolveUserIdToUuid(patSubject: string): Promise<string | null> {
     });
 
     if (rows.length > 0) {
-      return rows[0].id;
+      const userId = rows[0].id;
+      try {
+        await redis.setex(cacheKey, PAT_SUBJECT_CACHE_TTL_SECONDS, userId);
+      } catch {
+        void 0;
+      }
+      return userId;
     }
 
     logger.warn('Cannot resolve non-UUID userId to user UUID', { patSubject });

@@ -5,21 +5,35 @@ import type { RedisOptions } from 'ioredis';
 
 const isTest = process.env.NODE_ENV === 'test';
 
-const redisOptions: RedisOptions = {
-  host: env.REDIS_HOST || 'localhost',
-  port: env.REDIS_PORT || 6379,
-  retryStrategy: (times: number) => Math.min(times * 50, 2000),
-  maxRetriesPerRequest: 3,
-  enableReadyCheck: true,
-  enableOfflineQueue: true,
-  lazyConnect: isTest,
-};
+let redisOptions: RedisOptions;
+
+if (env.REDIS_URL) {
+  redisOptions = {
+    retryStrategy: (times: number) => Math.min(times * 50, 2000),
+    maxRetriesPerRequest: 3,
+    enableReadyCheck: true,
+    enableOfflineQueue: true,
+    lazyConnect: isTest,
+  };
+} else {
+  redisOptions = {
+    host: env.REDIS_HOST || 'localhost',
+    port: env.REDIS_PORT || 6379,
+    retryStrategy: (times: number) => Math.min(times * 50, 2000),
+    maxRetriesPerRequest: 3,
+    enableReadyCheck: true,
+    enableOfflineQueue: true,
+    lazyConnect: isTest,
+  };
+}
 
 if (env.REDIS_PASSWORD) {
   redisOptions.password = env.REDIS_PASSWORD;
 }
 
-export const redis = new Redis(redisOptions);
+export const redis = env.REDIS_URL
+  ? new Redis(env.REDIS_URL, redisOptions)
+  : new Redis(redisOptions);
 
 if (!isTest) {
   redis.on('connect', () => logger.info('Redis client connected'));

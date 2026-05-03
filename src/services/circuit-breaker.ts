@@ -23,13 +23,13 @@ const RECORD_SUCCESS_SCRIPT = `
   if state == 'HALF_OPEN' then
     redis.call('hset', key, 'state', 'CLOSED', 'failureCount', 0, 'nextAttemptTime', 0)
     redis.call('del', probeKey)
-    return 1
+    return 'CLOSED'
   elseif state == 'CLOSED' or state == false then
     redis.call('hset', key, 'failureCount', 0)
-    return 1
+    return 'CLOSED'
   end
   
-  return 0
+  return state
 `;
 
 const RECORD_FAILURE_SCRIPT = `
@@ -51,15 +51,15 @@ const RECORD_FAILURE_SCRIPT = `
   if state == 'CLOSED' then
     if failureCount >= threshold then
       redis.call('hset', key, 'state', 'OPEN', 'nextAttemptTime', now + resetTimeout)
-      return 2
+      return 'OPEN'
     end
   elseif state == 'HALF_OPEN' then
     redis.call('hset', key, 'state', 'OPEN', 'nextAttemptTime', now + resetTimeout)
     redis.call('del', probeKey)
-    return 2
+    return 'OPEN'
   end
   
-  return 1
+  return state
 `;
 
 const IS_REQUEST_ALLOWED_SCRIPT = `
@@ -97,8 +97,7 @@ const IS_REQUEST_ALLOWED_SCRIPT = `
 export async function recordSuccess(deploymentName: string): Promise<void> {
   const key = getCircuitKey(deploymentName);
   const probeKey = `${CIRCUIT_KEY_PREFIX}${deploymentName}:half_open_probe`;
-  await redis.eval(RECORD_SUCCESS_SCRIPT, 2, key, probeKey);
-  const state = await redis.hget(key, 'state');
+  const state = (await redis.eval(RECORD_SUCCESS_SCRIPT, 2, key, probeKey)) as string;
   if (state) {
     setCircuitBreakerState(state as 'CLOSED' | 'OPEN' | 'HALF_OPEN');
   }
@@ -107,7 +106,7 @@ export async function recordSuccess(deploymentName: string): Promise<void> {
 export async function recordFailure(deploymentName: string): Promise<void> {
   const key = getCircuitKey(deploymentName);
   const probeKey = `${CIRCUIT_KEY_PREFIX}${deploymentName}:half_open_probe`;
-  await redis.eval(
+  const state = (await redis.eval(
     RECORD_FAILURE_SCRIPT,
     2,
     key,
@@ -115,8 +114,7 @@ export async function recordFailure(deploymentName: string): Promise<void> {
     Date.now(),
     DEFAULT_FAILURE_THRESHOLD,
     DEFAULT_RESET_TIMEOUT
-  );
-  const state = await redis.hget(key, 'state');
+  )) as string;
   if (state) {
     setCircuitBreakerState(state as 'CLOSED' | 'OPEN' | 'HALF_OPEN');
   }

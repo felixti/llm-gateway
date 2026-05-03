@@ -43,6 +43,7 @@ const envSchema = z
     AZURE_ENTRA_CLIENT_SECRET: z.string().optional(),
 
     // Redis
+    REDIS_URL: z.string().url().optional(),
     REDIS_HOST: z.string().default('localhost'),
     REDIS_PORT: z.coerce.number().int().min(1).max(65535).default(6379),
     REDIS_PASSWORD: z.string().optional(),

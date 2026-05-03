@@ -11,8 +11,17 @@ export class MockRedis {
     return this.store.get(key) ?? null;
   }
 
-  async set(key: string, value: string | number | Buffer, ..._args: unknown[]): Promise<void> {
+  async set(
+    key: string,
+    value: string | number | Buffer,
+    ...args: unknown[]
+  ): Promise<string | undefined> {
+    const hasNx = args.includes('NX');
+    if (hasNx && this.store.has(key)) {
+      return undefined;
+    }
     this.store.set(key, String(value));
+    return 'OK';
   }
 
   async setex(key: string, _ttl: number, value: string | number | Buffer): Promise<void> {

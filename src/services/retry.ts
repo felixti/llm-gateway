@@ -4,6 +4,7 @@
  * skips retry for non-retryable errors (400, 401, 403)
  */
 
+import { incrementAzureRateLimitHits } from '@/observability/metrics';
 import { upstreamHttpsFetch } from '@/utils/fetch';
 
 export interface RetryOptions {
@@ -164,6 +165,9 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions =
 
       // Check for non-retryable errors
       const status = getStatusFromError(error);
+      if (status === 429) {
+        incrementAzureRateLimitHits();
+      }
       if (status && isNonRetryable(status)) {
         throw error;
       }

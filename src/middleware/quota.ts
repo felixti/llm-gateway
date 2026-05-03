@@ -5,7 +5,7 @@
  */
 
 import { env } from '@/config/env';
-import { incrementQuotaExceeded429 } from '@/observability/metrics';
+import { incrementQuotaExceeded429, incrementQuotaReservationNull } from '@/observability/metrics';
 import { calculateEstimatedCost } from '@/services/pricing.service';
 import {
   type QuotaReservation,
@@ -169,6 +169,8 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<Response 
 
   if (reservation.reservationId) {
     c.set('reservationId', reservation.reservationId);
+  } else {
+    incrementQuotaReservationNull();
   }
   if (reservation.estimatedCost) {
     c.set('estimatedCost', reservation.estimatedCost);

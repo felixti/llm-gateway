@@ -23,10 +23,15 @@ function createMockContext(overrides: Partial<{
 const next = async () => {};
 
 describe("scopeMiddleware", () => {
-  test("no scope set → should call next()", async () => {
+  test("no scope set → should return 403", async () => {
     const c = createMockContext();
     const result = await scopeMiddleware(c, next);
-    expect(result).toBeUndefined();
+    expect(result).toBeInstanceOf(Response);
+    expect(result!.status).toBe(403);
+    const body = (await result!.json()) as { error: { type: string; code: string; message: string } };
+    expect(body.error.type).toBe("permission_error");
+    expect(body.error.code).toBe("permission_error");
+    expect(body.error.message).toContain("Access denied: scope not set");
   });
 
   test("scope 'all' + GET → should call next()", async () => {

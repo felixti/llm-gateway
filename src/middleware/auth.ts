@@ -82,7 +82,10 @@ function parseJwtPayload(payloadB64: string): AuthResult<JwtPayload> {
  */
 function checkExpiry(exp: number): AuthResult<void> {
   const now = Math.floor(Date.now() / 1000);
-  if (exp && exp < now) {
+  if (!exp || exp === 0) {
+    return err({ code: 'authentication_error', message: 'Token expiration is required' });
+  }
+  if (exp < now) {
     return err({ code: 'authentication_error', message: 'Token has expired' });
   }
   return ok(undefined) as AuthResult<void>;

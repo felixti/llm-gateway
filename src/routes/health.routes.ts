@@ -15,6 +15,17 @@ import { Scalar } from '@scalar/hono-api-reference';
 import { Hono } from 'hono';
 
 const BEARER_PREFIX = 'Bearer ';
+const HEALTH_CHECK_TIMEOUT_MS = 5000;
+
+async function checkWithTimeout<T>(
+  check: () => Promise<T>,
+  timeoutMs: number = HEALTH_CHECK_TIMEOUT_MS
+): Promise<T | null> {
+  return Promise.race([
+    check(),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+  ]);
+}
 
 function metricsBearerAuthorized(authHeader: string | undefined, expected: string): boolean {
   if (!authHeader || !authHeader.startsWith(BEARER_PREFIX)) {
@@ -78,20 +89,23 @@ healthRoutes.get('/ready', async (c) => {
   };
 
   try {
-    checks.redis = await isRedisHealthy();
+    const redisResult = await checkWithTimeout(() => isRedisHealthy());
+    checks.redis = redisResult === true;
   } catch {
     checks.redis = false;
   }
 
   try {
-    checks.postgres = await isPostgresHealthy();
+    const postgresResult = await checkWithTimeout(() => isPostgresHealthy());
+    checks.postgres = postgresResult === true;
   } catch {
     checks.postgres = false;
   }
 
   if (env.HEALTH_CHECK_OTEL_ENABLED) {
     try {
-      checks.otel = await isOtelHealthy();
+      const otelResult = await checkWithTimeout(() => isOtelHealthy());
+      checks.otel = otelResult === true;
     } catch {
       checks.otel = false;
     }

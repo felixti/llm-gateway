@@ -10,6 +10,24 @@ import { MAX_SCAN_ITERATIONS } from '@/services/quota/constants';
 
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const ARCHIVE_INTERVAL_MS = 60 * 60 * 1000;
+const LOCK_TTL_SECONDS = 300;
+
+async function acquireLock(lockKey: string): Promise<boolean> {
+  try {
+    const acquired = await redis.set(lockKey, '1', 'EX', LOCK_TTL_SECONDS, 'NX');
+    return acquired === 'OK';
+  } catch {
+    return false;
+  }
+}
+
+async function releaseLock(lockKey: string): Promise<void> {
+  try {
+    await redis.del(lockKey);
+  } catch {
+    void 0;
+  }
+}
 
 let cleanupInterval: ReturnType<typeof setInterval> | null = null;
 let archiveInterval: ReturnType<typeof setInterval> | null = null;
@@ -25,6 +43,12 @@ async function runCleanupJob(): Promise<void> {
   if (cleanupRunning) return;
   cleanupRunning = true;
 
+  const lockKey = 'scheduler:cleanup:lock';
+  if (!(await acquireLock(lockKey))) {
+    cleanupRunning = false;
+    return;
+  }
+
   try {
     const cleaned = await cleanupOrphanedReservations();
     if (cleaned > 0) {
@@ -33,6 +57,7 @@ async function runCleanupJob(): Promise<void> {
   } catch (error) {
     logger.error('Cleanup job failed', { error });
   } finally {
+    await releaseLock(lockKey);
     cleanupRunning = false;
   }
 }
@@ -40,6 +65,12 @@ async function runCleanupJob(): Promise<void> {
 export async function runArchiveJob(): Promise<void> {
   if (archiveRunning) return;
   archiveRunning = true;
+
+  const lockKey = 'scheduler:archive:lock';
+  if (!(await acquireLock(lockKey))) {
+    archiveRunning = false;
+    return;
+  }
 
   const currentMonth = currentMonthKey();
 
@@ -133,6 +164,7 @@ export async function runArchiveJob(): Promise<void> {
   } catch (error) {
     logger.error('Archive job failed', { error });
   } finally {
+    await releaseLock(lockKey);
     archiveRunning = false;
   }
 }
