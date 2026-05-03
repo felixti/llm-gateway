@@ -498,7 +498,10 @@ async function tryRecoverFromHash(
     do {
       iterations++;
       if (iterations > MAX_SCAN_ITERATIONS) {
-        logger.warn({ reservationId, iterations }, 'Max SCAN iterations exceeded in tryRecoverFromHash');
+        logger.warn(
+          { reservationId, iterations },
+          'Max SCAN iterations exceeded in tryRecoverFromHash'
+        );
         break;
       }
       const scanResult = await redis.scan(

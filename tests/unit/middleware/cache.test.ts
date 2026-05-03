@@ -40,7 +40,7 @@ describe('cacheMiddleware', () => {
       headers: { 'x-test-user': 'user-a' },
     });
     expect(resUserA.status).toBe(200);
-    const bodyA = await resUserA.json();
+    const bodyA = (await resUserA.json()) as { requestCount: number; userId: string };
     expect(bodyA.requestCount).toBe(1);
     expect(bodyA.userId).toBe('user-a');
 
@@ -48,14 +48,14 @@ describe('cacheMiddleware', () => {
       headers: { 'x-test-user': 'user-a' },
     });
     expect(resUserAAgain.status).toBe(200);
-    const bodyAAgain = await resUserAAgain.json();
+    const bodyAAgain = (await resUserAAgain.json()) as { requestCount: number; userId: string };
     expect(bodyAAgain.requestCount).toBe(1);
 
     const resUserB = await app.request('/models', {
       headers: { 'x-test-user': 'user-b' },
     });
     expect(resUserB.status).toBe(200);
-    const bodyB = await resUserB.json();
+    const bodyB = (await resUserB.json()) as { requestCount: number; userId: string };
     expect(bodyB.requestCount).toBe(2);
     expect(bodyB.userId).toBe('user-b');
   });

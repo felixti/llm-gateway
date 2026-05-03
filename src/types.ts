@@ -2,8 +2,8 @@
  * Shared TypeScript Types for Hono Context
  */
 
-import type { Decimal } from 'decimal.js';
 import type { PatToken } from '@/utils/auth';
+import type { Decimal } from 'decimal.js';
 import type { ModelFamily } from './config/deployments';
 import type { DeploymentConfig } from './config/deployments';
 

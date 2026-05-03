@@ -10,13 +10,14 @@ import { database } from '../../../src/db/client';
 
 const VALID_PAT = createTestPat('user1');
 const ADMIN_PAT = createTestPat('user1', { scope: 'admin' });
+const OPERATOR_SECRET = 'test-operator-secret-32chars!!';
 
 let originalExecute: typeof database.execute;
 const originalOperatorSecret = process.env.ADMIN_OPERATOR_SECRET;
 
 describe('Admin Routes - /admin', () => {
   beforeEach(() => {
-    delete process.env.ADMIN_OPERATOR_SECRET;
+    process.env.ADMIN_OPERATOR_SECRET = OPERATOR_SECRET;
     originalExecute = database.execute.bind(database);
     database.execute = async () => ({ rows: [], rowCount: 0 });
   });
@@ -67,6 +68,7 @@ describe('Admin Routes - /admin', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: VALID_PAT,
+          'X-Operator-Secret': OPERATOR_SECRET,
         },
         body: JSON.stringify({ pat_id: '11111111-1111-1111-1111-111111111111' }),
       });
@@ -83,6 +85,7 @@ describe('Admin Routes - /admin', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: readPat,
+          'X-Operator-Secret': OPERATOR_SECRET,
         },
         body: JSON.stringify({ pat_id: '11111111-1111-1111-1111-111111111111' }),
       });
@@ -100,6 +103,7 @@ describe('Admin Routes - /admin', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: ADMIN_PAT,
+          'X-Operator-Secret': OPERATOR_SECRET,
         },
         body: 'not-json',
       });
@@ -115,6 +119,7 @@ describe('Admin Routes - /admin', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: ADMIN_PAT,
+          'X-Operator-Secret': OPERATOR_SECRET,
         },
         body: JSON.stringify({}),
       });
@@ -130,6 +135,7 @@ describe('Admin Routes - /admin', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: ADMIN_PAT,
+          'X-Operator-Secret': OPERATOR_SECRET,
         },
         body: JSON.stringify({ pat_id: 'not-a-uuid' }),
       });
@@ -140,10 +146,6 @@ describe('Admin Routes - /admin', () => {
   });
 
   describe('Success', () => {
-    beforeEach(() => {
-      process.env.ADMIN_OPERATOR_SECRET = 'test-operator-secret-32chars!!';
-    });
-
     it('should revoke PAT with valid request', async () => {
       const app = await createTestApp();
       const res = await app.request('/admin/pat/revoke', {
@@ -151,7 +153,7 @@ describe('Admin Routes - /admin', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: ADMIN_PAT,
-          'X-Operator-Secret': 'test-operator-secret-32chars!!',
+          'X-Operator-Secret': OPERATOR_SECRET,
         },
         body: JSON.stringify({
           pat_id: '11111111-1111-1111-1111-111111111111',
@@ -172,7 +174,7 @@ describe('Admin Routes - /admin', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: ADMIN_PAT,
-          'X-Operator-Secret': 'test-operator-secret-32chars!!',
+          'X-Operator-Secret': OPERATOR_SECRET,
         },
         body: JSON.stringify({
           pat_id: '22222222-2222-2222-2222-222222222222',
