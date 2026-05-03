@@ -23,6 +23,9 @@ COPY --from=build /app/dist ./dist
 COPY package.json ./
 COPY openapi.json ./
 
+# Pricing config for runtime hot-reload (resolved via import.meta.url → ../config/pricing.json from dist/index.js)
+COPY src/config/pricing.json ./config/pricing.json
+
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
