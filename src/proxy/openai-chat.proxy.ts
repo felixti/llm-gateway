@@ -93,8 +93,12 @@ export async function proxyNonStreamingChat(
   );
 
   if (!response.ok) {
-    await recordFailure(deployment.name);
-    await releaseReservedQuota(reservationId, requestId);
+    if (response.status !== 429) {
+      await recordFailure(deployment.name);
+    }
+    // NOTE: Do NOT release reservation here — the request handler factory may
+    // retry with a fallback deployment using the same reservationId.  If all
+    // fallbacks fail the factory is responsible for releasing the reservation.
     return createSanitizedUpstreamErrorResponse({
       response,
       path: '/v1/chat/completions',
@@ -165,8 +169,10 @@ export async function proxyStreamingChat(
   );
 
   if (!response.ok) {
-    await recordFailure(deployment.name);
-    await releaseReservedQuota(reservationId, requestId);
+    if (response.status !== 429) {
+      await recordFailure(deployment.name);
+    }
+    // Do NOT release reservation — factory may try fallback with same reservationId
     return createSanitizedUpstreamErrorResponse({
       response,
       path: '/v1/chat/completions',

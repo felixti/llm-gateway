@@ -78,7 +78,9 @@ export async function proxyCountTokensAnthropic(
   );
 
   if (!response.ok) {
-    await recordFailure(deployment.name);
+    if (response.status !== 429) {
+      await recordFailure(deployment.name);
+    }
     return createSanitizedUpstreamErrorResponse({
       response,
       path: '/v1/messages/count_tokens',
@@ -151,8 +153,10 @@ export async function proxyNonStreamingAnthropic(
   );
 
   if (!response.ok) {
-    await recordFailure(deployment.name);
-    await releaseReservedQuota(reservationId, requestId);
+    if (response.status !== 429) {
+      await recordFailure(deployment.name);
+    }
+    // Do NOT release reservation — factory may try fallback with same reservationId
     return createSanitizedUpstreamErrorResponse({
       response,
       path: '/v1/messages',
@@ -215,8 +219,10 @@ export async function proxyStreamingAnthropic(
   );
 
   if (!response.ok) {
-    await recordFailure(deployment.name);
-    await releaseReservedQuota(reservationId, requestId);
+    if (response.status !== 429) {
+      await recordFailure(deployment.name);
+    }
+    // Do NOT release reservation — factory may try fallback with same reservationId
     return createSanitizedUpstreamErrorResponse({
       response,
       path: '/v1/messages',
@@ -250,14 +256,19 @@ export async function proxyStreamingAnthropic(
   };
   const cleanup = handleStreamAbort(reservationId, releaseUnreconciled, abortSignal);
 
+  // Stateful decoder retained across chunks to handle multi-byte UTF-8
+  // characters that may span chunk boundaries.
+  const decoder = new TextDecoder();
+  let textBuffer = '';
+
   const stream = response.body.pipeThrough(
     new TransformStream({
       transform(chunk, controller) {
         controller.enqueue(chunk);
 
         if (!usageExtracted && reservationId) {
-          const text = new TextDecoder().decode(chunk);
-          const events = parseAnthropicEvents(text);
+          textBuffer += decoder.decode(chunk, { stream: true });
+          const events = parseAnthropicEvents(textBuffer);
           const usage = extractUsageFromAnthropicEvents(events);
 
           if (usage) {
@@ -303,6 +314,33 @@ export async function proxyStreamingAnthropic(
         }
       },
       async flush(controller) {
+        // Flush any remaining buffered bytes from the decoder
+        textBuffer += decoder.decode();
+        if (!usageExtracted && reservationId && textBuffer) {
+          const events = parseAnthropicEvents(textBuffer);
+          const usage = extractUsageFromAnthropicEvents(events);
+          if (usage) {
+            usageExtracted = true;
+            const release = await finalizeMutex.acquire();
+            try {
+              if (reservationFinalized) return;
+              reservationFinalized = true;
+              const actualCost = await reconcileUsage(
+                reservationId,
+                usage,
+                deployment.azureModelName
+              );
+              addLLMSpanAttributes({
+                promptTokens: usage.prompt_tokens,
+                completionTokens: usage.completion_tokens,
+                totalTokens: usage.prompt_tokens + usage.completion_tokens,
+                costUsd: actualCost.toNumber(),
+              });
+            } finally {
+              release();
+            }
+          }
+        }
         await cleanup();
         controller.terminate();
       },

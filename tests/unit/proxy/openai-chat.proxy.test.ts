@@ -253,7 +253,7 @@ describe("proxyNonStreamingChat", () => {
       { reservationId: "res-failure", requestId: "req-failure", userId: "user-123" } as any
     );
 
-    expect(mockReleaseReservation).toHaveBeenCalledWith("res-failure");
+    expect(mockReleaseReservation).not.toHaveBeenCalled();
   });
 
   test("calls recordFailure on upstream error", async () => {
@@ -381,7 +381,7 @@ describe("proxyStreamingChat", () => {
       { reservationId: "res-stream-failure", requestId: "req-stream-failure", userId: "user-123" } as any
     );
 
-    expect(mockReleaseReservation).toHaveBeenCalledWith("res-stream-failure");
+    expect(mockReleaseReservation).not.toHaveBeenCalled();
   });
 
   test("does not expose streaming upstream error body to clients", async () => {

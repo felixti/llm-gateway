@@ -132,7 +132,7 @@ describe('Anthropic Proxy', () => {
         { reservationId: 'res-failure', requestId: 'req-failure', userId: 'user-123' } as any
       );
 
-      expect(mockReleaseReservation).toHaveBeenCalledWith('res-failure');
+      expect(mockReleaseReservation).not.toHaveBeenCalled();
     });
 
     it('does not expose upstream error body to clients', async () => {
@@ -218,7 +218,7 @@ describe('Anthropic Proxy', () => {
         { reservationId: 'res-stream-failure', requestId: 'req-stream-failure', userId: 'user-123' } as any
       );
 
-      expect(mockReleaseReservation).toHaveBeenCalledWith('res-stream-failure');
+      expect(mockReleaseReservation).not.toHaveBeenCalled();
     });
 
     it('does not expose streaming upstream error body to clients', async () => {

@@ -23,6 +23,7 @@ import {
   recordError,
   withSpan,
 } from '@/observability/tracing';
+import { releaseReservedQuota } from '@/proxy/shared';
 import { getAzureAuthManager } from '@/services/azure-auth';
 import { isRequestAllowed } from '@/services/circuit-breaker';
 import { type Result, err, ok } from '@/utils/result';
@@ -268,6 +269,10 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
           if (fallbackResponse) {
             return fallbackResponse;
           }
+
+          // All fallbacks exhausted — release the quota reservation that will
+          // never be reconciled (no proxy succeeded).
+          await releaseReservedQuota(reservationId, requestId);
         }
 
         // Record duration and status on span
