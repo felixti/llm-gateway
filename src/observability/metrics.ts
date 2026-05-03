@@ -6,6 +6,19 @@ import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk
 
 let meterProvider: MeterProvider | null = null;
 
+function normalizePath(path: string): string {
+  if (path === '/v1/chat/completions') return '/v1/chat/completions';
+  if (path === '/v1/messages') return '/v1/messages';
+  if (path === '/v1/responses') return '/v1/responses';
+  if (path === '/v1/models') return '/v1/models';
+  if (path === '/health') return '/health';
+  if (path === '/ready') return '/ready';
+  if (path === '/metrics') return '/metrics';
+  if (path === '/quota/status') return '/quota/status';
+  if (path.startsWith('/admin/')) return '/admin/*';
+  return '/other';
+}
+
 const inMemoryCounters: Record<string, number> = {
   http_requests_total: 0,
   llm_tokens_total: 0,
@@ -142,7 +155,8 @@ export const llmRequestDuration = meter.createHistogram('llm_request_duration_ms
 });
 
 export function incrementHttpRequests(method: string, path: string, status: number): void {
-  httpRequestsTotal.add(1, { method, path, status: String(status) });
+  const normalized = normalizePath(path);
+  httpRequestsTotal.add(1, { method, path: normalized, status: String(status) });
   incrementCounter('http_requests_total');
 }
 
@@ -203,7 +217,8 @@ export function setCircuitBreakerState(state: 'CLOSED' | 'OPEN' | 'HALF_OPEN'): 
 }
 
 export function recordHttpRequestDuration(durationMs: number, method: string, path: string): void {
-  httpRequestDuration.record(durationMs, { method, path });
+  const normalized = normalizePath(path);
+  httpRequestDuration.record(durationMs, { method, path: normalized });
   inMemoryHistograms.http_request_duration_ms.count++;
   inMemoryHistograms.http_request_duration_ms.sum += durationMs;
 }
