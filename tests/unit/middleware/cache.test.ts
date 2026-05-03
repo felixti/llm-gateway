@@ -59,4 +59,56 @@ describe('cacheMiddleware', () => {
     expect(bodyB.requestCount).toBe(2);
     expect(bodyB.userId).toBe('user-b');
   });
+
+  test('cache preserves actual response status', async () => {
+    const app = new Hono();
+    let requestCount = 0;
+
+    app.use('*', async (c, next) => {
+      c.set('userId', 'test-user');
+      await next();
+    });
+
+    app.use('/items', cacheMiddleware({ ttl: 60 }));
+    app.get('/items', (c) => {
+      requestCount++;
+      if (requestCount === 1) {
+        return c.json({ found: false }, 200);
+      }
+      return c.json({ found: true }, 200);
+    });
+
+    const res1 = await app.request('/items');
+    expect(res1.status).toBe(200);
+    const body1 = (await res1.json()) as { found: boolean };
+    expect(body1.found).toBe(false);
+
+    const res2 = await app.request('/items');
+    expect(res2.status).toBe(200);
+    const body2 = (await res2.json()) as { found: boolean };
+    expect(body2.found).toBe(false);
+
+    const stored = await (redis as unknown as MockRedis).get(
+      'response-cache:test-user:GET:/items'
+    );
+    const parsed = JSON.parse(stored as string);
+    expect(parsed.status).toBe(200);
+  });
+
+  test('cache returns Vary: Authorization header on cache hits', async () => {
+    const app = new Hono();
+
+    app.use('*', async (c, next) => {
+      c.set('userId', 'vary-test-user');
+      await next();
+    });
+
+    app.use('/models', cacheMiddleware({ ttl: 60 }));
+    app.get('/models', (c) => c.json({ models: [] }));
+
+    await app.request('/models');
+
+    const cachedRes = await app.request('/models');
+    expect(cachedRes.headers.get('Vary')).toBe('Authorization');
+  });
 });

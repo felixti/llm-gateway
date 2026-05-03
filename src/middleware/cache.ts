@@ -37,10 +37,12 @@ export function cacheMiddleware(config: CacheConfig = {}) {
         if (typeof data.body === 'string') {
           return new Response(data.body, {
             status: data.status,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', Vary: 'Authorization' },
           });
         }
-        return c.json(data.body, data.status);
+        const response = c.json(data.body, data.status);
+        response.headers.set('Vary', 'Authorization');
+        return response;
       }
     } catch (error) {
       logger.warn({ cacheKey, error }, 'Cache read/parse error');
@@ -51,7 +53,7 @@ export function cacheMiddleware(config: CacheConfig = {}) {
     if (c.res.status === 200) {
       try {
         const body = await c.res.clone().text();
-        await redis.setex(cacheKey, ttl, JSON.stringify({ body, status: 200 }));
+        await redis.setex(cacheKey, ttl, JSON.stringify({ body, status: c.res.status }));
       } catch (error) {
         logger.warn({ cacheKey, error }, 'Cache write error');
       }
