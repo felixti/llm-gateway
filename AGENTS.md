@@ -168,7 +168,7 @@ src/
 │   ├── logger.ts        # Pino structured logging
 │   └── metrics.ts       # Counters/gauges
 ├── db/
-│   ├── migration.sql    # PostgreSQL schema
+│   ├── migrations/      # PostgreSQL schema migrations (001_initial_schema.sql, etc.)
 │   └── data-access.ts   # Audit logging
 └── index.ts             # Hono app bootstrap
 ```
