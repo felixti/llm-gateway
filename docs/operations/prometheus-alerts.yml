@@ -1,0 +1,65 @@
+groups:
+  - name: llm-gateway
+    rules:
+      - alert: LLMLatencyHigh
+        expr: histogram_quantile(0.95, rate(llm_request_duration_ms_bucket[5m])) > 10000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM request latency p95 above 10s"
+          description: "95th percentile LLM request duration is {{ $value }}ms on {{ $labels.instance }}."
+
+      - alert: QuotaNearExhaustion
+        expr: llm_quota_remaining_ratio < 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Quota remaining below 10%"
+          description: "Quota remaining ratio is {{ $value | humanizePercentage }} on {{ $labels.instance }}."
+
+      - alert: QuotaExhausted
+        expr: llm_quota_remaining_ratio <= 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Quota exhausted"
+          description: "Quota is fully exhausted on {{ $labels.instance }}. All requests will be rejected."
+
+      - alert: HighQuotaRejectionRate
+        expr: rate(quota_exceeded_429_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate of quota 429 rejections"
+          description: "{{ $value | printf \"%.2f\" }} quota rejections per second on {{ $labels.instance }}."
+
+      - alert: CircuitBreakerOpen
+        expr: circuit_breaker_state == 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Circuit breaker is OPEN"
+          description: "Circuit breaker on {{ $labels.instance }} has been open for more than 2 minutes. Upstream may be down."
+
+      - alert: HighLLMCostRate
+        expr: rate(llm_cost_usd_total[1h]) * 3600 > 100
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM cost rate exceeds $100/hour"
+          description: "Current LLM cost rate is ${{ $value | printf \"%.2f\" }}/hour on {{ $labels.instance }}."
+
+      - alert: PostgresHydrationFailures
+        expr: rate(quota_hydration_failures_total[5m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Postgres quota policy sync failures detected"
+          description: "Quota policy hydration from Postgres is failing on {{ $labels.instance }}. Redis quota data may be stale."

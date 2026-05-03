@@ -101,6 +101,26 @@ groups:
           runbook: "docs/operations/runbook-pat-rotation.md"
 ```
 
+## Dashboards & Alerts
+
+### Grafana Dashboard
+
+Import `docs/operations/grafana-dashboard.json` into Grafana for a pre-built
+dashboard covering request rate, token throughput, cost rate, latency percentiles,
+quota remaining, circuit breaker state, and rejection counters.
+
+### Prometheus Alert Rules
+
+Apply `docs/operations/prometheus-alerts.yml` to your Prometheus instance.
+Alerts cover:
+- **LLMLatencyHigh** — p95 latency > 10s for 5m
+- **QuotaNearExhaustion** — remaining < 10% for 5m
+- **QuotaExhausted** — remaining = 0 for 1m
+- **HighQuotaRejectionRate** — > 1 rejection/s for 5m
+- **CircuitBreakerOpen** — breaker OPEN for 2m
+- **HighLLMCostRate** — cost > $100/hr for 15m
+- **PostgresHydrationFailures** — sync failures for 10m
+
 ## Suggested Grafana dashboard panels
 
 1. **Gateway request rate** — `rate(http_requests_total[1m])` split by status class.

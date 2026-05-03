@@ -1,0 +1,166 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "title": "LLM Request Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "rate(http_requests_total{path=~\"/v1/.*\"}[5m])",
+          "legendFormat": "{{method}} {{path}} {{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" }
+      }
+    },
+    {
+      "title": "LLM Token Throughput",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "rate(llm_tokens_total{type=\"input\"}[5m])",
+          "legendFormat": "input {{model}}"
+        },
+        {
+          "expr": "rate(llm_tokens_total{type=\"output\"}[5m])",
+          "legendFormat": "output {{model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "tokes" }
+      }
+    },
+    {
+      "title": "LLM Cost Rate (USD/hour)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "rate(llm_cost_usd_total[5m]) * 3600",
+          "legendFormat": "{{model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD" }
+      }
+    },
+    {
+      "title": "Request Latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(llm_request_duration_ms_bucket[5m]))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(llm_request_duration_ms_bucket[5m]))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(llm_request_duration_ms_bucket[5m]))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ms" }
+      }
+    },
+    {
+      "title": "Quota Rejections (429)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "rate(quota_exceeded_429_total[5m])",
+          "legendFormat": "quota 429s"
+        },
+        {
+          "expr": "rate(rate_limit_429_total[5m])",
+          "legendFormat": "rate limit 429s"
+        }
+      ]
+    },
+    {
+      "title": "Circuit Breaker State",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 16 },
+      "targets": [
+        {
+          "expr": "circuit_breaker_state",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "CLOSED", "color": "green" },
+                "1": { "text": "OPEN", "color": "red" },
+                "2": { "text": "HALF_OPEN", "color": "yellow" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "title": "Quota Remaining Ratio",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 16 },
+      "targets": [
+        {
+          "expr": "llm_quota_remaining_ratio",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "red" },
+              { "value": 0.2, "color": "yellow" },
+              { "value": 0.5, "color": "green" }
+            ]
+          },
+          "unit": "percentunit"
+        }
+      }
+    },
+    {
+      "title": "Azure Rate Limit Hits",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 16 },
+      "targets": [
+        {
+          "expr": "rate(azure_rate_limit_hits_total[5m])",
+          "legendFormat": "hits/s"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["llm-gateway"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "LLM Gateway",
+  "version": 1,
+  "weekStart": ""
+}
