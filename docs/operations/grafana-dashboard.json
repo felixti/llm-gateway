@@ -36,7 +36,7 @@
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "tokes" }
+        "defaults": { "unit": "tokens" }
       }
     },
     {

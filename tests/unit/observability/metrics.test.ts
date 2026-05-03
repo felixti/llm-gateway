@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, vi } from 'bun:test';
 import {
   incrementHttpRequests,
   addLlmTokens,
@@ -139,5 +139,17 @@ describe('Metrics', () => {
     expect(output).toContain('http_request_duration_ms_count');
     expect(output).toContain('# TYPE llm_request_duration_ms histogram');
     expect(output).toContain('llm_request_duration_ms_count');
+  });
+});
+
+describe('finalizeProxyUsage metrics integration', () => {
+  it('should import metrics functions used by finalizeProxyUsage', async () => {
+    const proxyShared = await import('@/proxy/shared');
+    expect(typeof proxyShared.finalizeProxyUsage).toBe('function');
+
+    const metrics = await import('@/observability/metrics');
+    expect(typeof metrics.addLlmTokens).toBe('function');
+    expect(typeof metrics.addLlmCost).toBe('function');
+    expect(typeof metrics.recordLlmRequestDuration).toBe('function');
   });
 });
