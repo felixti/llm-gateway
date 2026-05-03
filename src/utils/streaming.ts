@@ -366,7 +366,7 @@ export function parseAnthropicEvents(text: string): AnthropicStreamEvent[] {
  */
 export function handleStreamAbort(
   reservationId: string | null,
-  releaseFn: (id: string) => Promise<void>,
+  releaseFn: () => Promise<void>,
   signal?: AbortSignal
 ): () => Promise<void> {
   let released = false;
@@ -378,7 +378,7 @@ export function handleStreamAbort(
 
     released = true;
     try {
-      await releaseFn(reservationId);
+      await releaseFn();
     } catch (err) {
       logger.warn({ err, reservationId }, 'Failed to release reservation on stream abort');
     }

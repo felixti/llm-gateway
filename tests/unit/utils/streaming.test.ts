@@ -342,8 +342,8 @@ data: {"type":"message_stop"}`;
       const controller = new AbortController();
       const released: string[] = [];
 
-      handleStreamAbort("res-abort-1", async (id) => {
-        released.push(id);
+      handleStreamAbort("res-abort-1", async () => {
+        released.push("res-abort-1");
       }, controller.signal);
 
       controller.abort();
@@ -356,8 +356,8 @@ data: {"type":"message_stop"}`;
       const controller = new AbortController();
       const released: string[] = [];
 
-      const cleanup = handleStreamAbort("res-abort-2", async (id) => {
-        released.push(id);
+      const cleanup = handleStreamAbort("res-abort-2", async () => {
+        released.push("res-abort-2");
       }, controller.signal);
 
       controller.abort();
