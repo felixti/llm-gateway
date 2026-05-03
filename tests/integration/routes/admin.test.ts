@@ -140,6 +140,10 @@ describe('Admin Routes - /admin', () => {
   });
 
   describe('Success', () => {
+    beforeEach(() => {
+      process.env.ADMIN_OPERATOR_SECRET = 'test-operator-secret-32chars!!';
+    });
+
     it('should revoke PAT with valid request', async () => {
       const app = await createTestApp();
       const res = await app.request('/admin/pat/revoke', {
@@ -147,6 +151,7 @@ describe('Admin Routes - /admin', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: ADMIN_PAT,
+          'X-Operator-Secret': 'test-operator-secret-32chars!!',
         },
         body: JSON.stringify({
           pat_id: '11111111-1111-1111-1111-111111111111',
@@ -167,6 +172,7 @@ describe('Admin Routes - /admin', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: ADMIN_PAT,
+          'X-Operator-Secret': 'test-operator-secret-32chars!!',
         },
         body: JSON.stringify({
           pat_id: '22222222-2222-2222-2222-222222222222',
