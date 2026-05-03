@@ -125,3 +125,46 @@ So either:
 - Set `users.pat_subject = '<whatever userId you embedded>'` (see migration `002_pat_subject.sql`).
 
 If neither matches, `getUserQuotaPolicyByPatSubject` returns `null` and Redis falls back to the default budget — that user effectively has the default 50 USD/month.
+
+---
+
+## Usage-history backfill (CTE bug — pre-2026-05-04 archives)
+
+`usage_history` rows archived before commit `<fixing-CTE-bug>` have all-zero
+`total_tokens_*` and `total_requests` because `batchGetRequestAuditStats` built
+the CTE with literal integers (`(2, 3, 4)`) instead of `($2, $3, $4)`. Postgres
+either rejected the query (`42P18`) or — depending on cast inference — joined
+zero rows from `make_date(2, 3, 1)` (year 2 AD, March, day 1). `total_cost_usd`
+was always correct because it is read directly from Redis `quota:*.spent`.
+
+### Detection
+
+```sql
+SELECT user_id, month, total_requests, total_tokens_input
+FROM usage_history
+WHERE total_requests = 0
+  AND EXISTS (
+    SELECT 1 FROM request_audit r
+    WHERE r.user_id = usage_history.user_id
+      AND r.created_at >= make_date(
+        CAST(SUBSTRING(usage_history.month FROM 1 FOR 4) AS int),
+        CAST(SUBSTRING(usage_history.month FROM 6 FOR 2) AS int),
+        1
+      )
+      AND r.created_at < make_date(
+        CAST(SUBSTRING(usage_history.month FROM 1 FOR 4) AS int),
+        CAST(SUBSTRING(usage_history.month FROM 6 FOR 2) AS int),
+        1
+      ) + INTERVAL '1 month'
+  );
+```
+
+### Fix
+
+```bash
+bun scripts/backfill-usage-history.ts            # dry-run — log drift, no writes
+bun scripts/backfill-usage-history.ts --apply    # apply UPDATE statements
+```
+
+The script is idempotent: re-runs are safe and update only rows that still
+drift from `request_audit` ground truth. `total_cost_usd` is preserved.

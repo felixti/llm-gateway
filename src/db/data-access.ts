@@ -122,20 +122,8 @@ export async function batchGetRequestAuditStats(
   const uniqueMonths = [...new Set(entries.map((e) => e.month))];
 
   try {
-    // Pre-compute year/month integers so created_at only compares against constants (index-friendly)
-    const dateRanges = uniqueMonths.map((month) => ({
-      month,
-      year: Number.parseInt(month.substring(0, 4), 10),
-      monthNum: Number.parseInt(month.substring(5, 7), 10),
-    }));
-
-    // Build CTE with start/end bounds per month label
-    const cteValues = dateRanges
-      .map((_d, i) => {
-        const base = i * 3 + 2; // params start at $2 (1-indexed: $2, $3, $4, $5, ...)
-        return `(${base}, ${base + 1}, ${base + 2})`;
-      })
-      .join(', ');
+    const years = uniqueMonths.map((m) => Number.parseInt(m.substring(0, 4), 10));
+    const monthNums = uniqueMonths.map((m) => Number.parseInt(m.substring(5, 7), 10));
 
     const query = `
       WITH month_ranges AS (
@@ -143,7 +131,7 @@ export async function batchGetRequestAuditStats(
           month,
           make_date(yr, mo, 1) AS month_start,
           make_date(yr, mo, 1) + INTERVAL '1 month' AS month_end
-        FROM (VALUES ${cteValues}) AS v(yr, mo, month)
+        FROM unnest($2::int[], $3::int[], $4::text[]) AS v(yr, mo, month)
       )
       SELECT
         r.user_id::text AS user_id,
@@ -160,7 +148,7 @@ export async function batchGetRequestAuditStats(
       GROUP BY r.user_id, mr.month
     `;
 
-    const params = [userIds, ...dateRanges.flatMap((d) => [d.year, d.monthNum, d.month])];
+    const params = [userIds, years, monthNums, uniqueMonths];
 
     const { rows } = await database.execute<{
       user_id: string;
