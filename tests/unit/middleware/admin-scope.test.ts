@@ -36,27 +36,76 @@ describe('requireAdminScopeMiddleware', () => {
     }
   });
 
-  test('scope admin → next()', async () => {
+  test('secret not configured → 403 configuration_error', async () => {
     const c = createMockContext({ scope: 'admin' });
     const result = await requireAdminScopeMiddleware(c, next);
-    expect(result).toBeUndefined();
-  });
-
-  test('scope all → 403', async () => {
-    const c = createMockContext({ scope: 'all' });
-    const result = await requireAdminScopeMiddleware(c, next);
     expect(result).toBeInstanceOf(Response);
     expect(result!.status).toBe(403);
+    const body = (await result!.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('configuration_error');
+    expect(body.error.message).toContain('not configured');
   });
 
-  test('missing scope → 403', async () => {
-    const c = createMockContext({});
-    const result = await requireAdminScopeMiddleware(c, next);
-    expect(result).toBeInstanceOf(Response);
-    expect(result!.status).toBe(403);
+  test('secret too short → 403 configuration_error', async () => {
+    process.env.ADMIN_OPERATOR_SECRET = 'short';
+    try {
+      const c = createMockContext({ scope: 'admin' });
+      const result = await requireAdminScopeMiddleware(c, next);
+      expect(result).toBeInstanceOf(Response);
+      expect(result!.status).toBe(403);
+      const body = (await result!.json()) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe('configuration_error');
+    } finally {
+      delete process.env.ADMIN_OPERATOR_SECRET;
+    }
   });
 
-  test('operator secret required: missing header → 403', async () => {
+  test('scope admin + valid secret → next()', async () => {
+    process.env.ADMIN_OPERATOR_SECRET = 'super-long-operator-secret-123';
+    try {
+      const c = createMockContext({
+        scope: 'admin',
+        operatorSecret: 'super-long-operator-secret-123',
+      });
+      const result = await requireAdminScopeMiddleware(c, next);
+      expect(result).toBeUndefined();
+    } finally {
+      delete process.env.ADMIN_OPERATOR_SECRET;
+    }
+  });
+
+  test('scope all + valid secret → 403 permission_error', async () => {
+    process.env.ADMIN_OPERATOR_SECRET = 'super-long-operator-secret-123';
+    try {
+      const c = createMockContext({
+        scope: 'all',
+        operatorSecret: 'super-long-operator-secret-123',
+      });
+      const result = await requireAdminScopeMiddleware(c, next);
+      expect(result).toBeInstanceOf(Response);
+      expect(result!.status).toBe(403);
+      const body = (await result!.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('permission_error');
+    } finally {
+      delete process.env.ADMIN_OPERATOR_SECRET;
+    }
+  });
+
+  test('missing scope + valid secret → 403 permission_error', async () => {
+    process.env.ADMIN_OPERATOR_SECRET = 'super-long-operator-secret-123';
+    try {
+      const c = createMockContext({ operatorSecret: 'super-long-operator-secret-123' });
+      const result = await requireAdminScopeMiddleware(c, next);
+      expect(result).toBeInstanceOf(Response);
+      expect(result!.status).toBe(403);
+      const body = (await result!.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('permission_error');
+    } finally {
+      delete process.env.ADMIN_OPERATOR_SECRET;
+    }
+  });
+
+  test('valid secret but missing header → 403 permission_error', async () => {
     process.env.ADMIN_OPERATOR_SECRET = 'super-long-operator-secret-123';
     try {
       const c = createMockContext({ scope: 'admin' });
@@ -70,15 +119,18 @@ describe('requireAdminScopeMiddleware', () => {
     }
   });
 
-  test('operator secret required: matching header → next()', async () => {
+  test('valid secret but wrong header → 403 permission_error', async () => {
     process.env.ADMIN_OPERATOR_SECRET = 'super-long-operator-secret-123';
     try {
       const c = createMockContext({
         scope: 'admin',
-        operatorSecret: 'super-long-operator-secret-123',
+        operatorSecret: 'wrong-secret-value-999',
       });
       const result = await requireAdminScopeMiddleware(c, next);
-      expect(result).toBeUndefined();
+      expect(result).toBeInstanceOf(Response);
+      expect(result!.status).toBe(403);
+      const body = (await result!.json()) as { error: { message: string } };
+      expect(body.error.message).toContain('operator credentials');
     } finally {
       delete process.env.ADMIN_OPERATOR_SECRET;
     }

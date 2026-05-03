@@ -9,9 +9,12 @@ import type { Context, Next } from 'hono';
 const HEADER_OPERATOR_SECRET = 'x-operator-secret';
 
 /** Read live so deployment can rotate the secret without process restart and tests can set it per case. */
-function getOperatorSecret(): string | undefined {
+function getOperatorSecret(): string {
   const raw = process.env.ADMIN_OPERATOR_SECRET;
-  return raw && raw.length >= 16 ? raw : undefined;
+  if (!raw || raw.length < 16) {
+    throw new Error('ADMIN_OPERATOR_SECRET is not configured or too short');
+  }
+  return raw;
 }
 
 export async function requireAdminScopeMiddleware(
@@ -20,15 +23,22 @@ export async function requireAdminScopeMiddleware(
 ): Promise<Response | undefined> {
   const path = c.req.path;
 
-  const operatorSecret = getOperatorSecret();
-  if (operatorSecret) {
-    const provided = c.req.header(HEADER_OPERATOR_SECRET);
-    if (provided !== operatorSecret) {
-      return c.json(
-        errorForProtocol(path, 403, 'permission_error', 'Invalid operator credentials'),
-        403
-      );
-    }
+  let operatorSecret: string;
+  try {
+    operatorSecret = getOperatorSecret();
+  } catch {
+    return c.json(
+      errorForProtocol(path, 403, 'configuration_error', 'Operator secret is not configured'),
+      403
+    );
+  }
+
+  const provided = c.req.header(HEADER_OPERATOR_SECRET);
+  if (provided !== operatorSecret) {
+    return c.json(
+      errorForProtocol(path, 403, 'permission_error', 'Invalid operator credentials'),
+      403
+    );
   }
 
   const scope = c.get('scope');
