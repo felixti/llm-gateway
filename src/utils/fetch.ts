@@ -31,12 +31,6 @@ export async function upstreamHttpsFetch(
   return fetch(input, options);
 }
 
-/** @deprecated Use upstreamHttpsFetch */
-export const secureFetch = upstreamHttpsFetch;
-
 export function createUpstreamFetcher(): typeof upstreamHttpsFetch {
   return upstreamHttpsFetch;
 }
-
-/** @deprecated Use createUpstreamFetcher */
-export const createSecureFetcher = createUpstreamFetcher;
