@@ -5,11 +5,15 @@ import { Decimal } from 'decimal.js';
 import { type TokenUsage, calculateCost } from './pricing.service';
 import {
   DEFAULT_BUDGET_MICRO,
+  IDEMPOTENCY_CLEANUP_PREFIX,
   IDEMPOTENCY_RECONCILE_PREFIX,
   IDEMPOTENCY_RELEASE_PREFIX,
   MAX_SCAN_ITERATIONS,
+  QUOTA_KEY_PREFIX,
   RESERVATION_HASH_PREFIX,
+  RESERVATION_KEY_PREFIX,
   RESERVATION_TTL_SECONDS,
+  RESERVED_KEY_PREFIX,
   getIdempotencyTtlSeconds,
 } from './quota/constants';
 import {
@@ -111,7 +115,9 @@ export async function releaseReservation(reservationId: string): Promise<void> {
       idempotencyKey,
       reservationKey,
       reservationId,
-      getIdempotencyTtlSeconds()
+      getIdempotencyTtlSeconds(),
+      RESERVED_KEY_PREFIX,
+      RESERVATION_HASH_PREFIX
     )) as (string | number)[];
 
     if (Array.isArray(result) && result[1] === 'not_found') {
@@ -169,7 +175,10 @@ export async function reconcileUsage(
       reservationKey,
       reservationId,
       costMicro,
-      getIdempotencyTtlSeconds()
+      getIdempotencyTtlSeconds(),
+      QUOTA_KEY_PREFIX,
+      RESERVED_KEY_PREFIX,
+      RESERVATION_HASH_PREFIX
     )) as (string | number)[];
 
     if (Array.isArray(result) && result[0] === 1) {
@@ -346,7 +355,10 @@ export async function cleanupOrphanedReservations(): Promise<number> {
           hashKey,
           String(nowMs),
           String(ttlMs),
-          String(getIdempotencyTtlSeconds())
+          String(getIdempotencyTtlSeconds()),
+          RESERVATION_KEY_PREFIX,
+          RESERVED_KEY_PREFIX,
+          IDEMPOTENCY_CLEANUP_PREFIX
         )) as number;
         totalCleaned += cleaned;
       }

@@ -1,5 +1,3 @@
-import { IDEMPOTENCY_CLEANUP_PREFIX } from './constants';
-
 export const CHECK_AND_RESERVE_SCRIPT = `
   local quotaKey = KEYS[1]
   local reservedKey = KEYS[2]
@@ -31,6 +29,8 @@ export const RELEASE_RESERVATION_SCRIPT = `
   local reservationKey = KEYS[2]
   local reservationId = ARGV[1]
   local idempotencyTtl = tonumber(ARGV[2])
+  local reservedPrefix = ARGV[3]
+  local hashPrefix = ARGV[4]
 
   if redis.call('exists', idempotencyKey) == 1 then
     return {0, 'already_released'}
@@ -57,8 +57,8 @@ export const RELEASE_RESERVATION_SCRIPT = `
     return {0, 'parse_error'}
   end
 
-  local reservedKey = 'reserved:' .. userId .. ':' .. month
-  local hashKey = 'reservations_meta:' .. userId .. ':' .. month
+  local reservedKey = reservedPrefix .. userId .. ':' .. month
+  local hashKey = hashPrefix .. userId .. ':' .. month
 
   redis.call('incrby', reservedKey, -tonumber(amountMicro))
   redis.call('del', reservationKey)
@@ -74,6 +74,9 @@ export const RECONCILE_USAGE_SCRIPT = `
   local reservationId = ARGV[1]
   local costMicro = ARGV[2]
   local idempotencyTtl = tonumber(ARGV[3])
+  local quotaPrefix = ARGV[4]
+  local reservedPrefix = ARGV[5]
+  local hashPrefix = ARGV[6]
 
   if redis.call('exists', idempotencyKey) == 1 then
     return {0, 'already_reconciled'}
@@ -100,9 +103,9 @@ export const RECONCILE_USAGE_SCRIPT = `
     return {0, 'parse_error'}
   end
 
-  local quotaKey = 'quota:' .. userId .. ':' .. month
-  local reservedKey = 'reserved:' .. userId .. ':' .. month
-  local hashKey = 'reservations_meta:' .. userId .. ':' .. month
+  local quotaKey = quotaPrefix .. userId .. ':' .. month
+  local reservedKey = reservedPrefix .. userId .. ':' .. month
+  local hashKey = hashPrefix .. userId .. ':' .. month
 
   redis.call('hincrby', quotaKey, 'spent', tonumber(costMicro))
   redis.call('incrby', reservedKey, -tonumber(reservedAmountMicro))
@@ -119,6 +122,9 @@ export const CLEANUP_ORPHAN_SCRIPT = `
   local nowMs = tonumber(ARGV[1])
   local ttlMs = tonumber(ARGV[2])
   local idempotencyTtl = tonumber(ARGV[3])
+  local reservationPrefix = ARGV[4]
+  local reservedPrefix = ARGV[5]
+  local idempotencyCleanupPrefix = ARGV[6]
 
   local fields = redis.call('hgetall', hashKey)
   local cleaned = 0
@@ -141,11 +147,11 @@ export const CLEANUP_ORPHAN_SCRIPT = `
     if amountMicro and userId and month and createdAtStr then
       local createdAt = tonumber(createdAtStr)
       if createdAt and (nowMs - createdAt) > ttlMs then
-        local reservationKey = 'reservation:' .. reservationId
+        local reservationKey = reservationPrefix .. reservationId
         if redis.call('exists', reservationKey) == 0 then
-          local idemKey = '${IDEMPOTENCY_CLEANUP_PREFIX}' .. reservationId
+          local idemKey = idempotencyCleanupPrefix .. reservationId
           if redis.call('exists', idemKey) == 0 then
-            local reservedKey = 'reserved:' .. userId .. ':' .. month
+            local reservedKey = reservedPrefix .. userId .. ':' .. month
             redis.call('incrby', reservedKey, -tonumber(amountMicro))
             redis.call('hdel', hashKey, reservationId)
             redis.call('set', idemKey, '1', 'EX', idempotencyTtl)
