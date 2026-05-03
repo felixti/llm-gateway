@@ -70,7 +70,7 @@ export class MockRedis {
     }
 
     this.store.set(reservationKey, reservationData);
-    this.incrbyfloat(reservedKey, cost);
+    this.incrby(reservedKey, Math.floor(cost));
     if (!this.hashes.has(hashKey)) {
       this.hashes.set(hashKey, new Map());
     }
@@ -335,6 +335,14 @@ export class MockRedis {
         cmds.push({ method: 'hincrbyfloat', args: [key, field, value] });
         return builder;
       },
+      hincrby(key: string, field: string, value: number) {
+        cmds.push({ method: 'hincrby', args: [key, field, value] });
+        return builder;
+      },
+      incrby(key: string, value: number) {
+        cmds.push({ method: 'incrby', args: [key, value] });
+        return builder;
+      },
       incrbyfloat(key: string, value: string) {
         cmds.push({ method: 'incrbyfloat', args: [key, value] });
         return builder;
@@ -350,7 +358,15 @@ export class MockRedis {
       exec: async (): Promise<unknown[][]> => {
         const results: unknown[][] = [];
         for (const cmd of cmds) {
-          if (cmd.method === 'hincrbyfloat') {
+          if (cmd.method === 'hincrby') {
+            const [key, field, value] = cmd.args as [string, string, number];
+            if (!this.hashes.has(key)) this.hashes.set(key, new Map());
+            const map = this.hashes.get(key)!;
+            const current = Number.parseInt(map.get(field) || '0', 10);
+            const newVal = current + Math.floor(value);
+            map.set(field, String(newVal));
+            results.push([null, newVal]);
+          } else if (cmd.method === 'hincrbyfloat') {
             const [key, field, value] = cmd.args as [string, string, string];
             if (!this.hashes.has(key)) this.hashes.set(key, new Map());
             const map = this.hashes.get(key)!;
@@ -358,6 +374,12 @@ export class MockRedis {
             const newVal = current + Number.parseFloat(value);
             map.set(field, String(newVal));
             results.push([null, String(newVal)]);
+          } else if (cmd.method === 'incrby') {
+            const [key, value] = cmd.args as [string, number];
+            const current = Number.parseInt(this.store.get(key) || '0', 10);
+            const newVal = current + Math.floor(value);
+            this.store.set(key, String(newVal));
+            results.push([null, newVal]);
           } else if (cmd.method === 'incrbyfloat') {
             const [key, value] = cmd.args as [string, string];
             const current = Number.parseFloat(this.store.get(key) || '0');
@@ -396,6 +418,22 @@ export class MockRedis {
     };
 
     return builder;
+  }
+
+  async hincrby(key: string, field: string, value: number): Promise<number> {
+    if (!this.hashes.has(key)) this.hashes.set(key, new Map());
+    const map = this.hashes.get(key)!;
+    const current = Number.parseInt(map.get(field) || '0', 10);
+    const newVal = current + Math.floor(value);
+    map.set(field, String(newVal));
+    return newVal;
+  }
+
+  async incrby(key: string, value: number): Promise<number> {
+    const current = Number.parseInt(this.store.get(key) || '0', 10);
+    const newVal = current + Math.floor(value);
+    this.store.set(key, String(newVal));
+    return newVal;
   }
 
   async incrbyfloat(key: string, value: number): Promise<string> {

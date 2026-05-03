@@ -37,6 +37,8 @@ function bindMockRedis(mock: MockRedis): void {
   r.ping = mock.ping.bind(mock);
   r.scan = mock.scan.bind(mock);
   r.ttl = mock.ttl.bind(mock);
+  r.hincrby = mock.hincrby.bind(mock);
+  r.incrby = mock.incrby.bind(mock);
 }
 
 let originalSyncFlag: string | undefined;
@@ -193,5 +195,30 @@ describe('quota.service sync gating', () => {
     const { syncQuotaPolicyFromPostgres } = await import('../../../src/services/quota.service');
     await syncQuotaPolicyFromPostgres('user-4', '2026-04');
     expect(policyCalls).toBe(0);
+  });
+});
+
+describe('quota.service float overflow regression', () => {
+  test('recordUsageOnly has no float drift after 1000 operations', async () => {
+    const { recordUsageOnly, getQuotaStatus } = await import(
+      '../../../src/services/quota.service'
+    );
+
+    const userId = 'user-float-drift';
+    const month = new Date().toISOString().slice(0, 7);
+    const quotaKey = `quota:${userId}:${month}`;
+    const r = redis as unknown as { hset: (...args: unknown[]) => Promise<unknown> };
+    await r.hset(quotaKey, { budget: '50000000000' });
+
+    const costMicro = 20000;
+    const expectedTotalMicro = costMicro * 1000;
+
+    for (let i = 0; i < 1000; i++) {
+      await recordUsageOnly(userId, { prompt_tokens: 1000, completion_tokens: 1000 }, 'gpt-5.4');
+    }
+
+    const status = await getQuotaStatus(userId);
+    const actualTotalMicro = Math.round(status.spent_usd * 1_000_000);
+    expect(actualTotalMicro).toBe(expectedTotalMicro);
   });
 });
