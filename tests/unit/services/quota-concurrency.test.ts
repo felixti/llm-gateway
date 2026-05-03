@@ -45,7 +45,9 @@ describe('quota.service concurrent reservations', () => {
     );
 
     const allowed = results.filter((result) => result.allowed);
-    const status = await getQuotaStatus('user-concurrent');
+    const result = await getQuotaStatus('user-concurrent');
+    if (!result.ok) throw new Error('getQuotaStatus failed: ' + String(result.error));
+    const status = result.value;
 
     expect(allowed).toHaveLength(10);
     expect(status.reserved_usd).toBeLessThanOrEqual(0.1);

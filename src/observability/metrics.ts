@@ -1,7 +1,7 @@
 import { env } from '@/config/env';
 import { resolveOtlpHttpMetricsUrl } from '@/observability/otlp-http-url';
 import { metrics } from '@opentelemetry/api';
-import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
+import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-grpc';
 import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 
 let meterProvider: MeterProvider | null = null;

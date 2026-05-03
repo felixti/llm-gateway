@@ -1,4 +1,5 @@
 import { describe, expect, test, vi, beforeEach, afterEach } from "bun:test";
+import { ok } from '@/utils/result';
 import {
   buildUpstreamUrl,
   buildRequestBody,
@@ -177,7 +178,7 @@ describe("proxyNonStreamingChat", () => {
     global.fetch = vi.fn(async () =>
       new Response(JSON.stringify(upstreamBody), { status: 200 })) as unknown as typeof fetch;
 
-    mockReconcileUsage.mockResolvedValue(new Decimal("0.001"));
+    mockReconcileUsage.mockResolvedValue(ok(new Decimal("0.001")));
     mockLogRequestAudit.mockResolvedValue(undefined);
 
     const response = await proxyNonStreamingChat(
@@ -281,7 +282,7 @@ describe("proxyNonStreamingChat", () => {
     global.fetch = vi.fn(async () =>
       new Response(JSON.stringify(upstreamBody), { status: 200 })) as unknown as typeof fetch;
 
-    mockReconcileUsage.mockResolvedValue(new Decimal("0.001"));
+    mockReconcileUsage.mockResolvedValue(ok(new Decimal("0.001")));
     mockLogRequestAudit.mockResolvedValue(undefined);
 
     await proxyNonStreamingChat(
@@ -310,7 +311,7 @@ describe("proxyNonStreamingChat", () => {
     global.fetch = vi.fn(async () =>
       new Response(JSON.stringify(upstreamBody), { status: 200 })) as unknown as typeof fetch;
 
-    mockReconcileUsage.mockResolvedValue(new Decimal("0.001"));
+    mockReconcileUsage.mockResolvedValue(ok(new Decimal("0.001")));
     mockLogRequestAudit.mockResolvedValue(undefined);
 
     await proxyNonStreamingChat(
@@ -481,7 +482,7 @@ describe("proxyStreamingChat", () => {
 
     global.fetch = vi.fn(async () =>
       new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })) as unknown as typeof fetch;
-    mockReconcileUsage.mockResolvedValue(new Decimal("0.000321"));
+    mockReconcileUsage.mockResolvedValue(ok(new Decimal("0.000321")));
     mockLogRequestAudit.mockResolvedValue(undefined);
 
     const response = await proxyStreamingChat(

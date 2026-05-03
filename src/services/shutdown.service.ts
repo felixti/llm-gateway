@@ -123,10 +123,10 @@ export async function shutdownMiddleware(c: Context, next: Next): Promise<Respon
 export function waitForDrain(timeoutMs: number = env.SHUTDOWN_TIMEOUT_MS): Promise<boolean> {
   if (!shuttingDown) {
     shuttingDown = true;
-    logger.info('Shutdown initiated, waiting for in-flight requests to drain', {
-      in_flight: inFlightCount,
-      timeout_ms: timeoutMs,
-    });
+    logger.info(
+      { in_flight: inFlightCount, timeout_ms: timeoutMs },
+      'Shutdown initiated, waiting for in-flight requests to drain'
+    );
   }
 
   if (inFlightCount === 0) {
@@ -141,10 +141,10 @@ export function waitForDrain(timeoutMs: number = env.SHUTDOWN_TIMEOUT_MS): Promi
         drainResolvers.splice(idx, 1);
       }
 
-      logger.warn('Drain timed out, forcing shutdown', {
-        in_flight: inFlightCount,
-        timeout_ms: timeoutMs,
-      });
+      logger.warn(
+        { in_flight: inFlightCount, timeout_ms: timeoutMs },
+        'Drain timed out, forcing shutdown'
+      );
       resolve(false);
     }, timeoutMs);
 
@@ -173,9 +173,10 @@ export async function initiateGracefulShutdown(
   const drained = await waitForDrain();
 
   if (!drained && server && typeof server.pendingRequests === 'number') {
-    logger.warn('Bun server pending requests at force-shutdown', {
-      pending_requests: server.pendingRequests,
-    });
+    logger.warn(
+      { pending_requests: server.pendingRequests },
+      'Bun server pending requests at force-shutdown'
+    );
   }
 
   return drained;

@@ -1,3 +1,4 @@
+import { isOk } from '@/utils/result';
 import { describe, expect, test, vi, beforeEach } from 'bun:test';
 import { Decimal } from 'decimal.js';
 import { redis } from '../../../src/db/redis';
@@ -80,11 +81,13 @@ describe('quota service orphan cleanup', () => {
 
     await redis.del(reservationKey);
 
-    const cost = await reconcileUsage(
+    const costResult = await reconcileUsage(
       reservationId,
       { prompt_tokens: 10, completion_tokens: 5 },
       'gpt-4o'
     );
+    if (!isOk(costResult)) throw new Error('reconcileUsage failed');
+    const cost = costResult.value;
 
     expect(cost.toString()).toBe('0.05');
     expect(await redis.hget(quotaKey, 'spent')).toBe('50000');

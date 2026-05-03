@@ -7,6 +7,8 @@ import type { ProxyRequestContext } from '@/routes/factories/types';
 import type { TokenUsage } from '@/services/pricing.service';
 import { reconcileUsage, recordUsageOnly, releaseReservation } from '@/services/quota.service';
 import { errorForProtocol } from '@/utils/errors';
+import { isOk } from '@/utils/result';
+import type { Decimal } from 'decimal.js';
 
 interface UpstreamErrorResponseOptions {
   response?: Response;
@@ -25,6 +27,7 @@ interface FinalizeUsageOptions {
   deployment: DeploymentConfig;
   startTime: number;
   thinkingEnabled?: boolean;
+  idempotencyKey?: string;
 }
 
 export function normalizeProxyContext(
@@ -126,6 +129,7 @@ export async function finalizeProxyUsage({
   deployment,
   startTime,
   thinkingEnabled = false,
+  idempotencyKey,
 }: FinalizeUsageOptions): Promise<void> {
   if (!usage) {
     if (reservationId) {
@@ -134,9 +138,33 @@ export async function finalizeProxyUsage({
     return;
   }
 
-  const actualCost = reservationId
-    ? await reconcileUsage(reservationId, usage, deployment.azureModelName)
-    : await recordUsageOnly(userId || 'unknown', usage, deployment.azureModelName);
+  let actualCost: Decimal;
+
+  if (reservationId) {
+    // reconcileUsage returns ReconciliationResult for fail-closed policy
+    const costResult = await reconcileUsage(reservationId, usage, deployment.azureModelName);
+
+    // Fail-closed: propagate reconciliation errors
+    if (!isOk(costResult)) {
+      logger.error(
+        { err: costResult.error, reservationId: costResult.error.reservationId, requestId },
+        'Quota reconciliation failed - Redis error'
+      );
+      const error = new Error(`Quota reconciliation failed: ${costResult.error.message}`);
+      error.name = 'QuotaReconciliationError';
+      throw error;
+    }
+
+    actualCost = costResult.value;
+  } else {
+    // recordUsageOnly returns Decimal directly (no reservation to reconcile)
+    actualCost = await recordUsageOnly(
+      userId || 'unknown',
+      usage,
+      deployment.azureModelName,
+      idempotencyKey
+    );
+  }
 
   addLLMSpanAttributes({
     promptTokens: usage.prompt_tokens,

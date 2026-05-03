@@ -5,15 +5,21 @@
  */
 
 import { env } from '@/config/env';
-import { incrementQuotaExceeded429, incrementQuotaReservationNull } from '@/observability/metrics';
+import {
+  incrementQuotaExceeded429,
+  incrementQuotaHydrationFailures,
+  incrementQuotaReservationNull,
+} from '@/observability/metrics';
 import { calculateEstimatedCost } from '@/services/pricing.service';
 import {
   type QuotaReservation,
+  type QuotaResult,
   checkAndReserve,
   getQuotaStatus,
   releaseReservation,
 } from '@/services/quota.service';
 import { errorForProtocol } from '@/utils/errors';
+import { isOk } from '@/utils/result';
 import { estimateAnthropicTokens, estimateMessagesTokens } from '@/utils/tokens';
 import type { Context, Next } from 'hono';
 
@@ -111,7 +117,22 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<Response 
     return;
   }
 
-  const quotaStatus = await getQuotaStatus(userId);
+  // Get quota status - fail closed if Redis error
+  const quotaStatusResult: QuotaResult = await getQuotaStatus(userId);
+
+  // Fail closed: if we cannot determine quota status, reject the request
+  if (!isOk(quotaStatusResult)) {
+    const error = errorForProtocol(
+      path,
+      429,
+      'quota_unavailable',
+      'Unable to determine quota status. Please try again later.'
+    );
+    incrementQuotaHydrationFailures();
+    return c.json(error, 429);
+  }
+
+  const quotaStatus = quotaStatusResult.value;
   const isHardLimit = !env.QUOTA_SOFT_LIMIT_ENABLED && quotaStatus.hard_limit;
 
   const { promptTokens, thinkingEnabled } = estimateRequestTokens(body, path, model);
@@ -145,7 +166,9 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<Response 
 
   if (wouldExceedBudget && !isHardLimit) {
     c.header(HEADER_WARNING, 'Soft quota limit exceeded. Usage is being tracked.');
+    const softLimitIdempotencyKey = `soft:${userId}:${path}:${Date.now()}`;
     c.set('reservationId', '');
+    c.set('idempotencyKey', softLimitIdempotencyKey);
     c.set('estimatedCost', estimatedCost);
     c.set('model', model);
     c.set('releaseQuota', async () => {});

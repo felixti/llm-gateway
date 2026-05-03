@@ -16,6 +16,7 @@ import { reconcileUsage } from '@/services/quota.service';
 import { withRetry } from '@/services/retry';
 import { upstreamHttpsFetch } from '@/utils/fetch';
 import { AsyncMutex } from '@/utils/mutex';
+import { isOk } from '@/utils/result';
 import {
   type AnthropicStreamEvent,
   handleStreamAbort,
@@ -157,7 +158,7 @@ export async function proxyNonStreamingAnthropic(
   contextOrReservationId: ProxyRequestContext | string,
   legacyRequestId?: string
 ): Promise<Response> {
-  const { reservationId, requestId, userId, abortSignal } = normalizeProxyContext(
+  const { reservationId, requestId, userId, abortSignal, idempotencyKey } = normalizeProxyContext(
     contextOrReservationId,
     legacyRequestId
   );
@@ -226,7 +227,15 @@ export async function proxyNonStreamingAnthropic(
   };
   const usage = responseBody?.usage;
 
-  await finalizeProxyUsage({ usage, reservationId, requestId, userId, deployment, startTime });
+  await finalizeProxyUsage({
+    usage,
+    reservationId,
+    requestId,
+    userId,
+    deployment,
+    startTime,
+    idempotencyKey,
+  });
 
   return new Response(JSON.stringify(responseBody), {
     status: 200,
@@ -353,11 +362,30 @@ export async function proxyStreamingAnthropic(
                 usageExtracted = true;
                 reservationFinalized = true;
 
-                const actualCost = await reconcileUsage(
+                const costResult = await reconcileUsage(
                   reservationId,
                   usage,
                   deployment.azureModelName
                 );
+
+                // Fail-closed: propagate reconciliation errors
+                if (!isOk(costResult)) {
+                  logger.error(
+                    {
+                      err: costResult.error,
+                      reservationId: costResult.error.reservationId,
+                      requestId,
+                    },
+                    'Quota reconciliation failed in Anthropic streaming - Redis error'
+                  );
+                  const error = new Error(
+                    `Quota reconciliation failed: ${costResult.error.message}`
+                  );
+                  error.name = 'QuotaReconciliationError';
+                  throw error;
+                }
+
+                const actualCost = costResult.value;
                 addLLMSpanAttributes({
                   promptTokens: usage.prompt_tokens,
                   completionTokens: usage.completion_tokens,
@@ -398,11 +426,28 @@ export async function proxyStreamingAnthropic(
             try {
               if (reservationFinalized) return;
               reservationFinalized = true;
-              const actualCost = await reconcileUsage(
+              const costResult = await reconcileUsage(
                 reservationId,
                 usage,
                 deployment.azureModelName
               );
+
+              // Fail-closed: propagate reconciliation errors
+              if (!isOk(costResult)) {
+                logger.error(
+                  {
+                    err: costResult.error,
+                    reservationId: costResult.error.reservationId,
+                    requestId,
+                  },
+                  'Quota reconciliation failed in Anthropic flush - Redis error'
+                );
+                const error = new Error(`Quota reconciliation failed: ${costResult.error.message}`);
+                error.name = 'QuotaReconciliationError';
+                throw error;
+              }
+
+              const actualCost = costResult.value;
               addLLMSpanAttributes({
                 promptTokens: usage.prompt_tokens,
                 completionTokens: usage.completion_tokens,

@@ -39,6 +39,7 @@ function extractRequestContext(c: Context): {
   reservationId: string;
   userId: string | undefined;
   abortSignal: AbortSignal;
+  idempotencyKey?: string;
 } {
   // Prefer the timeout-aware signal set by `timeoutMiddleware`; fall back to
   // the raw request signal (e.g. for tests that bypass the middleware chain).
@@ -48,6 +49,7 @@ function extractRequestContext(c: Context): {
     reservationId: c.get('reservationId') || '',
     userId: c.get('userId'),
     abortSignal: signal,
+    idempotencyKey: c.get('idempotencyKey'),
   };
 }
 
@@ -158,7 +160,8 @@ async function tryFallbacks(options: {
 export function createRequestHandler(deps: RequestHandlerDeps) {
   return async function handleRequest(c: Context): Promise<Response> {
     const path = c.req.path;
-    const { requestId, reservationId, userId, abortSignal } = extractRequestContext(c);
+    const { requestId, reservationId, userId, abortSignal, idempotencyKey } =
+      extractRequestContext(c);
     const startTime = Date.now();
 
     return withSpan(
@@ -231,7 +234,7 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
 
         // 7. Route to streaming or non-streaming proxy
         let response: Response;
-        const proxyContext = { reservationId, requestId, userId, abortSignal };
+        const proxyContext = { reservationId, requestId, userId, abortSignal, idempotencyKey };
 
         const useStreaming = bodyRecord.stream === true;
 

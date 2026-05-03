@@ -17,6 +17,7 @@ import { reconcileUsage } from '@/services/quota.service';
 import { withRetry } from '@/services/retry';
 import { upstreamHttpsFetch } from '@/utils/fetch';
 import { AsyncMutex } from '@/utils/mutex';
+import { isOk } from '@/utils/result';
 import { createOpenAIStreamTransformer, handleStreamAbort } from '@/utils/streaming';
 import {
   createSanitizedUpstreamErrorResponse,
@@ -73,7 +74,7 @@ export async function proxyNonStreamingChat(
   contextOrReservationId: ProxyRequestContext | string,
   legacyRequestId?: string
 ): Promise<Response> {
-  const { reservationId, requestId, userId, abortSignal } = normalizeProxyContext(
+  const { reservationId, requestId, userId, abortSignal, idempotencyKey } = normalizeProxyContext(
     contextOrReservationId,
     legacyRequestId
   );
@@ -151,7 +152,15 @@ export async function proxyNonStreamingChat(
   };
   const usage = responseBody?.usage;
 
-  await finalizeProxyUsage({ usage, reservationId, requestId, userId, deployment, startTime });
+  await finalizeProxyUsage({
+    usage,
+    reservationId,
+    requestId,
+    userId,
+    deployment,
+    startTime,
+    idempotencyKey,
+  });
 
   return new Response(JSON.stringify(responseBody), {
     status: 200,
@@ -264,7 +273,20 @@ export async function proxyStreamingChat(
         try {
           if (reservationFinalized) return;
           reservationFinalized = true;
-          const actualCost = await reconcileUsage(reservationId, usage, deployment.azureModelName);
+          const costResult = await reconcileUsage(reservationId, usage, deployment.azureModelName);
+
+          // Fail-closed: propagate reconciliation errors
+          if (!isOk(costResult)) {
+            logger.error(
+              { err: costResult.error, reservationId: costResult.error.reservationId, requestId },
+              'Quota reconciliation failed in OpenAI chat - Redis error'
+            );
+            const error = new Error(`Quota reconciliation failed: ${costResult.error.message}`);
+            error.name = 'QuotaReconciliationError';
+            throw error;
+          }
+
+          const actualCost = costResult.value;
           addLLMSpanAttributes({
             promptTokens: usage.prompt_tokens,
             completionTokens: usage.completion_tokens,

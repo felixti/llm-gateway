@@ -9,6 +9,7 @@ export const RESERVATION_HASH_PREFIX = 'reservations_meta:';
 export const IDEMPOTENCY_RELEASE_PREFIX = 'released:';
 export const IDEMPOTENCY_RECONCILE_PREFIX = 'reconciled:';
 export const IDEMPOTENCY_CLEANUP_PREFIX = 'cleanup:';
+export const IDEMPOTENCY_RECORD_ONLY_PREFIX = 'recorded:';
 
 export const RESERVATION_TTL_SECONDS = env.QUOTA_RESERVATION_TTL_SECONDS;
 export const DEFAULT_BUDGET_USD = 50;

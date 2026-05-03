@@ -47,10 +47,12 @@ interface CachedToken {
  */
 export class AzureAuthManager {
   private tokenCache: Map<string, CachedToken>;
+  private pendingFetches: Map<string, Promise<string>>;
   private fetchFn: typeof fetch;
 
   constructor(fetchFn: typeof fetch = fetch) {
     this.tokenCache = new Map();
+    this.pendingFetches = new Map();
     this.fetchFn = fetchFn;
   }
 
@@ -117,8 +119,23 @@ export class AzureAuthManager {
       return { Authorization: `Bearer ${cached.accessToken}` };
     }
 
-    // Fetch new token - clientSecret is string here due to check above
-    const token = await this.fetchEntraToken(tenantId, clientId, clientSecret, scope ?? '');
+    // Check if a fetch is already in-flight for this cacheKey (single-flight deduplication)
+    const existingFetch = this.pendingFetches.get(cacheKey);
+    if (existingFetch) {
+      const token = await existingFetch;
+      return { Authorization: `Bearer ${token}` };
+    }
+
+    // Create new fetch and track it in pendingFetches
+    const fetchPromise = this.fetchEntraToken(tenantId, clientId, clientSecret, scope ?? '');
+    this.pendingFetches.set(cacheKey, fetchPromise);
+
+    let token: string;
+    try {
+      token = await fetchPromise;
+    } finally {
+      this.pendingFetches.delete(cacheKey);
+    }
 
     // Decode expiry from JWT
     const exp = decodeJwtExp(token);

@@ -1,12 +1,14 @@
 import { redis } from '@/db/redis';
 import { logger } from '@/observability/logger';
 import { incrementQuotaOrphanCleaned } from '@/observability/metrics';
+import { type Result, err, ok } from '@/utils/result';
 import { Decimal } from 'decimal.js';
 import { type TokenUsage, calculateCost } from './pricing.service';
 import {
   DEFAULT_BUDGET_MICRO,
   IDEMPOTENCY_CLEANUP_PREFIX,
   IDEMPOTENCY_RECONCILE_PREFIX,
+  IDEMPOTENCY_RECORD_ONLY_PREFIX,
   IDEMPOTENCY_RELEASE_PREFIX,
   MAX_SCAN_ITERATIONS,
   QUOTA_KEY_PREFIX,
@@ -41,6 +43,9 @@ export interface QuotaReservation {
   reason?: string;
 }
 
+/**
+ * Quota status with all budget tracking fields
+ */
 export interface QuotaStatus {
   monthly_budget_usd: number;
   spent_usd: number;
@@ -50,7 +55,36 @@ export interface QuotaStatus {
   hard_limit: boolean;
 }
 
+/**
+ * Error type for quota operations - used for fail-closed policy
+ */
+export interface QuotaError {
+  code: string;
+  message: string;
+}
+
 export { syncQuotaPolicyFromPostgres };
+
+/**
+ * Result type for quota status lookups.
+ * Fail-closed: Redis errors propagate as errors, not defaults.
+ */
+export type QuotaResult = Result<QuotaStatus, QuotaError>;
+
+/**
+ * Error type for reconciliation operations
+ */
+export interface ReconciliationError {
+  code: string;
+  message: string;
+  reservationId: string;
+}
+
+/**
+ * Result type for reconcileUsage operations.
+ * Fail-closed: Redis errors propagate as errors, not zero values.
+ */
+export type ReconciliationResult = Result<Decimal, ReconciliationError>;
 
 export async function checkAndReserve(
   userId: string,
@@ -145,23 +179,42 @@ export async function releaseReservation(reservationId: string): Promise<void> {
 export async function recordUsageOnly(
   userId: string,
   actualUsage: TokenUsage,
-  model: string
+  model: string,
+  idempotencyKey?: string
 ): Promise<Decimal> {
   const actualCost = calculateCost(actualUsage, model);
   const costMicro = toMicrodollars(actualCost);
   const month = getCurrentMonth();
   const quotaKey = getQuotaKey(userId, month);
 
+  if (idempotencyKey) {
+    const key = `${IDEMPOTENCY_RECORD_ONLY_PREFIX}${idempotencyKey}`;
+    const ttl = getIdempotencyTtlSeconds();
+    const set = await redis.setnx(key, '1');
+    if (set === 0) {
+      return new Decimal(0);
+    }
+    await redis.expire(key, ttl);
+  }
+
   await redis.hincrby(quotaKey, 'spent', Number(costMicro));
 
   return actualCost;
 }
 
+/**
+ * Reconcile usage after an LLM response.
+ * Returns actualCost on success, error on failure (fail-closed).
+ *
+ * Previously returned Decimal(0) on errors, which allowed requests through
+ * without proper quota accounting. Now propagates errors so the quota
+ * middleware can reject the request.
+ */
 export async function reconcileUsage(
   reservationId: string,
   actualUsage: TokenUsage,
   model: string
-): Promise<Decimal> {
+): Promise<ReconciliationResult> {
   const actualCost = calculateCost(actualUsage, model);
   const costMicro = toMicrodollars(actualCost);
   const idempotencyKey = `${IDEMPOTENCY_RECONCILE_PREFIX}${reservationId}`;
@@ -182,11 +235,11 @@ export async function reconcileUsage(
     )) as (string | number)[];
 
     if (Array.isArray(result) && result[0] === 1) {
-      return actualCost;
+      return ok(actualCost);
     }
 
     if (Array.isArray(result) && result[1] === 'already_reconciled') {
-      return new Decimal(0);
+      return ok(new Decimal(0));
     }
 
     if (Array.isArray(result) && result[1] === 'not_found') {
@@ -206,15 +259,27 @@ export async function reconcileUsage(
           { reservationId, userId: nullData.userId, month: nullData.month },
           'Reconciled expired reservation via hash fallback'
         );
-        return actualCost;
+        return ok(actualCost);
       }
-      return new Decimal(0);
+      return err({
+        code: 'reservation_not_found',
+        message: 'Reservation not found and hash recovery failed',
+        reservationId,
+      });
     }
 
-    return new Decimal(0);
+    return err({
+      code: 'reconciliation_failed',
+      message: 'Reconciliation script returned unexpected result',
+      reservationId,
+    });
   } catch (error) {
     logger.error({ error, reservationId }, 'Reconcile usage error');
-    return new Decimal(0);
+    return err({
+      code: 'redis_error',
+      message: 'Failed to reconcile usage due to Redis error',
+      reservationId,
+    });
   }
 }
 
@@ -225,42 +290,56 @@ function parseHardLimitFlag(value: string | null): boolean {
   return true;
 }
 
-async function safeReadOrNull(op: () => Promise<string | null>): Promise<string | null> {
-  try {
-    return await op();
-  } catch (error) {
-    logger.warn({ error }, 'Quota read failed; falling back to defaults');
-    return null;
-  }
-}
-
-export async function getQuotaStatus(userId: string): Promise<QuotaStatus> {
+/**
+ * Get quota status for a user.
+ * Returns a Result<QuotaStatus, QuotaError> for fail-closed policy.
+ *
+ * Previously used safeReadOrNull which returned null on Redis errors,
+ * causing the caller to fall back to defaults (fail-open). Now propagates
+ * errors so the quota middleware can reject requests when quota status
+ * cannot be determined.
+ */
+export async function getQuotaStatus(userId: string): Promise<QuotaResult> {
   const month = getCurrentMonth();
   await syncQuotaPolicyFromPostgres(userId, month);
 
   const quotaKey = getQuotaKey(userId, month);
   const reservedKey = getReservedKey(userId, month);
 
-  const [budget, spent, reserved, hardRaw] = await Promise.all([
-    safeReadOrNull(() => redis.hget(quotaKey, 'budget')),
-    safeReadOrNull(() => redis.hget(quotaKey, 'spent')),
-    safeReadOrNull(() => redis.get(reservedKey)),
-    safeReadOrNull(() => redis.hget(quotaKey, 'hard_limit')),
-  ]);
+  let budget: string | null = null;
+  let spent: string | null = null;
+  let reserved: string | null = null;
+  let hardRaw: string | null = null;
+
+  try {
+    const results = await Promise.all([
+      redis.hget(quotaKey, 'budget'),
+      redis.hget(quotaKey, 'spent'),
+      redis.get(reservedKey),
+      redis.hget(quotaKey, 'hard_limit'),
+    ]);
+    [budget, spent, reserved, hardRaw] = results;
+  } catch (error) {
+    logger.error({ error, userId }, 'Failed to get quota status from Redis');
+    return err({
+      code: 'quota_status_unavailable',
+      message: 'Unable to determine quota status',
+    });
+  }
 
   const budgetDecimal = fromMicrodollars(budget || DEFAULT_BUDGET_MICRO);
   const spentDecimal = fromMicrodollars(spent || '0');
   const reservedDecimal = fromMicrodollars(reserved || '0');
   const remaining = budgetDecimal.minus(spentDecimal).minus(reservedDecimal);
 
-  return {
+  return ok({
     monthly_budget_usd: budgetDecimal.toNumber(),
     spent_usd: spentDecimal.toNumber(),
     reserved_usd: reservedDecimal.toNumber(),
     remaining_usd: Math.max(0, remaining.toNumber()),
     reset_date: getResetDate(),
     hard_limit: parseHardLimitFlag(hardRaw),
-  };
+  });
 }
 
 export async function setMonthlyBudget(

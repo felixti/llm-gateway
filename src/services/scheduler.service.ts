@@ -52,7 +52,7 @@ async function runCleanupJob(): Promise<void> {
   try {
     const cleaned = await cleanupOrphanedReservations();
     if (cleaned > 0) {
-      logger.info('Cleaned up orphaned reservations', { count: cleaned });
+      logger.info({ count: cleaned }, 'Cleaned up orphaned reservations');
     }
   } catch (error) {
     logger.error({ error }, 'Cleanup job failed');
@@ -159,7 +159,7 @@ export async function runArchiveJob(): Promise<void> {
     await batchArchiveMonthlyUsage(archiveRecords);
 
     if (archiveRecords.length > 0) {
-      logger.info('Archived monthly usage', { count: archiveRecords.length });
+      logger.info({ count: archiveRecords.length }, 'Archived monthly usage');
     }
   } catch (error) {
     logger.error({ error }, 'Archive job failed');

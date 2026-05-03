@@ -78,12 +78,12 @@ describe('Quota Routes - /quota', () => {
 
   describe('Degraded dependencies', () => {
     /**
-     * With `getQuotaStatus()` hardened to swallow Redis read failures and
-     * return defaults, the GET /quota endpoint must keep returning 200 with a
-     * conservative payload — never 500 — so clients can render a graceful
-     * "limits unknown" state instead of surfacing infra errors.
+     * With `getQuotaStatus()` hardened to fail-closed on Redis read failures,
+     * the GET /quota endpoint must return 429 with a structured error — never
+     * 500 — so clients know quota status is temporarily unavailable and can
+     * retry or fall back gracefully.
      */
-    it('returns 200 with defaulted numbers when quota-key Redis reads reject', async () => {
+    it('returns 429 with quota_unavailable when quota-key Redis reads reject', async () => {
       const app = await createTestApp();
       const { redis } = await import('@/db/redis');
       const r = redis as unknown as Record<
@@ -112,18 +112,11 @@ describe('Quota Routes - /quota', () => {
         const res = await app.request('/quota', {
           headers: { Authorization: VALID_PAT },
         });
-        expect(res.status).toBe(200);
+        expect(res.status).toBe(429);
         const body = (await res.json()) as {
-          monthly_budget_usd: number;
-          spent_usd: number;
-          reserved_usd: number;
-          remaining_usd: number;
-          hard_limit: boolean;
+          error: { code: string; message: string };
         };
-        expect(body.spent_usd).toBe(0);
-        expect(body.reserved_usd).toBe(0);
-        expect(body.hard_limit).toBe(true);
-        expect(body.monthly_budget_usd).toBeGreaterThan(0);
+        expect(body.error.code).toBe('quota_unavailable');
       } finally {
         r.hget = originalHget;
         r.get = originalGet;

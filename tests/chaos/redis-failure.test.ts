@@ -12,6 +12,7 @@ import { Decimal } from 'decimal.js';
 import { redis } from '../../src/db/redis';
 import { isRedisHealthy } from '../../src/db/redis';
 import { checkAndReserve, getQuotaStatus } from '../../src/services/quota.service';
+import { isErr } from '../../src/utils/result';
 
 interface Patch {
   key: string;
@@ -86,13 +87,11 @@ describe('Chaos: Redis Failure', () => {
       })
     );
 
-    // With every read rejecting we fall back to the defaults: zero spent,
-    // zero reserved, and hard_limit=true. The default monthly budget (50)
-    // remains the public contract even during transient Redis outages.
-    const status = await getQuotaStatus('chaos-user');
-    expect(status.spent_usd).toBe(0);
-    expect(status.reserved_usd).toBe(0);
-    expect(status.monthly_budget_usd).toBeGreaterThan(0);
-    expect(status.hard_limit).toBe(true);
+    // With Redis failing, getQuotaStatus returns an error (fail-closed).
+    const result = await getQuotaStatus('chaos-user');
+    expect(isErr(result)).toBe(true);
+    if (isErr(result)) {
+      expect(result.error.code).toBe('quota_status_unavailable');
+    }
   });
 });

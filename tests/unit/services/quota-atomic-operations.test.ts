@@ -5,6 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'bun:test';
 import { Decimal } from 'decimal.js';
+import { isErr } from '../../../src/utils/result';
 import { redis } from '../../../src/db/redis';
 import { MockRedis } from '../../integration/helpers/mock-redis';
 
@@ -150,19 +151,25 @@ describe('quota atomic reconcile', () => {
     expect(result.allowed).toBe(true);
 
     const reservationId = result.reservationId!;
-    const cost1 = await reconcileUsage(
+    const resultCost1 = await reconcileUsage(
       reservationId,
       { prompt_tokens: 10, completion_tokens: 5 },
       'gpt-4o'
     );
+    expect(resultCost1.ok).toBe(true);
+    if (!resultCost1.ok) throw new Error('reconcileUsage failed: ' + String(resultCost1.error));
+    const cost1 = resultCost1.value;
     expect(cost1.toNumber()).toBe(0.05);
 
     // Second reconcile should return 0 (idempotent)
-    const cost2 = await reconcileUsage(
+    const resultCost2 = await reconcileUsage(
       reservationId,
       { prompt_tokens: 10, completion_tokens: 5 },
       'gpt-4o'
     );
+    expect(resultCost2.ok).toBe(true);
+    if (!resultCost2.ok) throw new Error('reconcileUsage failed: ' + String(resultCost2.error));
+    const cost2 = resultCost2.value;
     expect(cost2.toNumber()).toBe(0);
   });
 
@@ -212,14 +219,18 @@ describe('quota atomic reconcile', () => {
     expect(spent).toBe('50000');
   });
 
-  test('reconcileUsage returns zero when reservation is missing', async () => {
+  test('reconcileUsage returns error when reservation is missing', async () => {
     const { reconcileUsage } = await import('../../../src/services/quota.service');
-    const cost = await reconcileUsage(
+    const resultCost = await reconcileUsage(
       'res_missing',
       { prompt_tokens: 1, completion_tokens: 1 },
       'gpt-5-mini'
     );
-    expect(cost.toNumber()).toBe(0);
+    // With fail-closed policy, missing reservation returns error
+    if (!isErr(resultCost)) {
+      throw new Error('Expected error result');
+    }
+    expect(resultCost.error.code).toBe('reservation_not_found');
   });
 
   test('reconcileUsage bills and releases an expired reservation recovered from hash', async () => {
@@ -239,12 +250,15 @@ describe('quota atomic reconcile', () => {
     // Simulate reservation expiry by deleting the key
     await redis.del(reservationKey);
 
-    const cost = await reconcileUsage(
+    const resultCost = await reconcileUsage(
       reservationId,
       { prompt_tokens: 10, completion_tokens: 5 },
       'gpt-4o'
     );
 
+    expect(resultCost.ok).toBe(true);
+    if (!resultCost.ok) throw new Error('reconcileUsage failed');
+    const cost = resultCost.value;
     expect(cost.toString()).toBe('0.05');
     expect(await redis.hget(quotaKey, 'spent')).toBe('50000');
     expect(Number(await redis.get(reservedKey) || '0')).toBe(0);

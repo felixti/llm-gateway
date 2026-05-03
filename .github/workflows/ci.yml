@@ -71,7 +71,7 @@ jobs:
 
       - name: Check Pino argument order
         run: |
-          ! grep -rn "logger\.error('[^']*',\s*{" src/ || (echo "ERROR: Pino logger.error called with string first arg (should be object first)" && exit 1)
+          ! grep -rn "logger\.(error|info|warn)('[^']*',\s*{" src/ || (echo "ERROR: Pino logger.(error|info|warn) called with string first arg (should be object first)" && exit 1)
 
       - name: Lint
         run: bun run lint
@@ -80,7 +80,7 @@ jobs:
 
       - name: Check Pino argument order
         run: |
-          ! grep -rn "logger\.error('[^']*',\s*{" src/ || (echo "ERROR: Pino logger.error called with string first arg (should be object first)" && exit 1)
+          ! grep -rn "logger\.(error|info|warn)('[^']*',\s*{" src/ || (echo "ERROR: Pino logger.(error|info|warn) called with string first arg (should be object first)" && exit 1)
 
       - name: Typecheck
         run: bun run typecheck

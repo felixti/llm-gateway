@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'bun:test';
 import { Decimal } from 'decimal.js';
 import { redactSensitiveContent, finalizeProxyUsage, releaseReservedQuota } from '@/proxy/shared';
+import { ok } from '@/utils/result';
 
 const mockReconcileUsage = vi.fn();
 const mockRecordUsageOnly = vi.fn();
@@ -124,7 +125,8 @@ describe('finalizeProxyUsage', () => {
     expect(mockRecordUsageOnly).toHaveBeenCalledWith(
       'user-1',
       baseUsage,
-      'gpt-5.4'
+      'gpt-5.4',
+      undefined
     );
     expect(mockReconcileUsage).not.toHaveBeenCalled();
     expect(mockLogRequestAudit).toHaveBeenCalledTimes(1);
@@ -132,7 +134,7 @@ describe('finalizeProxyUsage', () => {
   });
 
   test('reservation path calls reconcileUsage and logs audit when reservationId is truthy', async () => {
-    mockReconcileUsage.mockResolvedValue(new Decimal('0.003'));
+    mockReconcileUsage.mockResolvedValue(ok(new Decimal('0.003')));
     mockLogRequestAudit.mockResolvedValue(undefined);
 
     await finalizeProxyUsage({
@@ -204,7 +206,8 @@ describe('finalizeProxyUsage', () => {
     expect(mockRecordUsageOnly).toHaveBeenCalledWith(
       'unknown',
       baseUsage,
-      'gpt-5.4'
+      'gpt-5.4',
+      undefined
     );
   });
 });

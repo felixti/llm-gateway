@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'bun:test';
+import { ok } from '@/utils/result';
 import {
   buildUpstreamUrlAnthropic,
   buildUpstreamUrlAnthropicCountTokens,
@@ -168,7 +169,7 @@ describe('Anthropic Proxy', () => {
           JSON.stringify({ id: 'msg-1', usage: { prompt_tokens: 10, completion_tokens: 5 } }),
           { status: 200 }
         )) as unknown as typeof fetch;
-      mockReconcileUsage.mockResolvedValue(new Decimal('0.001'));
+      mockReconcileUsage.mockResolvedValue(ok(new Decimal('0.001')));
       mockLogRequestAudit.mockResolvedValue(undefined);
 
       await proxyNonStreamingAnthropic(
@@ -321,7 +322,7 @@ describe('Anthropic Proxy', () => {
           status: 200,
           headers: { 'content-type': 'text/event-stream' },
         })) as unknown as typeof fetch;
-      mockReconcileUsage.mockResolvedValue(new Decimal('0.000456'));
+      mockReconcileUsage.mockResolvedValue(ok(new Decimal('0.000456')));
       mockLogRequestAudit.mockResolvedValue(undefined);
 
       const response = await proxyStreamingAnthropic(

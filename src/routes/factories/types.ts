@@ -48,6 +48,7 @@ export interface ProxyRequestContext {
   requestId: string;
   userId?: string;
   abortSignal?: AbortSignal;
+  idempotencyKey?: string;
 }
 
 /**

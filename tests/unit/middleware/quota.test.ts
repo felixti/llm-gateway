@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'bun:test';
 import { Decimal } from 'decimal.js';
 import type { Context, Next } from 'hono';
+import { ok } from '@/utils/result';
 
 const mockCalculateEstimatedCost = vi.fn();
 const mockCheckAndReserve = vi.fn();
@@ -124,14 +125,14 @@ describe('quotaMiddleware — soft limit over-budget', () => {
   test('soft-limit over-budget calls next() and does NOT call checkAndReserve', async () => {
     const { quotaMiddleware } = await import('../../../src/middleware/quota');
 
-    mockGetQuotaStatus.mockResolvedValue({
+    mockGetQuotaStatus.mockResolvedValue(ok({
       monthly_budget_usd: 10,
       spent_usd: 9,
       reserved_usd: 0,
       remaining_usd: 1,
       reset_date: '2026-06-01T00:00:00.000Z',
       hard_limit: false,
-    });
+    }));
     mockCalculateEstimatedCost.mockReturnValue(new Decimal(5));
 
     const { context, vars } = createMockContext({
@@ -150,14 +151,14 @@ describe('quotaMiddleware — soft limit over-budget', () => {
   test('soft-limit over-budget sets releaseQuota to a no-op function', async () => {
     const { quotaMiddleware } = await import('../../../src/middleware/quota');
 
-    mockGetQuotaStatus.mockResolvedValue({
+    mockGetQuotaStatus.mockResolvedValue(ok({
       monthly_budget_usd: 10,
       spent_usd: 9,
       reserved_usd: 0,
       remaining_usd: 1,
       reset_date: '2026-06-01T00:00:00.000Z',
       hard_limit: false,
-    });
+    }));
     mockCalculateEstimatedCost.mockReturnValue(new Decimal(5));
 
     const { context, vars } = createMockContext({
@@ -178,14 +179,14 @@ describe('quotaMiddleware — soft limit over-budget', () => {
   test('soft-limit over-budget sets X-Warning header', async () => {
     const { quotaMiddleware } = await import('../../../src/middleware/quota');
 
-    mockGetQuotaStatus.mockResolvedValue({
+    mockGetQuotaStatus.mockResolvedValue(ok({
       monthly_budget_usd: 10,
       spent_usd: 9,
       reserved_usd: 0,
       remaining_usd: 1,
       reset_date: '2026-06-01T00:00:00.000Z',
       hard_limit: false,
-    });
+    }));
     mockCalculateEstimatedCost.mockReturnValue(new Decimal(5));
 
     const { context, headers } = createMockContext({
@@ -201,14 +202,14 @@ describe('quotaMiddleware — soft limit over-budget', () => {
   test('soft-limit over-budget sets X-Quota-Remaining to 0', async () => {
     const { quotaMiddleware } = await import('../../../src/middleware/quota');
 
-    mockGetQuotaStatus.mockResolvedValue({
+    mockGetQuotaStatus.mockResolvedValue(ok({
       monthly_budget_usd: 10,
       spent_usd: 9,
       reserved_usd: 0,
       remaining_usd: 1,
       reset_date: '2026-06-01T00:00:00.000Z',
       hard_limit: false,
-    });
+    }));
     mockCalculateEstimatedCost.mockReturnValue(new Decimal(5));
 
     const { context, headers } = createMockContext({
@@ -224,14 +225,14 @@ describe('quotaMiddleware — soft limit over-budget', () => {
   test('soft-limit over-budget sets reservationId to empty string', async () => {
     const { quotaMiddleware } = await import('../../../src/middleware/quota');
 
-    mockGetQuotaStatus.mockResolvedValue({
+    mockGetQuotaStatus.mockResolvedValue(ok({
       monthly_budget_usd: 10,
       spent_usd: 9,
       reserved_usd: 0,
       remaining_usd: 1,
       reset_date: '2026-06-01T00:00:00.000Z',
       hard_limit: false,
-    });
+    }));
     mockCalculateEstimatedCost.mockReturnValue(new Decimal(5));
 
     const { context, vars } = createMockContext({
@@ -247,14 +248,14 @@ describe('quotaMiddleware — soft limit over-budget', () => {
   test('soft-limit over-budget sets estimatedCost for downstream visibility', async () => {
     const { quotaMiddleware } = await import('../../../src/middleware/quota');
 
-    mockGetQuotaStatus.mockResolvedValue({
+    mockGetQuotaStatus.mockResolvedValue(ok({
       monthly_budget_usd: 10,
       spent_usd: 9,
       reserved_usd: 0,
       remaining_usd: 1,
       reset_date: '2026-06-01T00:00:00.000Z',
       hard_limit: false,
-    });
+    }));
     mockCalculateEstimatedCost.mockReturnValue(new Decimal(5));
 
     const { context, vars } = createMockContext({
@@ -270,14 +271,14 @@ describe('quotaMiddleware — soft limit over-budget', () => {
   test('soft-limit under-budget still reserves normally', async () => {
     const { quotaMiddleware } = await import('../../../src/middleware/quota');
 
-    mockGetQuotaStatus.mockResolvedValue({
+    mockGetQuotaStatus.mockResolvedValue(ok({
       monthly_budget_usd: 100,
       spent_usd: 5,
       reserved_usd: 0,
       remaining_usd: 95,
       reset_date: '2026-06-01T00:00:00.000Z',
       hard_limit: false,
-    });
+    }));
     mockCalculateEstimatedCost.mockReturnValue(new Decimal(0.5));
     mockCheckAndReserve.mockResolvedValue({
       allowed: true,
@@ -305,14 +306,14 @@ describe('quotaMiddleware — soft limit over-budget', () => {
     // QUOTA_SOFT_LIMIT_ENABLED=false means isHardLimit=true when hard_limit=true
     process.env.QUOTA_SOFT_LIMIT_ENABLED = 'false';
 
-    mockGetQuotaStatus.mockResolvedValue({
+    mockGetQuotaStatus.mockResolvedValue(ok({
       monthly_budget_usd: 10,
       spent_usd: 9,
       reserved_usd: 0,
       remaining_usd: 1,
       reset_date: '2026-06-01T00:00:00.000Z',
       hard_limit: true,
-    });
+    }));
     mockCalculateEstimatedCost.mockReturnValue(new Decimal(5));
 
     const { context } = createMockContext({

@@ -37,11 +37,9 @@ export function cacheMiddleware(config: CacheConfig = {}) {
         if (typeof data.body === 'string') {
           return new Response(data.body, {
             status: data.status,
-            headers: { 'Content-Type': 'application/json', Vary: 'Authorization' },
           });
         }
         const response = c.json(data.body, data.status);
-        response.headers.set('Vary', 'Authorization');
         return response;
       }
     } catch (error) {

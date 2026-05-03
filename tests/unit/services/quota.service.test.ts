@@ -4,6 +4,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'bun:test';
+import { isErr } from '../../../src/utils/result';
 import { Decimal } from 'decimal.js';
 import * as metrics from '../../../src/observability/metrics';
 import { redis } from '../../../src/db/redis';
@@ -71,7 +72,9 @@ describe('quota.service Postgres policy sync', () => {
     );
 
     await syncQuotaPolicyFromPostgres('user-1', '2026-04');
-    const status = await getQuotaStatus('user-1');
+    const result1 = await getQuotaStatus('user-1');
+    if (!result1.ok) throw new Error('getQuotaStatus failed: ' + String(result1.error));
+    const status = result1.value;
 
     expect(status.monthly_budget_usd).toBe(125);
     expect(status.hard_limit).toBe(false);
@@ -85,7 +88,9 @@ describe('quota.service Postgres policy sync', () => {
     );
 
     await syncQuotaPolicyFromPostgres('user-2', '2026-04');
-    const status = await getQuotaStatus('user-2');
+    const result2 = await getQuotaStatus('user-2');
+    if (!result2.ok) throw new Error('getQuotaStatus failed: ' + String(result2.error));
+    const status = result2.value;
 
     expect(status.monthly_budget_usd).toBe(50);
     expect(status.hard_limit).toBe(true);
@@ -146,14 +151,18 @@ describe('quota.service edge cases', () => {
     expect(result.reason).toBe('Reservation failed');
   });
 
-  test('reconcileUsage returns zero when reservation is missing', async () => {
+  test('reconcileUsage returns error when reservation is missing', async () => {
     const { reconcileUsage } = await import('../../../src/services/quota.service');
-    const cost = await reconcileUsage(
+    const resultCost = await reconcileUsage(
       'res_missing',
       { prompt_tokens: 1, completion_tokens: 1 },
       'gpt-5-mini'
     );
-    expect(cost.toNumber()).toBe(0);
+    // With fail-closed policy, missing reservation returns error
+    expect(isErr(resultCost)).toBe(true);
+    if (isErr(resultCost)) {
+      expect(resultCost.error.code).toBe('reservation_not_found');
+    }
   });
 
   test('releaseReservation is a no-op when key is missing', async () => {
@@ -207,17 +216,24 @@ describe('quota.service float overflow regression', () => {
     const userId = 'user-float-drift';
     const month = new Date().toISOString().slice(0, 7);
     const quotaKey = `quota:${userId}:${month}`;
-    const r = redis as unknown as { hset: (...args: unknown[]) => Promise<unknown> };
+    const r = redis as unknown as {
+      hset: (...args: unknown[]) => Promise<unknown>;
+      hget: (key: string, field: string) => Promise<string | null>;
+    };
     await r.hset(quotaKey, { budget: '50000000000' });
 
-    const costMicro = 20000;
+    await recordUsageOnly(userId, { prompt_tokens: 1000, completion_tokens: 1000 }, 'gpt-5.4');
+    const afterFirst = await r.hget(quotaKey, 'spent');
+    const costMicro = Number(afterFirst);
     const expectedTotalMicro = costMicro * 1000;
 
-    for (let i = 0; i < 1000; i++) {
+    for (let i = 0; i < 999; i++) {
       await recordUsageOnly(userId, { prompt_tokens: 1000, completion_tokens: 1000 }, 'gpt-5.4');
     }
 
-    const status = await getQuotaStatus(userId);
+    const resultStatus = await getQuotaStatus(userId);
+    if (!resultStatus.ok) throw new Error('getQuotaStatus failed: ' + String(resultStatus.error));
+    const status = resultStatus.value;
     const actualTotalMicro = Math.round(status.spent_usd * 1_000_000);
     expect(actualTotalMicro).toBe(expectedTotalMicro);
   });

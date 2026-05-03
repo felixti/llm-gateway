@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import database from '../../src/db/client';
 import { logRequestAudit, getUserQuotaPolicyByPatSubject } from '../../src/db/data-access';
 import { checkAndReserve, getQuotaStatus } from '../../src/services/quota.service';
+import { isErr } from '../../src/utils/result';
 import { createTestApp } from '../integration/helpers/test-app';
 import { createTestPat } from '../integration/helpers/test-pat';
 import { Decimal } from 'decimal.js';
@@ -92,10 +93,15 @@ describe('Chaos: Partial Commit', () => {
       return { rows: [], rowCount: 0 };
     }) as unknown as ExecuteFn);
 
-    const status = await getQuotaStatus('chaos-user');
-    expect(status.monthly_budget_usd).toBeGreaterThan(0);
-    expect(status.spent_usd).toBeGreaterThanOrEqual(0);
-    expect(status.hard_limit).toBe(true);
+    const result = await getQuotaStatus('chaos-user');
+    // With Postgres policy sync failing, getQuotaStatus still returns defaults
+    // from Redis (fail-open for missing keys, fail-closed for Redis errors)
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.monthly_budget_usd).toBeGreaterThan(0);
+      expect(result.value.spent_usd).toBeGreaterThanOrEqual(0);
+      expect(result.value.hard_limit).toBe(true);
+    }
   });
 
   it('getUserQuotaPolicyByPatSubject returns null on Postgres failure', async () => {

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'bun:test';
+import { isErr } from '../../../src/utils/result';
 import { redis } from '../../../src/db/redis';
 import { MockRedis } from '../../integration/helpers/mock-redis';
 
@@ -63,12 +64,12 @@ describe('quota.service getQuotaStatus failure path', () => {
     };
 
     const { getQuotaStatus } = await import('../../../src/services/quota.service');
-    const status = await getQuotaStatus('user-redis-fail');
-
-    expect(status.monthly_budget_usd).toBe(50);
-    expect(status.spent_usd).toBe(0);
-    expect(status.reserved_usd).toBe(0);
-    expect(status.hard_limit).toBe(true);
+    const result = await getQuotaStatus('user-redis-fail');
+    // With Redis failing, getQuotaStatus returns error (fail-closed)
+    if (!isErr(result)) {
+      throw new Error('Expected error result for user-reserved-fail');
+    }
+    expect(result.error.code).toBe('quota_status_unavailable');
   });
 
   test('returns defaults when Redis get throws for reserved key', async () => {
@@ -90,9 +91,12 @@ describe('quota.service getQuotaStatus failure path', () => {
     };
 
     const { getQuotaStatus } = await import('../../../src/services/quota.service');
-    const status = await getQuotaStatus('user-reserved-fail');
-
-    expect(status.reserved_usd).toBe(0);
+    const result = await getQuotaStatus('user-reserved-fail');
+    // With Redis failing, getQuotaStatus returns error (fail-closed)
+    if (!isErr(result)) {
+      throw new Error('Expected error result for user-reserved-fail');
+    }
+    expect(result.error.code).toBe('quota_status_unavailable');
   });
 });
 
@@ -129,11 +133,14 @@ describe('quota.service reconcileUsage failure path', () => {
     };
 
     const { reconcileUsage } = await import('../../../src/services/quota.service');
-    const cost = await reconcileUsage(
+    const resultCost = await reconcileUsage(
       'res_eval_fail',
       { prompt_tokens: 1, completion_tokens: 1 },
       'gpt-5-mini'
     );
-    expect(cost.toNumber()).toBe(0);
+    expect(isErr(resultCost)).toBe(true);
+    if (isErr(resultCost)) {
+      expect(resultCost.error.code).toBe('redis_error');
+    }
   });
 });

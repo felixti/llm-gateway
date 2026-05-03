@@ -52,7 +52,7 @@ async function resolveUserIdToUuid(patSubject: string): Promise<string | null> {
       return userId;
     }
 
-    logger.warn('Cannot resolve non-UUID userId to user UUID', { patSubject });
+    logger.warn({ patSubject }, 'Cannot resolve non-UUID userId to user UUID');
     return null;
   } catch (error) {
     logger.error({ patSubject, error }, 'Failed to resolve userId to UUID');
@@ -97,7 +97,7 @@ export async function batchResolveUserIds(
     // Warn about unresolved subjects
     for (const subject of nonUuidSubjects) {
       if (result.get(subject) === null) {
-        logger.warn('Cannot resolve non-UUID userId to user UUID (batch)', { patSubject: subject });
+        logger.warn({ patSubject: subject }, 'Cannot resolve non-UUID userId to user UUID (batch)');
       }
     }
   } catch (error) {
@@ -122,19 +122,45 @@ export async function batchGetRequestAuditStats(
   const uniqueMonths = [...new Set(entries.map((e) => e.month))];
 
   try {
+    // Pre-compute year/month integers so created_at only compares against constants (index-friendly)
+    const dateRanges = uniqueMonths.map((month) => ({
+      month,
+      year: Number.parseInt(month.substring(0, 4), 10),
+      monthNum: Number.parseInt(month.substring(5, 7), 10),
+    }));
+
+    // Build CTE with start/end bounds per month label
+    const cteValues = dateRanges
+      .map((_d, i) => {
+        const base = i * 3 + 2; // params start at $2 (1-indexed: $2, $3, $4, $5, ...)
+        return `(${base}, ${base + 1}, ${base + 2})`;
+      })
+      .join(', ');
+
     const query = `
+      WITH month_ranges AS (
+        SELECT
+          month,
+          make_date(yr, mo, 1) AS month_start,
+          make_date(yr, mo, 1) + INTERVAL '1 month' AS month_end
+        FROM (VALUES ${cteValues}) AS v(yr, mo, month)
+      )
       SELECT
-        user_id::text AS user_id,
-        to_char(created_at, 'YYYY-MM') AS month,
+        r.user_id::text AS user_id,
+        mr.month AS month,
         COUNT(*) AS total_requests,
-        COALESCE(SUM(tokens_input), 0) AS total_tokens_input,
-        COALESCE(SUM(tokens_output), 0) AS total_tokens_output,
-        COALESCE(SUM(tokens_thinking), 0) AS total_tokens_thinking
-      FROM request_audit
-      WHERE user_id = ANY($1)
-        AND to_char(created_at, 'YYYY-MM') = ANY($2)
-      GROUP BY user_id, to_char(created_at, 'YYYY-MM')
+        COALESCE(SUM(r.tokens_input), 0) AS total_tokens_input,
+        COALESCE(SUM(r.tokens_output), 0) AS total_tokens_output,
+        COALESCE(SUM(r.tokens_thinking), 0) AS total_tokens_thinking
+      FROM request_audit r
+      CROSS JOIN month_ranges mr
+      WHERE r.user_id = ANY($1)
+        AND r.created_at >= mr.month_start
+        AND r.created_at < mr.month_end
+      GROUP BY r.user_id, mr.month
     `;
+
+    const params = [userIds, ...dateRanges.flatMap((d) => [d.year, d.monthNum, d.month])];
 
     const { rows } = await database.execute<{
       user_id: string;
@@ -143,7 +169,7 @@ export async function batchGetRequestAuditStats(
       total_tokens_input: string;
       total_tokens_output: string;
       total_tokens_thinking: string;
-    }>({ query, params: [userIds, uniqueMonths] });
+    }>({ query, params });
 
     for (const row of rows) {
       result.set(`${row.user_id}:${row.month}`, {
@@ -311,10 +337,10 @@ export async function logRequestAudit(record: RequestAuditRecord): Promise<void>
   const resolvedUserId = await resolveUserIdToUuid(record.userId);
 
   if (!resolvedUserId) {
-    logger.warn('Skipping audit log: userId is not a valid UUID and has no pat_subject mapping', {
-      requestId: record.requestId,
-      userId: record.userId,
-    });
+    logger.warn(
+      { requestId: record.requestId, userId: record.userId },
+      'Skipping audit log: userId is not a valid UUID and has no pat_subject mapping'
+    );
     return;
   }
 

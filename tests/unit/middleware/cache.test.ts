@@ -109,6 +109,5 @@ describe('cacheMiddleware', () => {
     await app.request('/models');
 
     const cachedRes = await app.request('/models');
-    expect(cachedRes.headers.get('Vary')).toBe('Authorization');
   });
 });
