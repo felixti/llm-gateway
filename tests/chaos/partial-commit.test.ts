@@ -55,7 +55,7 @@ describe('Chaos: Partial Commit', () => {
     }) as unknown as ExecuteFn);
 
     await logRequestAudit({
-      userId: 'chaos-user',
+      userId: '550e8400-e29b-41d4-a716-446655440000',
       requestId: `req-${Date.now()}`,
       model: 'gpt-5.4',
       deployment: 'gpt-5.4-global',
@@ -122,7 +122,7 @@ describe('Chaos: Partial Commit', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: VALID_PAT,
+        Authorization: createTestPat('550e8400-e29b-41d4-a716-446655440000'),
       },
       body: JSON.stringify({
         model: 'gpt-5.4',
