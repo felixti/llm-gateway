@@ -8,6 +8,7 @@ import type { DeploymentConfig } from '@/config/deployments';
 import { getDeploymentByAlias } from '@/config/deployments';
 import { logRequestAudit } from '@/db/data-access';
 import { logger } from '@/observability/logger';
+import { incrementAzureRateLimitHits } from '@/observability/metrics';
 import { addLLMSpanAttributes, injectTraceContext } from '@/observability/tracing';
 import type { ProxyRequestContext } from '@/routes/factories/types';
 import { recordFailure, recordSuccess } from '@/services/circuit-breaker';
@@ -78,22 +79,46 @@ export async function proxyNonStreamingChat(
   );
   const startTime = Date.now();
   const traceHeaders = injectTraceContext(headers, requestId);
-  const response = await withRetry(
-    () =>
-      upstreamHttpsFetch(upstreamUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...traceHeaders,
-        },
-        body: JSON.stringify(body),
-        signal: abortSignal,
-      }),
-    { signal: abortSignal }
-  );
+  let response: Response;
+  try {
+    response = await withRetry(
+      () =>
+        upstreamHttpsFetch(upstreamUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...traceHeaders,
+          },
+          body: JSON.stringify(body),
+          signal: abortSignal,
+        }),
+      { signal: abortSignal }
+    );
+  } catch (error: unknown) {
+    if (
+      (error instanceof Error && error.name === 'AbortError') ||
+      (error instanceof DOMException && error.name === 'AbortError')
+    ) {
+      throw error;
+    }
+    logger.warn(
+      { err: error, requestId, deployment: deployment.name },
+      'Upstream network request failed'
+    );
+    await recordFailure(deployment.name);
+    return createSanitizedUpstreamErrorResponse({
+      path: '/v1/chat/completions',
+      errorCode: 'bad_gateway',
+      upstreamName: 'Azure OpenAI',
+      requestId,
+      deploymentName: deployment.name,
+    });
+  }
 
   if (!response.ok) {
-    if (response.status !== 429) {
+    if (response.status === 429) {
+      incrementAzureRateLimitHits();
+    } else {
       await recordFailure(deployment.name);
     }
     // NOTE: Do NOT release reservation here — the request handler factory may
@@ -152,24 +177,48 @@ export async function proxyStreamingChat(
   const upstreamBody = { ...body, stream: true } as Record<string, unknown>;
   if (!upstreamBody.stream_options) upstreamBody.stream_options = {};
   (upstreamBody.stream_options as Record<string, unknown>).include_usage = true;
-  const response = await withRetry(
-    () =>
-      upstreamHttpsFetch(upstreamUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...headers,
-          Accept: 'text/event-stream',
-          'x-ms-client-request-id': requestId,
-        },
-        body: JSON.stringify(upstreamBody),
-        signal: abortSignal,
-      }),
-    { signal: abortSignal }
-  );
+  let response: Response;
+  try {
+    response = await withRetry(
+      () =>
+        upstreamHttpsFetch(upstreamUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...headers,
+            Accept: 'text/event-stream',
+            'x-ms-client-request-id': requestId,
+          },
+          body: JSON.stringify(upstreamBody),
+          signal: abortSignal,
+        }),
+      { signal: abortSignal }
+    );
+  } catch (error: unknown) {
+    if (
+      (error instanceof Error && error.name === 'AbortError') ||
+      (error instanceof DOMException && error.name === 'AbortError')
+    ) {
+      throw error;
+    }
+    logger.warn(
+      { err: error, requestId, deployment: deployment.name },
+      'Upstream network request failed'
+    );
+    await recordFailure(deployment.name);
+    return createSanitizedUpstreamErrorResponse({
+      path: '/v1/chat/completions',
+      errorCode: 'bad_gateway',
+      upstreamName: 'Azure OpenAI',
+      requestId,
+      deploymentName: deployment.name,
+    });
+  }
 
   if (!response.ok) {
-    if (response.status !== 429) {
+    if (response.status === 429) {
+      incrementAzureRateLimitHits();
+    } else {
       await recordFailure(deployment.name);
     }
     // Do NOT release reservation — factory may try fallback with same reservationId

@@ -348,6 +348,45 @@ describe("proxyNonStreamingChat", () => {
     expect(mockReleaseReservation).toHaveBeenCalledWith("res-456");
     expect(mockReconcileUsage).not.toHaveBeenCalled();
   });
+
+  test("returns 502 and records circuit breaker failure on upstream network error", async () => {
+    global.fetch = vi.fn(async () => {
+      throw new Error("Connection refused");
+    }) as unknown as typeof fetch;
+
+    const response = await proxyNonStreamingChat(
+      "https://test.azure.com/chat",
+      {},
+      { model: "gpt-5.4", messages: [] },
+      baseDeployment,
+      "res-net",
+      "req-net"
+    );
+
+    expect(response.status).toBe(502);
+    expect(mockRecordFailure).toHaveBeenCalledWith("test-deployment");
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("bad_gateway");
+  });
+
+  test("rethrows abort errors without recording circuit breaker failure", async () => {
+    global.fetch = vi.fn(async () => {
+      throw new DOMException("Aborted", "AbortError");
+    }) as unknown as typeof fetch;
+
+    await expect(
+      proxyNonStreamingChat(
+        "https://test.azure.com/chat",
+        {},
+        { model: "gpt-5.4", messages: [] },
+        baseDeployment,
+        "res-abort",
+        "req-abort"
+      )
+    ).rejects.toThrow();
+
+    expect(mockRecordFailure).not.toHaveBeenCalled();
+  });
 });
 
 describe("proxyStreamingChat", () => {
@@ -616,5 +655,40 @@ describe("proxyStreamingChat", () => {
       expect.objectContaining({ err: testError, requestId: "req-stream-error" }),
       "Unhandled error in usage finalization"
     );
+  });
+
+  test("returns 502 and records circuit breaker failure on upstream network error", async () => {
+    global.fetch = vi.fn(async () => {
+      throw new Error("Connection refused");
+    }) as unknown as typeof fetch;
+
+    const response = await proxyStreamingChat(
+      "https://test.azure.com/chat",
+      {},
+      { model: "gpt-5.4", messages: [], stream: true },
+      baseDeployment,
+      { reservationId: "res-net", requestId: "req-net", userId: "user-123" } as any
+    );
+
+    expect(response.status).toBe(502);
+    expect(mockRecordFailure).toHaveBeenCalledWith("test-deployment");
+  });
+
+  test("rethrows abort errors without recording circuit breaker failure", async () => {
+    global.fetch = vi.fn(async () => {
+      throw new DOMException("Aborted", "AbortError");
+    }) as unknown as typeof fetch;
+
+    await expect(
+      proxyStreamingChat(
+        "https://test.azure.com/chat",
+        {},
+        { model: "gpt-5.4", messages: [], stream: true },
+        baseDeployment,
+        { reservationId: "res-abort", requestId: "req-abort", userId: "user-123" } as any
+      )
+    ).rejects.toThrow();
+
+    expect(mockRecordFailure).not.toHaveBeenCalled();
   });
 });

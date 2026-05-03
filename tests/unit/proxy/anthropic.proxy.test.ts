@@ -186,6 +186,41 @@ describe('Anthropic Proxy', () => {
         })
       );
     });
+
+    it('returns 502 and records circuit breaker failure on upstream network error', async () => {
+      global.fetch = vi.fn(async () => {
+        throw new Error('Connection refused');
+      }) as unknown as typeof fetch;
+
+      const response = await proxyNonStreamingAnthropic(
+        'https://test.azure.com/messages',
+        {},
+        { model: 'claude-test', messages: [], max_tokens: 100 },
+        baseDeployment,
+        { reservationId: 'res-net', requestId: 'req-net', userId: 'user-123' } as any
+      );
+
+      expect(response.status).toBe(502);
+      expect(mockRecordFailure).toHaveBeenCalledWith('claude-test');
+    });
+
+    it('rethrows abort errors without recording circuit breaker failure', async () => {
+      global.fetch = vi.fn(async () => {
+        throw new DOMException('Aborted', 'AbortError');
+      }) as unknown as typeof fetch;
+
+      await expect(
+        proxyNonStreamingAnthropic(
+          'https://test.azure.com/messages',
+          {},
+          { model: 'claude-test', messages: [], max_tokens: 100 },
+          baseDeployment,
+          { reservationId: 'res-abort', requestId: 'req-abort', userId: 'user-123' } as any
+        )
+      ).rejects.toThrow();
+
+      expect(mockRecordFailure).not.toHaveBeenCalled();
+    });
   });
 
   describe('proxyStreamingAnthropic', () => {
@@ -361,6 +396,41 @@ describe('Anthropic Proxy', () => {
       expect(mockReleaseReservation).toHaveBeenCalledWith('res-no-usage-ns');
       expect(mockReconcileUsage).not.toHaveBeenCalled();
     });
+
+    it('returns 502 and records circuit breaker failure on upstream network error', async () => {
+      global.fetch = vi.fn(async () => {
+        throw new Error('Connection refused');
+      }) as unknown as typeof fetch;
+
+      const response = await proxyStreamingAnthropic(
+        'https://test.azure.com/messages',
+        {},
+        { model: 'claude-test', messages: [], max_tokens: 100, stream: true },
+        baseDeployment,
+        { reservationId: 'res-net', requestId: 'req-net', userId: 'user-123' } as any
+      );
+
+      expect(response.status).toBe(502);
+      expect(mockRecordFailure).toHaveBeenCalledWith('claude-test');
+    });
+
+    it('rethrows abort errors without recording circuit breaker failure', async () => {
+      global.fetch = vi.fn(async () => {
+        throw new DOMException('Aborted', 'AbortError');
+      }) as unknown as typeof fetch;
+
+      await expect(
+        proxyStreamingAnthropic(
+          'https://test.azure.com/messages',
+          {},
+          { model: 'claude-test', messages: [], max_tokens: 100, stream: true },
+          baseDeployment,
+          { reservationId: 'res-abort', requestId: 'req-abort', userId: 'user-123' } as any
+        )
+      ).rejects.toThrow();
+
+      expect(mockRecordFailure).not.toHaveBeenCalled();
+    });
   });
 
   describe('proxyCountTokensAnthropic', () => {
@@ -456,6 +526,43 @@ describe('Anthropic Proxy', () => {
       expect(text).not.toContain('x-api-key-leaked');
       expect(mockRecordFailure).toHaveBeenCalledWith('claude-test');
       expect(mockReleaseReservation).not.toHaveBeenCalled();
+    });
+
+    it('returns 502 and records circuit breaker failure on upstream network error', async () => {
+      global.fetch = vi.fn(async () => {
+        throw new Error('Connection refused');
+      }) as unknown as typeof fetch;
+
+      const response = await proxyCountTokensAnthropic(
+        'https://test.azure.com/anthropic/v1/messages/count_tokens?api-version=2024-06-01',
+        {},
+        {},
+        { model: 'claude-test', messages: [{ role: 'user', content: 'Hi' }] },
+        baseDeployment,
+        { requestId: 'req-ct-net', userId: 'user-ct', abortSignal: new AbortController().signal }
+      );
+
+      expect(response.status).toBe(502);
+      expect(mockRecordFailure).toHaveBeenCalledWith('claude-test');
+    });
+
+    it('rethrows abort errors without recording circuit breaker failure', async () => {
+      global.fetch = vi.fn(async () => {
+        throw new DOMException('Aborted', 'AbortError');
+      }) as unknown as typeof fetch;
+
+      await expect(
+        proxyCountTokensAnthropic(
+          'https://test.azure.com/anthropic/v1/messages/count_tokens?api-version=2024-06-01',
+          {},
+          {},
+          { model: 'claude-test', messages: [{ role: 'user', content: 'Hi' }] },
+          baseDeployment,
+          { requestId: 'req-ct-abort', userId: 'user-ct', abortSignal: new AbortController().signal }
+        )
+      ).rejects.toThrow();
+
+      expect(mockRecordFailure).not.toHaveBeenCalled();
     });
   });
 });
