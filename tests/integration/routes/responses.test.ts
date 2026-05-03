@@ -124,9 +124,9 @@ describe('Responses Routes - /v1/responses', () => {
         body: JSON.stringify(createValidBody({ stream: false })),
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { id: string; choices: unknown[] };
+      const body = (await res.json()) as { id: string; output: unknown[] };
       expect(body.id).toBeDefined();
-      expect(Array.isArray(body.choices)).toBe(true);
+      expect(Array.isArray(body.output)).toBe(true);
     });
 
     it('should accept array input format', async () => {

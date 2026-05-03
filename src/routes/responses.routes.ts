@@ -8,12 +8,11 @@ import { protocolGuardMiddleware } from '@/middleware/protocol-guard';
 import { quotaMiddleware } from '@/middleware/quota';
 import { rateLimitMiddleware } from '@/middleware/rate-limit';
 import { scopeMiddleware } from '@/middleware/scope';
+import { buildRequestBody, buildUpstreamUrl } from '@/proxy/openai-chat.proxy';
 import {
-  buildRequestBody,
-  buildUpstreamUrl,
-  proxyNonStreamingChat,
-  proxyStreamingChat,
-} from '@/proxy/openai-chat.proxy';
+  proxyNonStreamingResponses,
+  proxyStreamingResponses,
+} from '@/proxy/openai-responses.proxy';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { createRequestHandler } from './factories/request-handler.factory';
@@ -111,8 +110,8 @@ const handleResponsesRequest = createRequestHandler({
   schema: responsesBodySchema,
   protocol: 'openai',
   path: '/v1/responses',
-  proxyStreaming: proxyStreamingChat,
-  proxyNonStreaming: proxyNonStreamingChat,
+  proxyStreaming: proxyStreamingResponses,
+  proxyNonStreaming: proxyNonStreamingResponses,
   getModel: (body: Record<string, unknown>) => body.model as string,
   buildUpstreamUrl: (deployment) => buildUpstreamUrl(deployment, deployment.modelFamily),
   transformBody: (body, deployment) =>
