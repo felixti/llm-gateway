@@ -19,16 +19,17 @@
     "lint:fix": "biome check --write .",
     "typecheck": "tsc --noEmit",
     "ci": "bun run lint && bun run typecheck && bun run test:coverage:check",
-    "load:test": "k6 run tests/load/k6.config.ts"
+    "load:test": "k6 run tests/load/k6.config.ts",
+    "load:test:quota": "k6 run tests/load/quota-pressure.js"
   },
   "dependencies": {
-    "@opentelemetry/api": "^1.7.0",
+    "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-metrics-otlp-grpc": "^0.216.0",
-    "@opentelemetry/exporter-trace-otlp-grpc": "^0.46.0",
-    "@opentelemetry/resources": "^1.21.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.216.0",
+    "@opentelemetry/resources": "^2.7.1",
     "@opentelemetry/sdk-metrics": "^2.7.1",
-    "@opentelemetry/sdk-trace-node": "^1.21.0",
-    "@opentelemetry/semantic-conventions": "^1.21.0",
+    "@opentelemetry/sdk-trace-node": "^2.7.1",
+    "@opentelemetry/semantic-conventions": "^1.40.0",
     "@scalar/hono-api-reference": "^0.10.13",
     "decimal.js": "^10.4.3",
     "hono": "^4.0.0",
@@ -46,6 +47,7 @@
     "@biomejs/biome": "^1.9.4",
     "@types/bun": "^1.0.0",
     "@types/uuid": "^9.0.7",
+    "testcontainers": "^10.9.0",
     "typescript": "^5.3.3"
   },
   "engines": {

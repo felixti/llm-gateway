@@ -20,7 +20,7 @@ import {
   trace,
 } from '@opentelemetry/api';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
-import { Resource } from '@opentelemetry/resources';
+import { resourceFromAttributes } from '@opentelemetry/resources';
 import {
   BatchSpanProcessor,
   NodeTracerProvider,
@@ -60,7 +60,7 @@ class TraceHashRatioSampler implements Sampler {
   }
 }
 
-const traceSampler = new TraceHashRatioSampler(0.1);
+const traceSampler = new TraceHashRatioSampler(env.OTEL_TRACING_SAMPLER_RATIO);
 
 // Custom span attribute keys (PRD §4.4.1)
 export const ATTR_LLM_USER_ID = 'llm.user_id';
@@ -73,6 +73,7 @@ export const ATTR_LLM_TOKENS_TOTAL = 'llm.tokens.total';
 export const ATTR_LLM_COST_USD = 'llm.cost.usd';
 export const ATTR_LLM_PROTOCOL = 'llm.protocol';
 export const ATTR_AZURE_AUTH_TYPE = 'azure.auth_type';
+export const ATTR_LLM_REQUEST_ID = 'llm.request_id';
 
 // Provider instance
 let provider: NodeTracerProvider | null = null;
@@ -127,7 +128,7 @@ export function initTracing(): void {
     return;
   }
 
-  const resource = new Resource({
+  const resource = resourceFromAttributes({
     [ATTR_SERVICE_NAME]: env.OTEL_SERVICE_NAME,
     [ATTR_SERVICE_VERSION]: '1.0.0',
   });
@@ -182,6 +183,7 @@ export function addLLMSpanAttributes(attrs: {
   costUsd?: number;
   protocol?: string;
   authType?: string;
+  requestId?: string;
 }): void {
   const activeSpan = trace.getActiveSpan();
   if (!activeSpan) {
@@ -206,6 +208,7 @@ export function addLLMSpanAttributes(attrs: {
   }
   if (attrs.protocol) span.setAttribute(ATTR_LLM_PROTOCOL, attrs.protocol);
   if (attrs.authType) span.setAttribute(ATTR_AZURE_AUTH_TYPE, attrs.authType);
+  if (attrs.requestId) span.setAttribute(ATTR_LLM_REQUEST_ID, attrs.requestId);
 }
 
 /**
@@ -271,4 +274,18 @@ export async function withSpan<T>(
       span.end();
     }
   });
+}
+
+/**
+ * Check if OpenTelemetry provider is healthy
+ * Returns true if OTel is disabled (provider is null) or if forceFlush succeeds
+ */
+export async function isOtelHealthy(): Promise<boolean> {
+  if (!provider) return true; // OTel disabled = healthy
+  try {
+    await provider.forceFlush();
+    return true;
+  } catch {
+    return false;
+  }
 }
