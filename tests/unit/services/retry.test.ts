@@ -278,6 +278,24 @@ describe("Retry Service", () => {
       expect(attempts).toBe(2);
     });
 
+    it("should retry when fn resolves a 429 Response (Azure rate limit)", async () => {
+      let attempts = 0;
+      const fn = async () => {
+        attempts++;
+        if (attempts < 2) {
+          return new Response(JSON.stringify({ error: "rate limited" }), {
+            status: 429,
+            headers: { "Retry-After": "1" },
+          });
+        }
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      };
+
+      const result = await withRetry(fn, { maxRetries: 3 });
+      expect(result.status).toBe(200);
+      expect(attempts).toBe(2);
+    });
+
     it("should retry when fn resolves a 5xx Response", async () => {
       let attempts = 0;
       const fn = async () => {

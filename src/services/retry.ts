@@ -122,7 +122,8 @@ function getStatusFromError(error: unknown): number {
 }
 
 function shouldRetryResponse(response: Response): boolean {
-  return response.status >= 500 && !isNonRetryable(response.status);
+  if (isNonRetryable(response.status)) return false;
+  return response.status === 429 || response.status >= 500;
 }
 
 /**
