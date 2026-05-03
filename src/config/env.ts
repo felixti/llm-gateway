@@ -82,7 +82,7 @@ const envSchema = z.object({
 
   // Security
   /** Comma-separated list of allowed CORS origins, or '*' for all origins */
-  CORS_ALLOWED_ORIGINS: z.string().default('*'),
+  CORS_ALLOWED_ORIGINS: z.string().default(''),
   /** Maximum request body size in bytes (default 10MB) */
   BODY_SIZE_LIMIT_BYTES: z.coerce
     .number()
