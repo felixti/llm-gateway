@@ -236,7 +236,6 @@ export async function proxyStreamingChat(
   }
 
   const transformer = createOpenAIStreamTransformer();
-  let usageExtracted = false;
   let reservationFinalized = false;
   const startTime = Date.now();
   const releaseUnreconciled = async () => {
@@ -248,52 +247,55 @@ export async function proxyStreamingChat(
   };
   handleStreamAbort(reservationId, releaseUnreconciled, abortSignal);
 
-  const stream = response.body.pipeThrough(new TransformStream(transformer)).pipeThrough(
-    new TransformStream({
-      transform(chunk, controller) {
-        if (!usageExtracted) {
-          const text = new TextDecoder().decode(chunk);
-          const usage = extractOpenAIUsage(text);
-          if (usage) {
-            usageExtracted = true;
-            if (reservationId) {
-              reservationFinalized = true;
-              reconcileUsage(reservationId, usage, deployment.azureModelName)
-                .then((actualCost) => {
-                  addLLMSpanAttributes({
-                    promptTokens: usage.prompt_tokens,
-                    completionTokens: usage.completion_tokens,
-                    totalTokens: usage.prompt_tokens + usage.completion_tokens,
-                    costUsd: actualCost.toNumber(),
-                  });
-                  logRequestAudit({
-                    userId: userId || 'unknown',
-                    requestId,
-                    model: deployment.azureModelName,
-                    deployment: deployment.name,
-                    protocolFamily: deployment.protocolFamily,
-                    tokensInput: usage.prompt_tokens,
-                    tokensOutput: usage.completion_tokens,
-                    tokensThinking: usage.thinking_tokens || 0,
-                    costUsd: actualCost.toString(),
-                    thinkingEnabled: false,
-                    azureAuthType: deployment.authConfig.type,
-                    durationMs: Date.now() - startTime,
-                    statusCode: 200,
-                  }).catch((err) => logger.warn({ err, requestId }, 'Failed to log request audit'));
-                })
-                .catch((err) => logger.error({ err, requestId }, 'Quota reconciliation error'));
-            }
-          }
-        }
-        controller.enqueue(chunk);
-      },
-      async flush(controller) {
-        await releaseUnreconciled();
-        controller.terminate();
-      },
-    })
-  );
+  const [clientStream, monitorStream] = response.body.tee();
+
+  const stream = clientStream.pipeThrough(new TransformStream(transformer));
+
+  (async () => {
+    const reader = monitorStream.getReader();
+    let fullText = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        fullText += new TextDecoder().decode(value, { stream: true });
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    const usage = extractOpenAIUsage(fullText);
+    if (usage && reservationId) {
+      reservationFinalized = true;
+      try {
+        const actualCost = await reconcileUsage(reservationId, usage, deployment.azureModelName);
+        addLLMSpanAttributes({
+          promptTokens: usage.prompt_tokens,
+          completionTokens: usage.completion_tokens,
+          totalTokens: usage.prompt_tokens + usage.completion_tokens,
+          costUsd: actualCost.toNumber(),
+        });
+        logRequestAudit({
+          userId: userId || 'unknown',
+          requestId,
+          model: deployment.azureModelName,
+          deployment: deployment.name,
+          protocolFamily: deployment.protocolFamily,
+          tokensInput: usage.prompt_tokens,
+          tokensOutput: usage.completion_tokens,
+          tokensThinking: usage.thinking_tokens || 0,
+          costUsd: actualCost.toString(),
+          thinkingEnabled: false,
+          azureAuthType: deployment.authConfig.type,
+          durationMs: Date.now() - startTime,
+          statusCode: 200,
+        }).catch((err) => logger.warn({ err, requestId }, 'Failed to log request audit'));
+      } catch (err) {
+        logger.error({ err, requestId }, 'Quota reconciliation error');
+      }
+    }
+    await releaseUnreconciled();
+  })();
 
   return new Response(stream, {
     status: 200,
