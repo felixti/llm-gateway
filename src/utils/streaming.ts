@@ -66,6 +66,11 @@ export function createOpenAIStreamTransformer() {
           continue;
         }
 
+        if (data.length < 10 || !data.includes('usage')) {
+          controller.enqueue(chunk);
+          continue;
+        }
+
         try {
           const parsed = JSON.parse(data) as OpenAIStreamChunk;
 
