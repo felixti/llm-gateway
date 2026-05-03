@@ -38,14 +38,19 @@ describe('requireAdminScopeMiddleware', () => {
     }
   });
 
-  test('secret not configured → 403 configuration_error', async () => {
+  test('secret not configured + admin scope → next() (operator secret is optional)', async () => {
     const c = createMockContext({ scope: 'admin' });
+    const result = await requireAdminScopeMiddleware(c, next);
+    expect(result).toBeUndefined();
+  });
+
+  test('secret not configured + non-admin scope → 403 permission_error', async () => {
+    const c = createMockContext({ scope: 'all' });
     const result = await requireAdminScopeMiddleware(c, next);
     expect(result).toBeInstanceOf(Response);
     expect(result!.status).toBe(403);
-    const body = (await result!.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe('configuration_error');
-    expect(body.error.message).toContain('not configured');
+    const body = (await result!.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('permission_error');
   });
 
   test('secret too short → 403 configuration_error', async () => {

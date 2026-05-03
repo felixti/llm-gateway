@@ -1,8 +1,3 @@
-/**
- * Requires PAT scope `admin` for operator routes (e.g. PAT revocation).
- * Run after authMiddleware.
- */
-
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { env } from '@/config/env';
 import { errorForProtocol } from '@/utils/errors';
@@ -10,13 +5,31 @@ import type { Context, Next } from 'hono';
 
 const HEADER_OPERATOR_SECRET = 'x-operator-secret';
 
-/** Read live so deployment can rotate the secret without process restart and tests can set it per case. */
-function getOperatorSecret(): string {
-  const raw = process.env.ADMIN_OPERATOR_SECRET;
-  if (!raw || raw.length < 16) {
-    throw new Error('ADMIN_OPERATOR_SECRET is not configured or too short');
+let _cachedRotated: string | null = null;
+
+/**
+ * Uses validated `env.ADMIN_OPERATOR_SECRET` as primary source.
+ * When process.env diverges (live rotation), re-validates min 16 chars and adopts.
+ * Returns `null` when not configured.
+ */
+function getOperatorSecret(): string | null {
+  const validated = env.ADMIN_OPERATOR_SECRET ?? null;
+
+  const raw = process.env.ADMIN_OPERATOR_SECRET ?? '';
+  if (!raw) {
+    _cachedRotated = null;
+    return null;
   }
-  return raw;
+
+  if (raw === validated) return validated;
+
+  // process.env diverged from validated config → rotation in progress
+  if (raw.length < 16) {
+    throw new Error('ADMIN_OPERATOR_SECRET is set but too short (minimum 16 characters)');
+  }
+
+  _cachedRotated = raw;
+  return _cachedRotated;
 }
 
 function isOperatorSecretValid(provided: string | undefined, expected: string): boolean {
@@ -36,22 +49,24 @@ export async function requireAdminScopeMiddleware(
 ): Promise<Response | undefined> {
   const path = c.req.path;
 
-  let operatorSecret: string;
+  let operatorSecret: string | null;
   try {
     operatorSecret = getOperatorSecret();
   } catch {
     return c.json(
-      errorForProtocol(path, 403, 'configuration_error', 'Operator secret is not configured'),
+      errorForProtocol(path, 403, 'configuration_error', 'Operator secret is misconfigured'),
       403
     );
   }
 
-  const provided = c.req.header(HEADER_OPERATOR_SECRET);
-  if (!isOperatorSecretValid(provided, operatorSecret)) {
-    return c.json(
-      errorForProtocol(path, 403, 'permission_error', 'Invalid operator credentials'),
-      403
-    );
+  if (operatorSecret !== null) {
+    const provided = c.req.header(HEADER_OPERATOR_SECRET);
+    if (!isOperatorSecretValid(provided, operatorSecret)) {
+      return c.json(
+        errorForProtocol(path, 403, 'permission_error', 'Invalid operator credentials'),
+        403
+      );
+    }
   }
 
   const scope = c.get('scope');
