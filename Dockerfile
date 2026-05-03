@@ -13,6 +13,8 @@ COPY openapi.json ./
 RUN bun build src/index.ts --outdir=dist --target=bun --external '@opentelemetry/*'
 
 FROM base AS production
+# Runtime resource limits should be enforced via orchestrator (e.g. Kubernetes limits/requests
+# or Docker --memory / --cpus). Recommended minimum: 512 MiB memory, 0.5 vCPU.
 ENV NODE_ENV=production
 ENV TZ=UTC
 
@@ -24,6 +26,6 @@ COPY openapi.json ./
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD bun -e "fetch('http://localhost:3000/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
+  CMD wget -qO- http://localhost:3000/health || exit 1
 
 CMD ["bun", "run", "dist/index.js"]
