@@ -234,7 +234,9 @@ export async function proxyStreamingChat(
         } finally {
           release();
         }
-      })().catch((err) => logger.error({ err, requestId }, 'Unhandled error in usage finalization'));
+      })().catch((err) =>
+        logger.error({ err, requestId }, 'Unhandled error in usage finalization')
+      );
     },
     onEnd: releaseUnreconciled,
   });

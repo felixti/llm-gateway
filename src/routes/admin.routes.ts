@@ -93,7 +93,10 @@ adminRoutes.post('/pat/revoke', async (c) => {
   try {
     expiry = await getPatExpiryForRevocation(pat_id);
   } catch (error) {
-    logger.warn({ patId: pat_id, error }, 'Failed to load PAT expiry for revocation TTL, proceeding without TTL');
+    logger.warn(
+      { patId: pat_id, error },
+      'Failed to load PAT expiry for revocation TTL, proceeding without TTL'
+    );
   }
   const ttlSeconds = getBlocklistTtlSeconds(expiry?.expiresAt);
   if (ttlSeconds) {
