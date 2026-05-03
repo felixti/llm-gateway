@@ -83,6 +83,7 @@ async function checkRequestLimit(userId: string): Promise<RateLimitResult> {
     windowStart,
     RPM_LIMIT,
     WINDOW_SECONDS,
+    userId,
     userId
   );
 
