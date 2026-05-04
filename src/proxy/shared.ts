@@ -1,14 +1,42 @@
 import type { DeploymentConfig } from '@/config/deployments';
-import { logRequestAudit } from '@/db/data-access';
+import { type AuditWriteResult, insertRequestAuditOrThrow } from '@/db/data-access';
 import { logger } from '@/observability/logger';
-import { addLlmCost, addLlmTokens, recordLlmRequestDuration } from '@/observability/metrics';
+import {
+  addLlmCost,
+  addLlmTokens,
+  incrementUnbilledRequests,
+  recordLlmRequestDuration,
+} from '@/observability/metrics';
 import { addLLMSpanAttributes } from '@/observability/tracing';
 import type { ProxyRequestContext } from '@/routes/factories/types';
-import type { TokenUsage } from '@/services/pricing.service';
+import { type TokenUsage, calculateCost } from '@/services/pricing.service';
 import { reconcileUsage, recordUsageOnly, releaseReservation } from '@/services/quota.service';
+import { writeWalEntry } from '@/services/wal.service';
 import { errorForProtocol } from '@/utils/errors';
 import { isOk } from '@/utils/result';
 import type { Decimal } from 'decimal.js';
+
+const PG_AUDIT_RETRIES = 3;
+const PG_AUDIT_BACKOFF_MS = [200, 400, 800];
+
+async function logRequestAuditDurable(
+  payload: Parameters<typeof insertRequestAuditOrThrow>[0]
+): Promise<AuditWriteResult | 'failed'> {
+  for (let attempt = 0; attempt < PG_AUDIT_RETRIES; attempt++) {
+    try {
+      return await insertRequestAuditOrThrow(payload);
+    } catch (err) {
+      logger.warn(
+        { err, requestId: payload.requestId, attempt: attempt + 1 },
+        'Postgres audit insert failed, retrying'
+      );
+      if (attempt < PG_AUDIT_RETRIES - 1) {
+        await new Promise((r) => setTimeout(r, PG_AUDIT_BACKOFF_MS[attempt]));
+      }
+    }
+  }
+  return 'failed';
+}
 
 interface UpstreamErrorResponseOptions {
   response?: Response;
@@ -138,32 +166,25 @@ export async function finalizeProxyUsage({
     return;
   }
 
-  let actualCost: Decimal;
+  const actualCost: Decimal = calculateCost(usage, deployment.azureModelName);
 
+  let redisOk = true;
   if (reservationId) {
-    // reconcileUsage returns ReconciliationResult for fail-closed policy
     const costResult = await reconcileUsage(reservationId, usage, deployment.azureModelName);
-
-    // Fail-closed: propagate reconciliation errors
     if (!isOk(costResult)) {
-      logger.error(
+      redisOk = false;
+      logger.warn(
         { err: costResult.error, reservationId: costResult.error.reservationId, requestId },
-        'Quota reconciliation failed - Redis error'
+        'Quota reconciliation failed - reconciler job will rebuild from Postgres'
       );
-      const error = new Error(`Quota reconciliation failed: ${costResult.error.message}`);
-      error.name = 'QuotaReconciliationError';
-      throw error;
     }
-
-    actualCost = costResult.value;
   } else {
-    // recordUsageOnly returns Decimal directly (no reservation to reconcile)
-    actualCost = await recordUsageOnly(
-      userId || 'unknown',
-      usage,
-      deployment.azureModelName,
-      idempotencyKey
-    );
+    try {
+      await recordUsageOnly(userId || 'unknown', usage, deployment.azureModelName, idempotencyKey);
+    } catch (err) {
+      redisOk = false;
+      logger.warn({ err, requestId }, 'recordUsageOnly failed - reconciler will rebuild');
+    }
   }
 
   addLLMSpanAttributes({
@@ -181,7 +202,7 @@ export async function finalizeProxyUsage({
     deployment.protocolFamily
   );
 
-  logRequestAudit({
+  const auditResult = await logRequestAuditDurable({
     userId: userId || 'unknown',
     requestId,
     model: deployment.azureModelName,
@@ -195,5 +216,31 @@ export async function finalizeProxyUsage({
     azureAuthType: deployment.authConfig.type,
     durationMs: Date.now() - startTime,
     statusCode: 200,
-  }).catch((err) => logger.warn({ err, requestId }, 'Failed to log request audit'));
+  });
+
+  if (auditResult === 'failed') {
+    const reason: 'redis_fail' | 'pg_fail' | 'both_fail' = redisOk ? 'pg_fail' : 'both_fail';
+    try {
+      await writeWalEntry({
+        requestId,
+        userId: userId || 'unknown',
+        model: deployment.azureModelName,
+        tokensInput: usage.prompt_tokens,
+        tokensOutput: usage.completion_tokens,
+        tokensThinking: usage.thinking_tokens || 0,
+        costUsd: actualCost.toString(),
+        timestamp: new Date().toISOString(),
+        reason,
+      });
+    } catch (err) {
+      logger.error({ err, requestId }, 'WAL write failed - data loss possible');
+    }
+    incrementUnbilledRequests(reason);
+
+    if (!redisOk) {
+      const error = new Error('Quota reconciliation and audit both failed');
+      error.name = 'QuotaReconciliationError';
+      throw error;
+    }
+  }
 }

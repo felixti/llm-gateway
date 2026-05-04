@@ -47,6 +47,10 @@ vi.mock("../../../src/services/quota.service", () => ({
 
 vi.mock("../../../src/db/data-access", () => ({
   logRequestAudit: (...args: unknown[]) => mockLogRequestAudit(...args),
+  insertRequestAuditOrThrow: async (...args: unknown[]) => {
+    await mockLogRequestAudit(...args);
+    return "inserted";
+  },
 }));
 
 vi.mock("../../../src/services/retry", () => ({
@@ -651,10 +655,14 @@ describe("proxyStreamingChat", () => {
     // Allow microtasks for the async onUsage IIFE to settle.
     await new Promise((r) => setTimeout(r, 20));
 
-    expect(mockLoggerError).toHaveBeenCalledTimes(1);
-    expect(mockLoggerError).toHaveBeenCalledWith(
-      expect.objectContaining({ err: testError, requestId: "req-stream-error" }),
-      "Unhandled error in usage finalization"
+    expect(mockLoggerError).toHaveBeenCalled();
+    const errorCalls = mockLoggerError.mock.calls;
+    const finalizeFailedCall = errorCalls.find(
+      (call) => call[1] === "Streaming finalize failed - WAL persisted"
+    );
+    expect(finalizeFailedCall).toBeDefined();
+    expect(finalizeFailedCall![0]).toEqual(
+      expect.objectContaining({ requestId: "req-stream-error" })
     );
   });
 

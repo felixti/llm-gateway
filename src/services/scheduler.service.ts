@@ -1,12 +1,15 @@
+import { env } from '@/config/env';
 import {
   batchArchiveMonthlyUsage,
   batchGetRequestAuditStats,
   batchResolveUserIds,
+  getMonthlySpentFromAudit,
 } from '@/db/data-access';
 import { redis } from '@/db/redis';
 import { logger } from '@/observability/logger';
 import { cleanupOrphanedReservations } from '@/services/quota.service';
 import { MAX_SCAN_ITERATIONS } from '@/services/quota/constants';
+import { Decimal } from 'decimal.js';
 
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const ARCHIVE_INTERVAL_MS = 60 * 60 * 1000;
@@ -31,8 +34,12 @@ async function releaseLock(lockKey: string): Promise<void> {
 
 let cleanupInterval: ReturnType<typeof setInterval> | null = null;
 let archiveInterval: ReturnType<typeof setInterval> | null = null;
+let reconcilerInterval: ReturnType<typeof setInterval> | null = null;
 let cleanupRunning = false;
 let archiveRunning = false;
+let reconcilerRunning = false;
+
+const RECONCILER_DRIFT_TOLERANCE_MICRO = 1;
 
 function currentMonthKey(): string {
   const now = new Date();
@@ -169,16 +176,92 @@ export async function runArchiveJob(): Promise<void> {
   }
 }
 
+export async function runReconcilerJob(): Promise<void> {
+  if (reconcilerRunning) return;
+  reconcilerRunning = true;
+
+  const lockKey = 'scheduler:reconciler:lock';
+  if (!(await acquireLock(lockKey))) {
+    reconcilerRunning = false;
+    return;
+  }
+
+  try {
+    const month = currentMonthKey();
+    const pattern = `quota:*:${month}`;
+    let cursor = '0';
+    let scanIterations = 0;
+    const userIds = new Set<string>();
+
+    do {
+      scanIterations++;
+      if (scanIterations > MAX_SCAN_ITERATIONS) {
+        logger.warn({ scanIterations }, 'Max SCAN iterations exceeded in runReconcilerJob');
+        break;
+      }
+      const [next, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = next;
+      for (const key of keys) {
+        const parts = key.split(':');
+        if (parts.length >= 3) userIds.add(parts[1]);
+      }
+    } while (cursor !== '0');
+
+    if (userIds.size === 0) return;
+
+    const resolveMap = await batchResolveUserIds([...userIds]);
+    let drifted = 0;
+
+    for (const patUserId of userIds) {
+      const resolved = resolveMap.get(patUserId);
+      if (!resolved) continue;
+
+      const truthUsd = await getMonthlySpentFromAudit(resolved, month);
+      const truthMicro = new Decimal(truthUsd).times(1_000_000).toFixed(0);
+
+      const quotaKey = `quota:${patUserId}:${month}`;
+      const currentMicro = (await redis.hget(quotaKey, 'spent')) ?? '0';
+
+      const driftAbs = Math.abs(Number(truthMicro) - Number(currentMicro));
+      if (driftAbs > RECONCILER_DRIFT_TOLERANCE_MICRO) {
+        await redis.hset(quotaKey, 'spent', truthMicro);
+        drifted++;
+        logger.info(
+          {
+            userId: patUserId,
+            month,
+            before: currentMicro,
+            after: truthMicro,
+            drift: driftAbs,
+          },
+          'Reconciler corrected quota.spent drift'
+        );
+      }
+    }
+
+    if (drifted > 0) {
+      logger.info({ drifted, scanned: userIds.size }, 'Reconciler job complete');
+    }
+  } catch (error) {
+    logger.error({ error }, 'Reconciler job failed');
+  } finally {
+    await releaseLock(lockKey);
+    reconcilerRunning = false;
+  }
+}
+
 export function startBackgroundJobs(): void {
-  if (cleanupInterval !== null || archiveInterval !== null) {
+  if (cleanupInterval !== null || archiveInterval !== null || reconcilerInterval !== null) {
     return;
   }
 
   cleanupInterval = setInterval(runCleanupJob, CLEANUP_INTERVAL_MS);
   archiveInterval = setInterval(runArchiveJob, ARCHIVE_INTERVAL_MS);
+  reconcilerInterval = setInterval(runReconcilerJob, env.RECONCILER_INTERVAL_MS);
 
   if (cleanupInterval.unref) cleanupInterval.unref();
   if (archiveInterval.unref) archiveInterval.unref();
+  if (reconcilerInterval.unref) reconcilerInterval.unref();
 
   logger.info('Background jobs started');
 }
@@ -191,6 +274,10 @@ export function stopBackgroundJobs(): void {
   if (archiveInterval !== null) {
     clearInterval(archiveInterval);
     archiveInterval = null;
+  }
+  if (reconcilerInterval !== null) {
+    clearInterval(reconcilerInterval);
+    reconcilerInterval = null;
   }
   logger.info('Background jobs stopped');
 }

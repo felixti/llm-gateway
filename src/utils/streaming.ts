@@ -194,8 +194,12 @@ export function createOpenAIStreamTransformer(options: OpenAIStreamTransformerOp
     options.onUsage?.(usage);
   });
 
+  let controllerRef: TransformStreamDefaultController | null = null;
+  const encoder = new TextEncoder();
+
   return {
     transform(chunk: Uint8Array, controller: TransformStreamDefaultController): void {
+      controllerRef = controller;
       const text = new TextDecoder().decode(chunk);
       const lines = text.split(/\r?\n/);
 
@@ -216,9 +220,24 @@ export function createOpenAIStreamTransformer(options: OpenAIStreamTransformerOp
     },
 
     async flush(controller: TransformStreamDefaultController): Promise<void> {
+      controllerRef = controller;
       observer.flush();
       await options.onEnd?.();
       controller.terminate();
+      controllerRef = null;
+    },
+
+    emitError(code: string, message: string): void {
+      if (!controllerRef) return;
+      try {
+        const errEvent = `data: ${JSON.stringify({
+          error: { type: 'server_error', code, message },
+        })}\n\n`;
+        controllerRef.enqueue(encoder.encode(errEvent));
+        controllerRef.enqueue(encoder.encode('data: [DONE]\n\n'));
+      } catch {
+        void 0;
+      }
     },
   };
 }
@@ -287,15 +306,32 @@ export function isAnthropicStreamEvent(value: unknown): value is AnthropicStream
  * All other events pass through natively
  */
 export function createAnthropicStreamTransformer() {
+  let controllerRef: TransformStreamDefaultController | null = null;
+  const encoder = new TextEncoder();
+
   return {
     transform(chunk: Uint8Array, controller: TransformStreamDefaultController): void {
-      // Pass through all chunks - Anthropic streaming is native passthrough
-      // We only intercept for usage tracking
+      controllerRef = controller;
       controller.enqueue(chunk);
     },
 
     flush(controller: TransformStreamDefaultController): void {
+      controllerRef = controller;
       controller.terminate();
+      controllerRef = null;
+    },
+
+    emitError(code: string, message: string): void {
+      if (!controllerRef) return;
+      try {
+        const errEvent = `event: error\ndata: ${JSON.stringify({
+          type: 'error',
+          error: { type: 'server_error', code, message },
+        })}\n\n`;
+        controllerRef.enqueue(encoder.encode(errEvent));
+      } catch {
+        void 0;
+      }
     },
   };
 }

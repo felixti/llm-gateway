@@ -5,18 +5,14 @@
  */
 
 import type { DeploymentConfig } from '@/config/deployments';
-import { logRequestAudit } from '@/db/data-access';
 import { logger } from '@/observability/logger';
 import { incrementAzureRateLimitHits } from '@/observability/metrics';
-import { addLLMSpanAttributes } from '@/observability/tracing';
 import type { ProxyRequestContext } from '@/routes/factories/types';
 import { recordFailure, recordSuccess } from '@/services/circuit-breaker';
 import type { TokenUsage } from '@/services/pricing.service';
-import { reconcileUsage } from '@/services/quota.service';
 import { withRetry } from '@/services/retry';
 import { upstreamHttpsFetch } from '@/utils/fetch';
 import { AsyncMutex } from '@/utils/mutex';
-import { isOk } from '@/utils/result';
 import {
   type AnthropicStreamEvent,
   handleStreamAbort,
@@ -338,14 +334,48 @@ export async function proxyStreamingAnthropic(
   };
   const cleanup = handleStreamAbort(reservationId, releaseUnreconciled, abortSignal);
 
-  // Stateful decoder retained across chunks to handle multi-byte UTF-8
-  // characters that may span chunk boundaries.
   const decoder = new TextDecoder();
   let textBuffer = '';
+  let activeController: TransformStreamDefaultController<Uint8Array> | null = null;
+  const errorEncoder = new TextEncoder();
+
+  const emitAnthropicError = (code: string, message: string): void => {
+    if (!activeController) return;
+    try {
+      const event = `event: error\ndata: ${JSON.stringify({
+        type: 'error',
+        error: { type: 'server_error', code, message },
+      })}\n\n`;
+      activeController.enqueue(errorEncoder.encode(event));
+    } catch {
+      void 0;
+    }
+  };
+
+  const finalize = async (usage: TokenUsage): Promise<void> => {
+    try {
+      await finalizeProxyUsage({
+        usage,
+        reservationId,
+        requestId,
+        userId,
+        deployment,
+        startTime,
+        thinkingEnabled: false,
+      });
+    } catch (err) {
+      logger.error({ err, requestId }, 'Streaming finalize failed - WAL persisted');
+      emitAnthropicError(
+        'quota_reconciliation_failed',
+        'Server failed to record usage; request stored to dead-letter queue'
+      );
+    }
+  };
 
   const stream = response.body.pipeThrough(
-    new TransformStream({
+    new TransformStream<Uint8Array, Uint8Array>({
       transform(chunk, controller) {
+        activeController = controller;
         controller.enqueue(chunk);
 
         if (!usageExtracted && reservationId) {
@@ -354,68 +384,24 @@ export async function proxyStreamingAnthropic(
           const usage = extractUsageFromAnthropicEvents(events);
 
           if (usage) {
-            // Don't block stream - fire-and-forget with mutex
             (async () => {
               const release = await finalizeMutex.acquire();
               try {
                 if (usageExtracted || reservationFinalized) return;
                 usageExtracted = true;
                 reservationFinalized = true;
-
-                const costResult = await reconcileUsage(
-                  reservationId,
-                  usage,
-                  deployment.azureModelName
-                );
-
-                // Fail-closed: propagate reconciliation errors
-                if (!isOk(costResult)) {
-                  logger.error(
-                    {
-                      err: costResult.error,
-                      reservationId: costResult.error.reservationId,
-                      requestId,
-                    },
-                    'Quota reconciliation failed in Anthropic streaming - Redis error'
-                  );
-                  const error = new Error(
-                    `Quota reconciliation failed: ${costResult.error.message}`
-                  );
-                  error.name = 'QuotaReconciliationError';
-                  throw error;
-                }
-
-                const actualCost = costResult.value;
-                addLLMSpanAttributes({
-                  promptTokens: usage.prompt_tokens,
-                  completionTokens: usage.completion_tokens,
-                  totalTokens: usage.prompt_tokens + usage.completion_tokens,
-                  costUsd: actualCost.toNumber(),
-                });
-                logRequestAudit({
-                  userId: userId || 'unknown',
-                  requestId,
-                  model: deployment.azureModelName,
-                  deployment: deployment.name,
-                  protocolFamily: deployment.protocolFamily,
-                  tokensInput: usage.prompt_tokens,
-                  tokensOutput: usage.completion_tokens,
-                  tokensThinking: usage.thinking_tokens || 0,
-                  costUsd: actualCost.toString(),
-                  thinkingEnabled: false,
-                  azureAuthType: deployment.authConfig.type,
-                  durationMs: Date.now() - startTime,
-                  statusCode: 200,
-                }).catch((err) => logger.warn({ err, requestId }, 'Failed to log request audit'));
+                await finalize(usage);
               } finally {
                 release();
               }
-            })();
+            })().catch((err) =>
+              logger.error({ err, requestId }, 'Unhandled error in usage finalization')
+            );
           }
         }
       },
       async flush(controller) {
-        // Flush any remaining buffered bytes from the decoder
+        activeController = controller;
         textBuffer += decoder.decode();
         if (!usageExtracted && reservationId && textBuffer) {
           const events = parseAnthropicEvents(textBuffer);
@@ -426,34 +412,7 @@ export async function proxyStreamingAnthropic(
             try {
               if (reservationFinalized) return;
               reservationFinalized = true;
-              const costResult = await reconcileUsage(
-                reservationId,
-                usage,
-                deployment.azureModelName
-              );
-
-              // Fail-closed: propagate reconciliation errors
-              if (!isOk(costResult)) {
-                logger.error(
-                  {
-                    err: costResult.error,
-                    reservationId: costResult.error.reservationId,
-                    requestId,
-                  },
-                  'Quota reconciliation failed in Anthropic flush - Redis error'
-                );
-                const error = new Error(`Quota reconciliation failed: ${costResult.error.message}`);
-                error.name = 'QuotaReconciliationError';
-                throw error;
-              }
-
-              const actualCost = costResult.value;
-              addLLMSpanAttributes({
-                promptTokens: usage.prompt_tokens,
-                completionTokens: usage.completion_tokens,
-                totalTokens: usage.prompt_tokens + usage.completion_tokens,
-                costUsd: actualCost.toNumber(),
-              });
+              await finalize(usage);
             } finally {
               release();
             }
@@ -461,6 +420,7 @@ export async function proxyStreamingAnthropic(
         }
         await cleanup();
         controller.terminate();
+        activeController = null;
       },
     })
   );

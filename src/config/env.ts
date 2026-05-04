@@ -124,6 +124,11 @@ const envSchema = z
     REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
     /** Graceful shutdown timeout in milliseconds (default 30s) */
     SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+
+    /** Write-Ahead-Log directory for unbilled requests (dual-failure DLQ) */
+    WAL_DIR: z.string().default('/var/lib/llm-gateway/dlq'),
+    /** Quota reconciler job interval (rebuilds Redis spent from Postgres) */
+    RECONCILER_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
   })
   .superRefine((data, ctx) => {
     if (data.NODE_ENV !== 'production') {

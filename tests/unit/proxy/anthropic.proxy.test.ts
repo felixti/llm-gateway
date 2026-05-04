@@ -25,6 +25,10 @@ vi.mock('../../../src/services/quota.service', () => ({
 
 vi.mock('../../../src/db/data-access', () => ({
   logRequestAudit: (...args: unknown[]) => mockLogRequestAudit(...args),
+  insertRequestAuditOrThrow: async (...args: unknown[]) => {
+    await mockLogRequestAudit(...args);
+    return 'inserted';
+  },
 }));
 
 vi.mock('../../../src/services/retry', () => ({

@@ -33,6 +33,7 @@ const inMemoryCounters: Record<string, number> = {
   pat_revocations_total: 0,
   quota_orphan_cleaned_total: 0,
   quota_reservation_null_total: 0,
+  unbilled_requests_total: 0,
 };
 
 const inMemoryGauges: Record<string, number> = {
@@ -149,6 +150,10 @@ export const patRevocationsTotal = meter.createCounter('pat_revocations_total', 
   description: 'PAT revocation requests recorded',
 });
 
+export const unbilledRequestsTotal = meter.createCounter('unbilled_requests_total', {
+  description: 'Requests that completed without successful billing (WAL written)',
+});
+
 export const llmQuotaRemainingRatio = meter.createGauge('llm_quota_remaining_ratio', {
   description: 'Remaining quota ratio (0-1)',
 });
@@ -216,6 +221,11 @@ export function incrementQuotaOrphanCleaned(): void {
 
 export function incrementQuotaReservationNull(): void {
   incrementCounter('quota_reservation_null_total');
+}
+
+export function incrementUnbilledRequests(reason: 'redis_fail' | 'pg_fail' | 'both_fail'): void {
+  unbilledRequestsTotal.add(1, { reason });
+  incrementCounter('unbilled_requests_total');
 }
 
 export function setQuotaRemainingRatio(ratio: number): void {

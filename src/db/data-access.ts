@@ -321,7 +321,17 @@ export async function getUserQuotaPolicyByPatSubject(
  * Resolves non-UUID userId via users.pat_subject before inserting.
  * Skips insert (warns) if userId cannot be resolved to a valid UUID.
  */
-export async function logRequestAudit(record: RequestAuditRecord): Promise<void> {
+export type AuditWriteResult = 'inserted' | 'skipped_unresolvable_user';
+
+/**
+ * Strict variant of audit insert: throws on Postgres errors so the caller
+ * (durable wrapper in proxy/shared.ts) can retry and write WAL. The
+ * `skipped_unresolvable_user` outcome signals a deterministic config issue
+ * that retrying / WAL-replaying cannot fix.
+ */
+export async function insertRequestAuditOrThrow(
+  record: RequestAuditRecord
+): Promise<AuditWriteResult> {
   const resolvedUserId = await resolveUserIdToUuid(record.userId);
 
   if (!resolvedUserId) {
@@ -329,7 +339,7 @@ export async function logRequestAudit(record: RequestAuditRecord): Promise<void>
       { requestId: record.requestId, userId: record.userId },
       'Skipping audit log: userId is not a valid UUID and has no pat_subject mapping'
     );
-    return;
+    return 'skipped_unresolvable_user';
   }
 
   const query = `
@@ -357,8 +367,13 @@ export async function logRequestAudit(record: RequestAuditRecord): Promise<void>
     record.errorMessage ?? null,
   ];
 
+  await database.execute({ query, params });
+  return 'inserted';
+}
+
+export async function logRequestAudit(record: RequestAuditRecord): Promise<void> {
   try {
-    await database.execute({ query, params });
+    await insertRequestAuditOrThrow(record);
   } catch (error) {
     logger.error({ requestId: record.requestId, error }, 'Failed to log request audit');
   }
@@ -521,4 +536,35 @@ export async function getApiKeyByJti(jti: string): Promise<{ id: string; jti: st
   });
 
   return rows[0] || null;
+}
+
+/**
+ * Sum of cost_usd across request_audit for a user/month.
+ * Used by the reconciler job to rebuild Redis quota.spent from durable
+ * Postgres ground truth after Redis failures. Returns USD as a decimal
+ * string (e.g. "1.234567"); caller converts to micro if needed.
+ */
+export async function getMonthlySpentFromAudit(
+  resolvedUserId: string,
+  month: string
+): Promise<string> {
+  const year = Number.parseInt(month.substring(0, 4), 10);
+  const monthNum = Number.parseInt(month.substring(5, 7), 10);
+
+  try {
+    const { rows } = await database.execute<{ total: string }>({
+      query: `
+        SELECT COALESCE(SUM(cost_usd), 0)::text AS total
+        FROM request_audit
+        WHERE user_id = $1
+          AND created_at >= make_date($2, $3, 1)
+          AND created_at < make_date($2, $3, 1) + INTERVAL '1 month'
+      `,
+      params: [resolvedUserId, year, monthNum],
+    });
+    return rows[0]?.total ?? '0';
+  } catch (error) {
+    logger.error({ error, resolvedUserId, month }, 'Failed to query monthly spent from audit');
+    return '0';
+  }
 }

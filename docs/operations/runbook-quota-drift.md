@@ -168,3 +168,87 @@ bun scripts/backfill-usage-history.ts --apply    # apply UPDATE statements
 
 The script is idempotent: re-runs are safe and update only rows that still
 drift from `request_audit` ground truth. `total_cost_usd` is preserved.
+
+---
+
+## WAL replay (unbilled-requests dead-letter queue)
+
+When `unbilled_requests_total` increments, JSON entries appear in `WAL_DIR`
+(default `/var/lib/llm-gateway/dlq`). Each file is an atomic, complete
+record of a request that ran but could not be billed at the time:
+
+```json
+{
+  "requestId": "req-xyz",
+  "userId": "pat-user-id",
+  "model": "gpt-5-mini",
+  "tokensInput": 100,
+  "tokensOutput": 50,
+  "tokensThinking": 0,
+  "costUsd": "0.001500",
+  "timestamp": "2026-05-04T12:00:00.000Z",
+  "reason": "both_fail"
+}
+```
+
+`reason` values:
+- `redis_fail` — never appears in WAL on its own (Redis-only outages are
+  covered by the reconciler job rebuilding `quota:*.spent` from Postgres)
+- `pg_fail` — Postgres audit insert exhausted retries; Redis spent was
+  recorded but durable audit row missing
+- `both_fail` — both paths failed; the streaming client received a
+  synthetic SSE error tail and the non-streaming client received 502
+
+### Detection
+
+```bash
+ls -lh "$WAL_DIR"/unbilled-*.json | wc -l
+```
+
+Or query Prometheus: `sum(unbilled_requests_total) > 0`.
+
+### Replay
+
+```bash
+# Inspect a single entry
+cat "$WAL_DIR"/unbilled-<requestId>.json | jq
+
+# Manual replay loop (until automated replay script ships):
+for f in "$WAL_DIR"/unbilled-*.json; do
+  data=$(cat "$f")
+  reqId=$(echo "$data" | jq -r .requestId)
+  userId=$(echo "$data" | jq -r .userId)
+  model=$(echo "$data" | jq -r .model)
+  costUsd=$(echo "$data" | jq -r .costUsd)
+  tokensIn=$(echo "$data" | jq -r .tokensInput)
+  tokensOut=$(echo "$data" | jq -r .tokensOutput)
+  tokensThink=$(echo "$data" | jq -r .tokensThinking)
+  timestamp=$(echo "$data" | jq -r .timestamp)
+
+  # Resolve userId via pat_subject and INSERT
+  psql "$DATABASE_URL" -c "
+    INSERT INTO request_audit
+      (user_id, request_id, model, deployment, protocol_family,
+       tokens_input, tokens_output, tokens_thinking, cost_usd,
+       thinking_enabled, azure_auth_type, duration_ms, status_code, created_at)
+    SELECT u.id, '$reqId', '$model', '$model', 'replay',
+           $tokensIn, $tokensOut, $tokensThink, $costUsd,
+           false, 'apikey', 0, 200, '$timestamp'::timestamptz
+    FROM users u WHERE u.pat_subject = '$userId' OR u.id::text = '$userId'
+    ON CONFLICT DO NOTHING;
+  " && rm -f "$f"
+done
+```
+
+The reconciler job (`runReconcilerJob`, default 60 s interval) ensures
+Redis `quota:{userId}:{month}.spent` matches `SUM(cost_usd)` from
+`request_audit`. WAL replay therefore restores both billing AND quota
+enforcement state in one step — no manual Redis edits needed.
+
+### Production hardening
+
+- Mount `$WAL_DIR` on a dedicated volume separate from the application
+  filesystem so the gateway can WAL even when the main disk is full.
+- Alert on `rate(unbilled_requests_total[15m]) > 0` — non-zero rate
+  indicates ongoing dual-failure conditions that need investigation.
+- Replay WAL entries before any month-end billing reconciliation.

@@ -6,18 +6,15 @@
 
 import type { DeploymentConfig } from '@/config/deployments';
 import { getDeploymentByAlias } from '@/config/deployments';
-import { logRequestAudit } from '@/db/data-access';
 import { logger } from '@/observability/logger';
 import { incrementAzureRateLimitHits } from '@/observability/metrics';
-import { addLLMSpanAttributes, injectTraceContext } from '@/observability/tracing';
+import { injectTraceContext } from '@/observability/tracing';
 import type { ProxyRequestContext } from '@/routes/factories/types';
 import { recordFailure, recordSuccess } from '@/services/circuit-breaker';
 import type { TokenUsage } from '@/services/pricing.service';
-import { reconcileUsage } from '@/services/quota.service';
 import { withRetry } from '@/services/retry';
 import { upstreamHttpsFetch } from '@/utils/fetch';
 import { AsyncMutex } from '@/utils/mutex';
-import { isOk } from '@/utils/result';
 import { createOpenAIStreamTransformer, handleStreamAbort } from '@/utils/streaming';
 import {
   createSanitizedUpstreamErrorResponse,
@@ -273,47 +270,25 @@ export async function proxyStreamingChat(
         try {
           if (reservationFinalized) return;
           reservationFinalized = true;
-          const costResult = await reconcileUsage(reservationId, usage, deployment.azureModelName);
-
-          // Fail-closed: propagate reconciliation errors
-          if (!isOk(costResult)) {
-            logger.error(
-              { err: costResult.error, reservationId: costResult.error.reservationId, requestId },
-              'Quota reconciliation failed in OpenAI chat - Redis error'
-            );
-            const error = new Error(`Quota reconciliation failed: ${costResult.error.message}`);
-            error.name = 'QuotaReconciliationError';
-            throw error;
-          }
-
-          const actualCost = costResult.value;
-          addLLMSpanAttributes({
-            promptTokens: usage.prompt_tokens,
-            completionTokens: usage.completion_tokens,
-            totalTokens: usage.prompt_tokens + usage.completion_tokens,
-            costUsd: actualCost.toNumber(),
-          });
-          logRequestAudit({
-            userId: userId || 'unknown',
+          await finalizeProxyUsage({
+            usage,
+            reservationId,
             requestId,
-            model: deployment.azureModelName,
-            deployment: deployment.name,
-            protocolFamily: deployment.protocolFamily,
-            tokensInput: usage.prompt_tokens,
-            tokensOutput: usage.completion_tokens,
-            tokensThinking: usage.thinking_tokens || 0,
-            costUsd: actualCost.toString(),
+            userId,
+            deployment,
+            startTime,
             thinkingEnabled: false,
-            azureAuthType: deployment.authConfig.type,
-            durationMs: Date.now() - startTime,
-            statusCode: 200,
-          }).catch((err) => logger.warn({ err, requestId }, 'Failed to log request audit'));
+          });
         } finally {
           release();
         }
-      })().catch((err) =>
-        logger.error({ err, requestId }, 'Unhandled error in usage finalization')
-      );
+      })().catch((err) => {
+        logger.error({ err, requestId }, 'Streaming finalize failed - WAL persisted');
+        transformer.emitError(
+          'quota_reconciliation_failed',
+          'Server failed to record usage; request stored to dead-letter queue'
+        );
+      });
     },
     onEnd: releaseUnreconciled,
   });
