@@ -34,6 +34,7 @@ const inMemoryCounters: Record<string, number> = {
   quota_orphan_cleaned_total: 0,
   quota_reservation_null_total: 0,
   unbilled_requests_total: 0,
+  fallback_soft_overage_total: 0,
 };
 
 const inMemoryGauges: Record<string, number> = {
@@ -154,6 +155,10 @@ export const unbilledRequestsTotal = meter.createCounter('unbilled_requests_tota
   description: 'Requests that completed without successful billing (WAL written)',
 });
 
+export const fallbackSoftOverageTotal = meter.createCounter('fallback_soft_overage_total', {
+  description: 'Fallback chain top-ups that exceeded hard budget on soft-limit accounts',
+});
+
 export const llmQuotaRemainingRatio = meter.createGauge('llm_quota_remaining_ratio', {
   description: 'Remaining quota ratio (0-1)',
 });
@@ -226,6 +231,11 @@ export function incrementQuotaReservationNull(): void {
 export function incrementUnbilledRequests(reason: 'redis_fail' | 'pg_fail' | 'both_fail'): void {
   unbilledRequestsTotal.add(1, { reason });
   incrementCounter('unbilled_requests_total');
+}
+
+export function incrementFallbackSoftOverage(model: string): void {
+  fallbackSoftOverageTotal.add(1, { model: normalizeMetricModel(model) });
+  incrementCounter('fallback_soft_overage_total');
 }
 
 export function setQuotaRemainingRatio(ratio: number): void {

@@ -15,8 +15,10 @@
  */
 
 import { getDeploymentByAlias, getFallbackChain } from '@/config/deployments';
+import { redis } from '@/db/redis';
 import { REQUEST_SIGNAL_KEY } from '@/middleware/timeout';
-import { getRequestBodyLogMetadata, logDebugRequestMetadata } from '@/observability/logger';
+import { getRequestBodyLogMetadata, logDebugRequestMetadata, logger } from '@/observability/logger';
+import { incrementFallbackSoftOverage } from '@/observability/metrics';
 import {
   addLLMSpanAttributes,
   getCurrentTraceId,
@@ -26,6 +28,8 @@ import {
 import { releaseReservedQuota } from '@/proxy/shared';
 import { getAzureAuthManager } from '@/services/azure-auth';
 import { isRequestAllowed } from '@/services/circuit-breaker';
+import { topUpReservation } from '@/services/quota.service';
+import { fromMicrodollars } from '@/services/quota/money';
 import { type Result, err, ok } from '@/utils/result';
 import type { Context } from 'hono';
 import { type RequestError, createRequestErrorResponse, validateBody } from './errors';
@@ -114,6 +118,36 @@ async function tryFallbacks(options: {
       fallbackAuthHeaders = await options.authManager.getAuthHeadersForDeployment(fallback);
     } catch {
       continue;
+    }
+
+    if (options.proxyContext.reservationId) {
+      try {
+        const reservationKey = `reservation:${options.proxyContext.reservationId}`;
+        const reservationData = await redis.get(reservationKey);
+        if (reservationData) {
+          const parts = reservationData.split('|');
+          const originalAmountMicro = Number(parts[0]) || 0;
+          const originalCost = fromMicrodollars(String(originalAmountMicro));
+
+          const fallbackEstimate = originalCost.times(1.2);
+          const delta = fallbackEstimate.minus(originalCost);
+
+          if (delta.gt(0)) {
+            const topUp = await topUpReservation(options.proxyContext.reservationId, delta);
+            if (topUp.mode === 'hard_rejected') {
+              continue;
+            }
+            if (topUp.mode === 'soft_overage') {
+              incrementFallbackSoftOverage(fallback.azureModelName);
+            }
+          }
+        }
+      } catch (err) {
+        logger.warn(
+          { err, fallback: fallback.name },
+          'Reservation top-up failed, proceeding with fallback'
+        );
+      }
     }
 
     const fallbackUrl = options.deps.buildUpstreamUrl(fallback);

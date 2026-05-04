@@ -164,3 +164,66 @@ export const CLEANUP_ORPHAN_SCRIPT = `
 
   return cleaned
 `;
+
+export const TOP_UP_RESERVATION_SCRIPT = `
+  local quotaKey = KEYS[1]
+  local reservationKey = KEYS[2]
+  local deltaMicro = tonumber(ARGV[1])
+  local reservationId = ARGV[2]
+  local defaultBudget = tonumber(ARGV[3])
+  local ttl = tonumber(ARGV[4])
+  local reservedPrefix = ARGV[5]
+  local hashPrefix = ARGV[6]
+
+  local data = redis.call('get', reservationKey)
+  if not data then
+    return {0, 'not_found'}
+  end
+
+  local amountMicroStr, userId, month, createdAt
+  local idx = 0
+  for part in string.gmatch(data, '[^|]+') do
+    if idx == 0 then amountMicroStr = part
+    elseif idx == 1 then userId = part
+    elseif idx == 2 then month = part
+    elseif idx == 3 then createdAt = part
+    end
+    idx = idx + 1
+  end
+
+  if not amountMicroStr or not userId or not month then
+    return {0, 'parse_error'}
+  end
+
+  local amountMicro = tonumber(amountMicroStr)
+  local newAmount = amountMicro + deltaMicro
+  if newAmount < 0 then newAmount = 0 end
+
+  local reservedKey = reservedPrefix .. userId .. ':' .. month
+  local hashKey = hashPrefix .. userId .. ':' .. month
+
+  if deltaMicro > 0 then
+    local budget = tonumber(redis.call('hget', quotaKey, 'budget') or defaultBudget)
+    local spent = tonumber(redis.call('hget', quotaKey, 'spent') or 0)
+    local reserved = tonumber(redis.call('get', reservedKey) or 0)
+    local hardLimit = redis.call('hget', quotaKey, 'hard_limit')
+    local isHard = (hardLimit ~= '0' and hardLimit ~= 'false')
+
+    if spent + reserved + deltaMicro > budget then
+      if isHard then
+        return {0, 'hard_rejected'}
+      end
+      redis.call('incrby', reservedKey, deltaMicro)
+      local newData = newAmount .. '|' .. userId .. '|' .. month .. '|' .. (createdAt or '0')
+      redis.call('set', reservationKey, newData, 'EX', ttl)
+      redis.call('hset', hashKey, reservationId, newData)
+      return {1, 'soft_overage'}
+    end
+  end
+
+  redis.call('incrby', reservedKey, deltaMicro)
+  local newData = newAmount .. '|' .. userId .. '|' .. month .. '|' .. (createdAt or '0')
+  redis.call('set', reservationKey, newData, 'EX', ttl)
+  redis.call('hset', hashKey, reservationId, newData)
+  return {1, 'within_budget'}
+`;

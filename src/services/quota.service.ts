@@ -34,6 +34,7 @@ import {
   CLEANUP_ORPHAN_SCRIPT,
   RECONCILE_USAGE_SCRIPT,
   RELEASE_RESERVATION_SCRIPT,
+  TOP_UP_RESERVATION_SCRIPT,
 } from './quota/scripts';
 
 export interface QuotaReservation {
@@ -401,6 +402,57 @@ async function tryRecoverFromHash(
     logger.warn({ error, reservationId }, 'Failed to recover reservation from hash');
   }
   return null;
+}
+
+export interface TopUpResult {
+  allowed: boolean;
+  mode: 'within_budget' | 'soft_overage' | 'hard_rejected' | 'not_found' | 'parse_error' | 'error';
+}
+
+export async function topUpReservation(
+  reservationId: string,
+  delta: Decimal
+): Promise<TopUpResult> {
+  const reservationKey = getReservationKey(reservationId);
+
+  let userId: string;
+  let month: string;
+  try {
+    const data = await redis.get(reservationKey);
+    if (!data) return { allowed: false, mode: 'not_found' };
+    const parts = data.split('|');
+    if (parts.length < 3) return { allowed: false, mode: 'parse_error' };
+    userId = parts[1];
+    month = parts[2];
+  } catch (error) {
+    logger.error({ error, reservationId }, 'Top-up: failed to read reservation');
+    return { allowed: false, mode: 'error' };
+  }
+
+  const quotaKey = getQuotaKey(userId, month);
+  const deltaMicro = toMicrodollars(delta);
+
+  try {
+    const result = (await redis.eval(
+      TOP_UP_RESERVATION_SCRIPT,
+      2,
+      quotaKey,
+      reservationKey,
+      String(deltaMicro),
+      reservationId,
+      DEFAULT_BUDGET_MICRO,
+      RESERVATION_TTL_SECONDS,
+      RESERVED_KEY_PREFIX,
+      RESERVATION_HASH_PREFIX
+    )) as (string | number)[];
+
+    const ok = result[0] === 1;
+    const mode = result[1] as TopUpResult['mode'];
+    return { allowed: ok, mode };
+  } catch (error) {
+    logger.error({ error, reservationId }, 'Top-up reservation error');
+    return { allowed: false, mode: 'error' };
+  }
 }
 
 export async function cleanupOrphanedReservations(): Promise<number> {

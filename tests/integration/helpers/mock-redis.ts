@@ -45,6 +45,10 @@ export class MockRedis {
       return this.evalCleanup(args);
     }
 
+    if (script.includes('top_up_reservation') || script.includes('deltaMicro')) {
+      return this.evalTopUp(args);
+    }
+
     if (script.includes('monthly_budget') || script.includes('reserved')) {
       return this.evalCheckAndReserve(args);
     }
@@ -58,6 +62,66 @@ export class MockRedis {
     }
 
     return this.evalCircuitBreakerSuccess(args);
+  }
+
+  private evalTopUp(args: (string | number)[]): unknown {
+    const quotaKey = args[0] as string;
+    const reservationKey = args[1] as string;
+    const deltaMicro = Number(args[2]);
+    const reservationId = args[3] as string;
+    const defaultBudget = Number(args[4]);
+
+    const data = this.store.get(reservationKey);
+    if (!data) {
+      return [0, 'not_found'];
+    }
+
+    const parts = data.split('|');
+    const amountMicroStr = parts[0];
+    const userId = parts[1];
+    const month = parts[2];
+    const createdAt = parts[3] || '0';
+
+    if (!amountMicroStr || !userId || !month) {
+      return [0, 'parse_error'];
+    }
+
+    const amountMicro = Number(amountMicroStr);
+    let newAmount = amountMicro + deltaMicro;
+    if (newAmount < 0) newAmount = 0;
+
+    const reservedKey = `reserved:${userId}:${month}`;
+    const hashKey = `reservations_meta:${userId}:${month}`;
+
+    if (deltaMicro > 0) {
+      const budgetRaw = this.hashes.get(quotaKey)?.get('budget') || String(defaultBudget);
+      const budget = Number(budgetRaw);
+      const spent = Number(this.hashes.get(quotaKey)?.get('spent') || '0');
+      const reserved = Number(this.store.get(reservedKey) || '0');
+      const hardLimitRaw = this.hashes.get(quotaKey)?.get('hard_limit');
+      const isHard = hardLimitRaw !== '0' && hardLimitRaw !== 'false';
+
+      if (spent + reserved + deltaMicro > budget) {
+        if (isHard) {
+          return [0, 'hard_rejected'];
+        }
+        const currentReserved = Number(this.store.get(reservedKey) || '0');
+        this.store.set(reservedKey, String(currentReserved + deltaMicro));
+        const newData = `${newAmount}|${userId}|${month}|${createdAt}`;
+        this.store.set(reservationKey, newData);
+        if (!this.hashes.has(hashKey)) this.hashes.set(hashKey, new Map());
+        this.hashes.get(hashKey)!.set(reservationId, newData);
+        return [1, 'soft_overage'];
+      }
+    }
+
+    const currentReserved = Number(this.store.get(reservedKey) || '0');
+    this.store.set(reservedKey, String(currentReserved + deltaMicro));
+    const newData = `${newAmount}|${userId}|${month}|${createdAt}`;
+    this.store.set(reservationKey, newData);
+    if (!this.hashes.has(hashKey)) this.hashes.set(hashKey, new Map());
+    this.hashes.get(hashKey)!.set(reservationId, newData);
+    return [1, 'within_budget'];
   }
 
   private evalCheckAndReserve(args: (string | number)[]): unknown {
