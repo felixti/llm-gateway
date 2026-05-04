@@ -1,3 +1,4 @@
+import { env } from '@/config/env';
 import { redis } from '@/db/redis';
 import { setCircuitBreakerState } from '@/observability/metrics';
 
@@ -10,6 +11,8 @@ export enum CircuitState {
 const DEFAULT_FAILURE_THRESHOLD = 5;
 const DEFAULT_RESET_TIMEOUT = 30_000;
 const CIRCUIT_KEY_PREFIX = 'circuit:';
+
+export const PROBE_TTL_SECONDS = Math.ceil(env.REQUEST_TIMEOUT_MS / 1000) + 5;
 
 function getCircuitKey(deploymentName: string): string {
   return `${CIRCUIT_KEY_PREFIX}${deploymentName}`;
@@ -62,11 +65,12 @@ const RECORD_FAILURE_SCRIPT = `
   return state
 `;
 
-const IS_REQUEST_ALLOWED_SCRIPT = `
+export const IS_REQUEST_ALLOWED_SCRIPT = `
   local key = KEYS[1]
   local probeKey = KEYS[2]
   local now = tonumber(ARGV[1])
   local resetTimeout = tonumber(ARGV[2])
+  local probeTtl = tonumber(ARGV[3])
 
   local state = redis.call('hget', key, 'state')
   if state == false or state == 'CLOSED' then
@@ -77,14 +81,14 @@ const IS_REQUEST_ALLOWED_SCRIPT = `
     local nextAttemptTime = tonumber(redis.call('hget', key, 'nextAttemptTime') or 0)
     if now >= nextAttemptTime then
       redis.call('hset', key, 'state', 'HALF_OPEN')
-      redis.call('set', probeKey, '1')
+      redis.call('set', probeKey, '1', 'EX', probeTtl)
       return 1
     end
     return 0
   end
 
   if state == 'HALF_OPEN' then
-    local probeSet = redis.call('set', probeKey, '1', 'NX')
+    local probeSet = redis.call('set', probeKey, '1', 'NX', 'EX', probeTtl)
     if not probeSet then
       return 0
     end
@@ -129,7 +133,8 @@ export async function isRequestAllowed(deploymentName: string): Promise<boolean>
     key,
     probeKey,
     Date.now(),
-    DEFAULT_RESET_TIMEOUT
+    DEFAULT_RESET_TIMEOUT,
+    PROBE_TTL_SECONDS
   );
   return result === 1;
 }
