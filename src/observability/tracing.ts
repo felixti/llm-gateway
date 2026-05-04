@@ -192,6 +192,7 @@ export function addLLMSpanAttributes(attrs: {
   deployment?: string;
   promptTokens?: number;
   completionTokens?: number;
+  thinkingTokens?: number;
   totalTokens?: number;
   costUsd?: number;
   protocol?: string;
@@ -212,6 +213,9 @@ export function addLLMSpanAttributes(attrs: {
   }
   if (attrs.completionTokens !== undefined) {
     span.setAttribute(ATTR_LLM_TOKENS_OUTPUT, attrs.completionTokens);
+  }
+  if (attrs.thinkingTokens !== undefined) {
+    span.setAttribute(ATTR_LLM_TOKENS_THINKING, attrs.thinkingTokens);
   }
   if (attrs.totalTokens !== undefined) {
     span.setAttribute(ATTR_LLM_TOKENS_TOTAL, attrs.totalTokens);

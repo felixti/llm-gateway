@@ -17,15 +17,18 @@ export class PinoPIITransform implements DestinationStream {
   }
 
   write(logEntry: string): void {
+    const newline = logEntry.endsWith('\r\n') ? '\r\n' : logEntry.endsWith('\n') ? '\n' : '';
+    const entry = newline ? logEntry.slice(0, -newline.length) : logEntry;
+
     try {
-      const parsed = JSON.parse(logEntry);
+      const parsed = JSON.parse(entry);
       const sanitized = sanitizePII(parsed);
-      this.destination.write(JSON.stringify(sanitized));
+      this.destination.write(`${JSON.stringify(sanitized)}${newline}`);
     } catch {
       // Unparseable entry: sanitize the raw string as fallback
-      const sanitized = sanitizePII(logEntry);
+      const sanitized = sanitizePII(entry);
       if (typeof sanitized === 'string') {
-        this.destination.write(sanitized);
+        this.destination.write(`${sanitized}${newline}`);
       } else {
         this.destination.write(logEntry);
       }

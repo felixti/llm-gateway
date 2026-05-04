@@ -29,10 +29,25 @@ function getAllowedCorsOrigins(): string[] {
   return allowedOrigins;
 }
 
+export function shouldCompressResponse(response: Response): boolean {
+  const contentType = response.headers.get('Content-Type')?.toLowerCase() ?? '';
+  const cacheControl = response.headers.get('Cache-Control')?.toLowerCase() ?? '';
+
+  if (contentType.includes('text/event-stream')) {
+    return false;
+  }
+
+  if (cacheControl.includes('no-transform')) {
+    return false;
+  }
+
+  return true;
+}
+
 function applyGlobalMiddleware(app: Hono): void {
   const allowedOrigins = getAllowedCorsOrigins();
 
-  app.use('*', compress());
+  app.use('*', compress({ filter: (c) => shouldCompressResponse(c.res) }));
   app.use(
     '*',
     secureHeaders({

@@ -42,13 +42,41 @@ const inMemoryGauges: Record<string, number> = {
   circuit_breaker_state: 0,
 };
 
-const inMemoryHistograms: Record<string, { count: number; sum: number }> = {
-  http_request_duration_ms: { count: 0, sum: 0 },
-  llm_request_duration_ms: { count: 0, sum: 0 },
+type InMemoryHistogram = {
+  buckets: number[];
+  counts: number[];
+  count: number;
+  sum: number;
+};
+
+const inMemoryHistograms: Record<string, InMemoryHistogram> = {
+  http_request_duration_ms: {
+    buckets: [50, 100, 250, 500, 1000, 2500, 5000, 10000],
+    counts: [0, 0, 0, 0, 0, 0, 0, 0],
+    count: 0,
+    sum: 0,
+  },
+  llm_request_duration_ms: {
+    buckets: [250, 500, 1000, 2500, 5000, 10000, 30000, 60000],
+    counts: [0, 0, 0, 0, 0, 0, 0, 0],
+    count: 0,
+    sum: 0,
+  },
 };
 
 function incrementCounter(name: string, value = 1): void {
   inMemoryCounters[name] = (inMemoryCounters[name] || 0) + value;
+}
+
+function recordInMemoryHistogram(name: keyof typeof inMemoryHistograms, value: number): void {
+  const histogram = inMemoryHistograms[name];
+  histogram.count++;
+  histogram.sum += value;
+  histogram.buckets.forEach((bucket, index) => {
+    if (value <= bucket) {
+      histogram.counts[index]++;
+    }
+  });
 }
 
 export function getPrometheusMetrics(): string {
@@ -63,6 +91,10 @@ export function getPrometheusMetrics(): string {
   }
   for (const [name, value] of Object.entries(inMemoryHistograms)) {
     lines.push(`# TYPE ${name} histogram`);
+    for (let i = 0; i < value.buckets.length; i++) {
+      lines.push(`${name}_bucket{le="${value.buckets[i]}"} ${value.counts[i]}`);
+    }
+    lines.push(`${name}_bucket{le="+Inf"} ${value.count}`);
     lines.push(`${name}_count ${value.count}`);
     lines.push(`${name}_sum ${value.sum}`);
   }
@@ -255,8 +287,7 @@ export function setCircuitBreakerState(state: 'CLOSED' | 'OPEN' | 'HALF_OPEN'): 
 export function recordHttpRequestDuration(durationMs: number, method: string, path: string): void {
   const normalized = normalizePath(path);
   httpRequestDuration.record(durationMs, { method, path: normalized });
-  inMemoryHistograms.http_request_duration_ms.count++;
-  inMemoryHistograms.http_request_duration_ms.sum += durationMs;
+  recordInMemoryHistogram('http_request_duration_ms', durationMs);
 }
 
 export function recordLlmRequestDuration(
@@ -265,6 +296,5 @@ export function recordLlmRequestDuration(
   protocol: string
 ): void {
   llmRequestDuration.record(durationMs, { model: normalizeMetricModel(model), protocol });
-  inMemoryHistograms.llm_request_duration_ms.count++;
-  inMemoryHistograms.llm_request_duration_ms.sum += durationMs;
+  recordInMemoryHistogram('llm_request_duration_ms', durationMs);
 }

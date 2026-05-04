@@ -114,8 +114,12 @@ describe('Metrics', () => {
     expect(output).toContain('# TYPE circuit_breaker_state gauge');
     expect(output).toContain('circuit_breaker_state 1');
     expect(output).toContain('# TYPE http_request_duration_ms histogram');
+    expect(output).toContain('http_request_duration_ms_bucket{le="100"');
+    expect(output).toContain('http_request_duration_ms_bucket{le="+Inf"');
     expect(output).toContain('http_request_duration_ms_count');
     expect(output).toContain('# TYPE llm_request_duration_ms histogram');
+    expect(output).toContain('llm_request_duration_ms_bucket{le="1000"');
+    expect(output).toContain('llm_request_duration_ms_bucket{le="+Inf"');
     expect(output).toContain('llm_request_duration_ms_count');
   });
 });

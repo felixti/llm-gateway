@@ -13,8 +13,13 @@ import {
 } from './responses-tools';
 
 type ResponsesInputItem = {
+  type?: string;
   role?: string;
   content?: unknown;
+  call_id?: string;
+  output?: unknown;
+  name?: string;
+  arguments?: unknown;
 };
 
 function stringifyResponseContent(content: unknown): string {
@@ -33,10 +38,55 @@ function stringifyResponseContent(content: unknown): string {
       if (part && typeof part === 'object' && typeof Reflect.get(part, 'text') === 'string') {
         return Reflect.get(part, 'text') as string;
       }
+      if (part && typeof part === 'object' && typeof Reflect.get(part, 'output') === 'string') {
+        return Reflect.get(part, 'output') as string;
+      }
       return '';
     })
     .filter(Boolean)
     .join('\n');
+}
+
+function mapResponsesRole(role: string | undefined): string {
+  if (role === 'developer' || role === 'system') {
+    return 'system';
+  }
+  if (role === 'assistant') {
+    return 'assistant';
+  }
+  return 'user';
+}
+
+function transformResponsesInputItem(item: ResponsesInputItem): Record<string, unknown> {
+  if (item.type === 'function_call_output') {
+    return {
+      role: 'tool',
+      tool_call_id: item.call_id,
+      content: stringifyResponseContent(item.output),
+    };
+  }
+
+  if (item.type === 'function_call') {
+    return {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: item.call_id,
+          type: 'function',
+          function: {
+            name: item.name ?? 'function_tool',
+            arguments: stringifyResponseContent(item.arguments),
+          },
+        },
+      ],
+    };
+  }
+
+  return {
+    role: mapResponsesRole(item.role),
+    content: stringifyResponseContent(item.content),
+  };
 }
 
 /**
@@ -51,10 +101,7 @@ export function transformResponsesToChatCompletions(
     typeof input === 'string'
       ? [{ role: 'user', content: input }]
       : Array.isArray(input)
-        ? input.map((item: ResponsesInputItem) => ({
-            role: item.role ?? 'user',
-            content: stringifyResponseContent(item.content),
-          }))
+        ? input.map((item: ResponsesInputItem) => transformResponsesInputItem(item))
         : [];
 
   const tools = Array.isArray(body.tools)
@@ -158,6 +205,15 @@ interface ChatCompletionChunk {
     delta?: {
       role?: string;
       content?: string;
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: string;
+        function?: {
+          name?: string;
+          arguments?: string;
+        };
+      }>;
     };
     finish_reason?: string;
   }>;
@@ -180,7 +236,11 @@ export function createResponsesStreamTransformer() {
   let buffer = '';
   let started = false;
   let responseCreatedAt: number | undefined;
+  let responseId = '';
+  let responseModel = '';
   const accumulatedText: Record<number, string> = {};
+  const toolCalls: Record<number, { id: string; name: string; arguments: string; added: boolean }> =
+    {};
 
   return {
     transform(chunk: Uint8Array, controller: TransformStreamDefaultController): void {
@@ -206,6 +266,13 @@ export function createResponsesStreamTransformer() {
           const parsed = JSON.parse(data) as ChatCompletionChunk;
           const choice = parsed.choices?.[0];
           const index = choice?.index ?? 0;
+
+          if (parsed.id) {
+            responseId = parsed.id;
+          }
+          if (parsed.model) {
+            responseModel = parsed.model;
+          }
 
           if (!started && parsed.id) {
             started = true;
@@ -263,7 +330,64 @@ export function createResponsesStreamTransformer() {
             );
           }
 
+          if (choice?.delta?.tool_calls) {
+            for (const toolDelta of choice.delta.tool_calls) {
+              const toolIndex = toolDelta.index ?? 0;
+              const current = toolCalls[toolIndex] ?? {
+                id: toolDelta.id ?? `${responseId || parsed.id || 'response'}-tool-${toolIndex}`,
+                name: toolDelta.function?.name ?? 'function_tool',
+                arguments: '',
+                added: false,
+              };
+
+              toolCalls[toolIndex] = {
+                id: toolDelta.id ?? current.id,
+                name: toolDelta.function?.name ?? current.name,
+                arguments: current.arguments + (toolDelta.function?.arguments ?? ''),
+                added: current.added,
+              };
+
+              if (!toolCalls[toolIndex].added) {
+                toolCalls[toolIndex].added = true;
+                outputLines.push(
+                  `data: ${serialize({
+                    type: 'response.output_item.added',
+                    output_index: toolIndex,
+                    item: {
+                      type: 'function_call',
+                      id: toolCalls[toolIndex].id,
+                      call_id: toolCalls[toolIndex].id,
+                      name: toolCalls[toolIndex].name,
+                      arguments: '',
+                      status: 'in_progress',
+                    },
+                  })}`
+                );
+              }
+            }
+          }
+
           if (choice?.finish_reason) {
+            if (choice.finish_reason === 'tool_calls') {
+              for (const [toolIndex, toolCall] of Object.entries(toolCalls)) {
+                outputLines.push(
+                  `data: ${serialize({
+                    type: 'response.output_item.done',
+                    output_index: Number(toolIndex),
+                    item: {
+                      type: 'function_call',
+                      id: toolCall.id,
+                      call_id: toolCall.id,
+                      name: toolCall.name,
+                      arguments: toolCall.arguments,
+                      status: 'completed',
+                    },
+                  })}`
+                );
+              }
+              continue;
+            }
+
             const text = accumulatedText[index] || '';
             outputLines.push(
               `data: ${serialize({
@@ -305,21 +429,33 @@ export function createResponsesStreamTransformer() {
                   object: 'response',
                   created_at: parsed.created ?? responseCreatedAt ?? getCurrentUnixTime(),
                   status: 'completed',
-                  model: parsed.model || '',
-                  output: parsed.choices?.map((c) => {
+                  model: parsed.model || responseModel,
+                  output: parsed.choices?.flatMap<Record<string, unknown>>((c) => {
                     const idx = c.index ?? 0;
-                    return {
-                      type: 'message',
-                      id: `${parsed.id}-${idx}`,
-                      status: 'completed',
-                      role: 'assistant',
-                      content: [
-                        {
-                          type: 'output_text',
-                          text: accumulatedText[idx] || '',
-                        },
-                      ],
-                    };
+                    if (c.finish_reason === 'tool_calls') {
+                      return Object.values(toolCalls).map((toolCall) => ({
+                        type: 'function_call',
+                        id: toolCall.id,
+                        call_id: toolCall.id,
+                        name: toolCall.name,
+                        arguments: toolCall.arguments,
+                        status: 'completed',
+                      }));
+                    }
+                    return [
+                      {
+                        type: 'message',
+                        id: `${parsed.id || responseId}-${idx}`,
+                        status: 'completed',
+                        role: 'assistant',
+                        content: [
+                          {
+                            type: 'output_text',
+                            text: accumulatedText[idx] || '',
+                          },
+                        ],
+                      },
+                    ];
                   }),
                   usage: parsed.usage,
                 },

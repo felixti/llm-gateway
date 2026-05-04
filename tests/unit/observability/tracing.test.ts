@@ -101,6 +101,14 @@ describe('Tracing', () => {
         })
       ).not.toThrow();
     });
+
+    it('accepts thinking token attributes for OpenTelemetry spans', () => {
+      expect(() =>
+        addLLMSpanAttributes({
+          thinkingTokens: 7,
+        })
+      ).not.toThrow();
+    });
   });
 
   describe('recordError', () => {

@@ -173,6 +173,29 @@ describe("transformResponsesToChatCompletions", () => {
       },
     ]);
   });
+
+  test("maps rich Responses input items to Chat Completions messages", () => {
+    const result = transformResponsesToChatCompletions({
+      model: "gpt-5.3-codex",
+      input: [
+        {
+          type: "message",
+          role: "developer",
+          content: [{ type: "input_text", text: "Follow repo rules" }],
+        },
+        {
+          type: "function_call_output",
+          call_id: "call_123",
+          output: "file contents",
+        },
+      ],
+    });
+
+    expect(result.messages).toEqual([
+      { role: "system", content: "Follow repo rules" },
+      { role: "tool", tool_call_id: "call_123", content: "file contents" },
+    ]);
+  });
 });
 
 describe("createResponsesStreamTransformer", () => {
@@ -233,7 +256,6 @@ describe("createResponsesStreamTransformer", () => {
     };
 
     transformer.transform(encoder.encode(`data: ${JSON.stringify(event1)}\n\n`), controller);
-    chunks.length = 0;
     transformer.transform(encoder.encode(`data: ${JSON.stringify(event2)}\n\n`), controller);
     chunks.length = 0;
     transformer.transform(encoder.encode(`data: ${JSON.stringify(event3)}\n\n`), controller);
@@ -274,7 +296,6 @@ describe("createResponsesStreamTransformer", () => {
     };
 
     transformer.transform(encoder.encode(`data: ${JSON.stringify(event1)}\n\n`), controller);
-    chunks.length = 0;
     transformer.transform(encoder.encode(`data: ${JSON.stringify(event2)}\n\n`), controller);
     chunks.length = 0;
     transformer.transform(encoder.encode(`data: ${JSON.stringify(event3)}\n\n`), controller);
@@ -296,5 +317,60 @@ describe("createResponsesStreamTransformer", () => {
 
     transformer.transform(new TextEncoder().encode("foo: bar\n"), controller);
     expect.assertions(1);
+  });
+
+  test("emits Responses function_call items from streaming tool call deltas", () => {
+    const transformer = createResponsesStreamTransformer();
+    const chunks: string[] = [];
+    const controller = makeController(chunks);
+    const encoder = new TextEncoder();
+
+    const event1 = {
+      id: "chatcmp-tools",
+      created: 1700000005,
+      model: "gpt-test",
+      choices: [
+        {
+          index: 0,
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id: "call_123",
+                type: "function",
+                function: { name: "shell_exec", arguments: "{\"cmd\":" },
+              },
+            ],
+          },
+        },
+      ],
+    };
+    const event2 = {
+      id: "chatcmp-tools",
+      choices: [
+        {
+          index: 0,
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                function: { arguments: "\"pwd\"}" },
+              },
+            ],
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
+    };
+
+    transformer.transform(encoder.encode(`data: ${JSON.stringify(event1)}\n\n`), controller);
+    transformer.transform(encoder.encode(`data: ${JSON.stringify(event2)}\n\n`), controller);
+
+    const text = chunks.join("");
+    expect(text).toContain("response.output_item.added");
+    expect(text).toContain("response.output_item.done");
+    expect(text).toContain('"type":"function_call"');
+    expect(text).toContain('"name":"shell_exec"');
+    expect(text).toContain('"arguments":"{\\"cmd\\":\\"pwd\\"}"');
   });
 });

@@ -141,6 +141,18 @@ describe("PinoPIITransform", () => {
   });
 
   describe("integration with pino logger output", () => {
+    it("preserves one newline boundary per parsed JSON log line", () => {
+      const { write, captured } = createCapturingStream();
+      const transform = new PinoPIITransform({ write });
+      const entry = JSON.stringify({ level: 30, msg: "user test@example.com" });
+
+      transform.write(`${entry}\n`);
+      transform.write(`${entry}\n`);
+
+      expect(captured.join("")).toEndWith("\n");
+      expect(captured.join("").split("\n").filter(Boolean)).toHaveLength(2);
+    });
+
     it("should sanitize logger.info output through the transform", () => {
       const { write, captured } = createCapturingStream();
       const transform = new PinoPIITransform({ write });

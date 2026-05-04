@@ -25,10 +25,17 @@ export const responsesBodySchema = z
     input: z.union([
       z.string(),
       z.array(
-        z.object({
-          role: z.enum(['user']),
-          content: z.string(),
-        })
+        z
+          .object({
+            type: z.string().optional(),
+            role: z.enum(['user', 'assistant', 'system', 'developer']).optional(),
+            content: z.unknown().optional(),
+            call_id: z.string().optional(),
+            output: z.unknown().optional(),
+            name: z.string().optional(),
+            arguments: z.unknown().optional(),
+          })
+          .passthrough()
       ),
     ]),
     stream: z.boolean().optional().default(false),
