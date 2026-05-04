@@ -12,6 +12,7 @@ import { buildRequestBody, buildUpstreamUrl } from '@/proxy/openai-chat.proxy';
 import {
   proxyNonStreamingResponses,
   proxyStreamingResponses,
+  transformResponsesToChatCompletions,
 } from '@/proxy/openai-responses.proxy';
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -33,12 +34,21 @@ export const responsesBodySchema = z
     stream: z.boolean().optional().default(false),
     tools: z
       .array(
-        z.object({
-          type: z.literal('function'),
-          name: z.string(),
-          description: z.string().optional(),
-          parameters: z.record(z.unknown()),
-        })
+        z
+          .object({
+            type: z.string(),
+            name: z.string().optional(),
+            description: z.string().optional(),
+            parameters: z.record(z.unknown()).optional(),
+            function: z
+              .object({
+                name: z.string().optional(),
+                description: z.string().optional(),
+                parameters: z.record(z.unknown()).optional(),
+              })
+              .optional(),
+          })
+          .passthrough()
       )
       .optional(),
     reasoning: z
@@ -59,52 +69,6 @@ export const responsesBodySchema = z
 
 export type ResponsesBody = z.infer<typeof responsesBodySchema>;
 
-/**
- * Transform Responses API request to Chat Completions format
- */
-function transformToChatCompletions(body: Record<string, unknown>): Record<string, unknown> {
-  const typedBody = body as ResponsesBody;
-  const messages: Array<{ role: string; content: string }> = [];
-
-  // Transform input to messages
-  if (typeof typedBody.input === 'string') {
-    messages.push({ role: 'user', content: typedBody.input });
-  } else if (Array.isArray(typedBody.input)) {
-    for (const item of typedBody.input) {
-      messages.push({ role: item.role, content: item.content });
-    }
-  }
-
-  // Transform tools if present
-  type Tool = {
-    type: 'function';
-    name: string;
-    description?: string;
-    parameters: Record<string, unknown>;
-  };
-  let functions:
-    | Array<{ name: string; description?: string; parameters: Record<string, unknown> }>
-    | undefined;
-  if (typedBody.tools && typedBody.tools.length > 0) {
-    functions = typedBody.tools.map((tool: Tool) => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.parameters,
-    }));
-  }
-
-  return {
-    model: typedBody.model,
-    messages,
-    stream: typedBody.stream,
-    max_tokens: typedBody.max_tokens,
-    max_completion_tokens: typedBody.max_completion_tokens,
-    temperature: typedBody.temperature,
-    user: typedBody.user,
-    functions,
-  };
-}
-
 // Create handler using factory
 const handleResponsesRequest = createRequestHandler({
   schema: responsesBodySchema,
@@ -115,7 +79,7 @@ const handleResponsesRequest = createRequestHandler({
   getModel: (body: Record<string, unknown>) => body.model as string,
   buildUpstreamUrl: (deployment) => buildUpstreamUrl(deployment, deployment.modelFamily),
   transformBody: (body, deployment) =>
-    buildRequestBody(transformToChatCompletions(body), deployment.modelFamily),
+    buildRequestBody(transformResponsesToChatCompletions(body), deployment.modelFamily),
 });
 
 // Create responses routes

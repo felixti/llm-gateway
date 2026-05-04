@@ -152,6 +152,24 @@ describe('rateLimitMiddleware', () => {
     expect(evalCalls[1][5]).toBe(150);
   });
 
+  test('counts Chat Completions prompt messages toward token-per-minute limiting', async () => {
+    const { rateLimitMiddleware } = await import('../../../src/middleware/rate-limit');
+    const next = vi.fn(async () => undefined) as Next;
+
+    await rateLimitMiddleware(
+      createContext({
+        model: 'gpt-5.4',
+        messages: [{ role: 'user', content: 'x'.repeat(400) }],
+        max_completion_tokens: 20,
+      }),
+      next
+    );
+
+    expect(next).toHaveBeenCalled();
+    expect(evalCalls).toHaveLength(2);
+    expect(evalCalls[1][5]).toBeGreaterThan(20);
+  });
+
   test('counts Responses API string input toward token-per-minute limiting', async () => {
     const { rateLimitMiddleware } = await import('../../../src/middleware/rate-limit');
     const next = vi.fn(async () => undefined) as Next;

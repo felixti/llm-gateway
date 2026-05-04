@@ -10,12 +10,14 @@ const mockReleaseReservation = vi.fn();
 const mockReconcileUsage = vi.fn();
 
 vi.mock('../../../src/services/pricing.service', () => ({
+  calculateCost: (...args: unknown[]) => mockCalculateEstimatedCost(...args),
   calculateEstimatedCost: (...args: unknown[]) => mockCalculateEstimatedCost(...args),
 }));
 
 vi.mock('../../../src/services/quota.service', () => ({
   checkAndReserve: (...args: unknown[]) => mockCheckAndReserve(...args),
   getQuotaStatus: (...args: unknown[]) => mockGetQuotaStatus(...args),
+  recordUsageOnly: vi.fn(),
   releaseReservation: (...args: unknown[]) => mockReleaseReservation(...args),
   reconcileUsage: (...args: unknown[]) => mockReconcileUsage(...args),
 }));
@@ -329,6 +331,40 @@ describe('quotaMiddleware — soft limit over-budget', () => {
     expect(vars.get('reservationId')).toBe('res_123');
   });
 
+  test('releases reservation when downstream handler returns a pre-proxy error response', async () => {
+    const { quotaMiddleware } = await import('../../../src/middleware/quota');
+
+    mockGetQuotaStatus.mockResolvedValue(ok({
+      monthly_budget_usd: 100,
+      spent_usd: 5,
+      reserved_usd: 0,
+      remaining_usd: 95,
+      reset_date: '2026-06-01T00:00:00.000Z',
+      hard_limit: false,
+    }));
+    mockCalculateEstimatedCost.mockReturnValue(new Decimal(0.5));
+    mockCheckAndReserve.mockResolvedValue({
+      allowed: true,
+      reservationId: 'res_pre_proxy_error',
+      estimatedCost: new Decimal(0.5),
+    });
+
+    const { context } = createMockContext({
+      parsedBody: { messages: [{ role: 'user', content: 'hello' }], max_tokens: 100 },
+    });
+    const next = vi.fn(async () => {
+      (context as unknown as { res: Response }).res = new Response(
+        JSON.stringify({ error: { code: 'invalid_request' } }),
+        { status: 400 }
+      );
+    }) as Next;
+
+    await quotaMiddleware(context, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(mockReleaseReservation).toHaveBeenCalledWith('res_pre_proxy_error');
+  });
+
   test('hard-limit over-budget still returns 429', async () => {
     const { quotaMiddleware } = await import('../../../src/middleware/quota');
 
@@ -402,5 +438,26 @@ describe('quotaMiddleware — count_tokens', () => {
     expect(mockCheckAndReserve).not.toHaveBeenCalled();
     expect(mockCalculateEstimatedCost).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  test("missing model → returns 400 (fail-closed)", async () => {
+    const { quotaMiddleware } = await import("../../../src/middleware/quota");
+    const next = vi.fn(async () => undefined) as Next;
+
+    const { context } = createMockContext({
+      userId: "user-1",
+      model: "",
+      path: "/v1/chat/completions",
+      parsedBody: { messages: [{ role: "user", content: "hello" }] },
+    });
+
+    const result = await quotaMiddleware(context, next);
+
+    expect(result).toBeInstanceOf(Response);
+    expect(result!.status).toBe(400);
+    const body = (await result!.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("invalid_request");
+    expect(body.error.message).toContain("Model is required");
+    expect(next).not.toHaveBeenCalled();
   });
 });

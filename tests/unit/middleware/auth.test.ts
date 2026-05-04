@@ -121,6 +121,21 @@ describe("authMiddleware", () => {
     expect(result!.status).toBe(401);
   });
 
+  test("base64url characters in payload (- and _) → decodes correctly", async () => {
+    // UUID-like jti produces base64url chars like - and _ when encoded
+    const jti = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    const token = generateValidPat("user-1", { jti, exp, scope: "all" });
+    mockRedisGet.mockResolvedValue(null);
+
+    const c = createMockContext(`Bearer ${token}`);
+    const result = await authMiddleware(c, next);
+
+    expect(result).toBeUndefined();
+    expect(c.get(JTI_KEY)).toBe(jti);
+    expect(c.get(SCOPE_KEY)).toBe("all");
+  });
+
   test("Redis blocklist read rejects → fails closed with 503", async () => {
     const jti = "jti-redis-down";
     const exp = Math.floor(Date.now() / 1000) + 3600;

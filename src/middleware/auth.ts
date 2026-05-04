@@ -62,8 +62,11 @@ interface JwtPayload {
  */
 function parseJwtPayload(payloadB64: string): AuthResult<JwtPayload> {
   try {
-    const padded = payloadB64.padEnd(payloadB64.length + ((4 - (payloadB64.length % 4)) % 4), '=');
-    const decoded = JSON.parse(atob(padded)) as { jti?: string; exp?: number; scope?: string };
+    const decoded = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf-8')) as {
+      jti?: string;
+      exp?: number;
+      scope?: string;
+    };
     const jti = decoded.jti || '';
     const exp = decoded.exp || 0;
     const scope = decoded.scope;

@@ -1,4 +1,4 @@
-import { recordHttpRequestDuration } from '@/observability/metrics';
+import { incrementHttpRequests, recordHttpRequestDuration } from '@/observability/metrics';
 import type { Context, Next } from 'hono';
 
 export async function performanceMiddleware(c: Context, next: Next) {
@@ -7,5 +7,7 @@ export async function performanceMiddleware(c: Context, next: Next) {
   await next();
 
   const duration = performance.now() - startTime;
+  const status = c.res?.status ?? 0;
+  incrementHttpRequests(c.req.method, c.req.path, status);
   recordHttpRequestDuration(duration, c.req.method, c.req.path);
 }

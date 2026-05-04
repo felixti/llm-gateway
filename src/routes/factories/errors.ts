@@ -73,13 +73,3 @@ export function validateBody<T>(body: unknown, schema: ZodSchema): Result<T, Req
 
   return ok(parsed.data as T);
 }
-
-/**
- * Wrap JSON parsing in Result type
- */
-export function parseJsonBody(body: unknown): Result<Record<string, unknown>, RequestError> {
-  if (typeof body !== 'object' || body === null) {
-    return err({ type: 'invalid_json', message: 'Request body must be an object' });
-  }
-  return ok(body as Record<string, unknown>);
-}

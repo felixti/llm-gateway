@@ -2,7 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import {
   parsePatToken,
   validatePatStructure,
-  isJtiBlocklisted,
   hashJtiForBlocklist,
 } from '../../../src/utils/auth';
 
@@ -54,30 +53,6 @@ describe('Auth utilities', () => {
       const result = validatePatStructure(`lg_user1_header.payload.${wrongSig}`);
       expect(result.valid).toBe(false);
       expect(result.error).toBe('Invalid signature');
-    });
-  });
-
-  describe('isJtiBlocklisted', () => {
-    it('should return false when JTI is not in blocklist', async () => {
-      const result = await isJtiBlocklisted('jti-1', async () => null);
-      expect(result).toBe(false);
-    });
-
-    it('should return true when JTI hash matches blocklist', async () => {
-      const jti = 'jti-1';
-      const hash = hashJtiForBlocklist(jti);
-      const result = await isJtiBlocklisted(jti, async () => hash);
-      expect(result).toBe(true);
-    });
-
-    it('should return false when JTI hash does not match', async () => {
-      const result = await isJtiBlocklisted('jti-1', async () => 'wronghash');
-      expect(result).toBe(false);
-    });
-
-    it('should return false for invalid stored hash', async () => {
-      const result = await isJtiBlocklisted('jti-1', async () => 'zz');
-      expect(result).toBe(false);
     });
   });
 

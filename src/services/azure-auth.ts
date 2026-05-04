@@ -222,6 +222,7 @@ export function getAzureAuthManager(): AzureAuthManager {
 
 /**
  * Create new AzureAuthManager instance (for testing)
+ * @internal
  */
 export function createAzureAuthManager(fetchFn?: typeof fetch): AzureAuthManager {
   return new AzureAuthManager(fetchFn);

@@ -2,6 +2,7 @@ import { env } from '@/config/env';
 import { redis } from '@/db/redis';
 import { setCircuitBreakerState } from '@/observability/metrics';
 
+/** @internal */
 export enum CircuitState {
   CLOSED = 'CLOSED',
   OPEN = 'OPEN',
@@ -139,6 +140,7 @@ export async function isRequestAllowed(deploymentName: string): Promise<boolean>
   return result === 1;
 }
 
+/** @internal */
 export async function getCircuitState(deploymentName: string): Promise<{
   state: CircuitState;
   failureCount: number;
@@ -170,12 +172,14 @@ export async function getCircuitState(deploymentName: string): Promise<{
   };
 }
 
+/** @internal */
 export async function resetCircuitBreaker(deploymentName: string): Promise<void> {
   const key = getCircuitKey(deploymentName);
   const probeKey = `${CIRCUIT_KEY_PREFIX}${deploymentName}:half_open_probe`;
   await redis.del(key, probeKey);
 }
 
+/** @internal */
 export async function resetAllCircuitBreakers(): Promise<void> {
   const pattern = `${CIRCUIT_KEY_PREFIX}*`;
   let cursor = '0';

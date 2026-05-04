@@ -85,7 +85,7 @@ export interface ReconciliationError {
  * Result type for reconcileUsage operations.
  * Fail-closed: Redis errors propagate as errors, not zero values.
  */
-export type ReconciliationResult = Result<Decimal, ReconciliationError>;
+type ReconciliationResult = Result<Decimal, ReconciliationError>;
 
 export async function checkAndReserve(
   userId: string,
@@ -343,23 +343,6 @@ export async function getQuotaStatus(userId: string): Promise<QuotaResult> {
   });
 }
 
-export async function setMonthlyBudget(
-  userId: string,
-  budgetUsd: number,
-  month?: string
-): Promise<void> {
-  const targetMonth = month || getCurrentMonth();
-  const quotaKey = getQuotaKey(userId, targetMonth);
-  const budgetMicro = toMicrodollars(new Decimal(budgetUsd));
-
-  await redis.hset(quotaKey, {
-    budget: budgetMicro,
-    spent: '0',
-    reset_date: getResetDate(),
-    db_synced_at: String(Date.now()),
-  });
-}
-
 async function tryRecoverFromHash(
   reservationId: string
 ): Promise<{ userId: string; month: string; amountMicro: string } | null> {
@@ -404,7 +387,7 @@ async function tryRecoverFromHash(
   return null;
 }
 
-export interface TopUpResult {
+interface TopUpResult {
   allowed: boolean;
   mode: 'within_budget' | 'soft_overage' | 'hard_rejected' | 'not_found' | 'parse_error' | 'error';
 }

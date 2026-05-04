@@ -2,6 +2,7 @@ import { env } from '@/config/env';
 import { redis } from '@/db/redis';
 import { incrementRateLimit429 } from '@/observability/metrics';
 import { errorForProtocol } from '@/utils/errors';
+import { estimateAnthropicTokens, estimateMessagesTokens } from '@/utils/tokens';
 import type { Context, Next } from 'hono';
 
 const RPM_LIMIT = env.RATE_LIMIT_RPM;
@@ -163,7 +164,7 @@ function extractTokenCount(c: Context): number {
     max_tokens?: number;
     max_completion_tokens?: number;
     input?: unknown;
-    messages?: Array<{ content?: unknown }>;
+    messages?: Array<{ role?: string; content?: unknown }>;
   };
 
   // Use max_completion_tokens with precedence over max_tokens
@@ -180,29 +181,36 @@ function extractTokenCount(c: Context): number {
 
   const path = c.req.path;
   if (path === '/v1/responses' && typeof b.input === 'string') {
-    return Math.ceil(b.input.length / 4) + maxTokens;
+    const model =
+      typeof Reflect.get(b, 'model') === 'string' ? (Reflect.get(b, 'model') as string) : 'gpt';
+    const promptTokens = estimateMessagesTokens([{ role: 'user', content: b.input }], model);
+    return promptTokens + maxTokens;
+  }
+
+  if (path === '/v1/chat/completions' && Array.isArray(b.messages)) {
+    const model =
+      typeof Reflect.get(b, 'model') === 'string' ? (Reflect.get(b, 'model') as string) : 'gpt';
+    const promptTokens = estimateMessagesTokens(
+      b.messages.map((message) => ({
+        role: message.role,
+        content: typeof message.content === 'string' ? message.content : '',
+      })),
+      model
+    );
+    return promptTokens + maxTokens;
   }
 
   const isAnthropicMessagesRoute =
     path === '/v1/messages' || path === '/v1/messages/count_tokens' || path === '/count_tokens';
 
   if (isAnthropicMessagesRoute && Array.isArray(b.messages)) {
-    let contentLength = 0;
-    for (const msg of b.messages) {
-      if (msg && typeof msg === 'object' && msg.content !== undefined) {
-        const content = msg.content;
-        if (typeof content === 'string') {
-          contentLength += content.length;
-        } else if (Array.isArray(content)) {
-          for (const block of content) {
-            if (block && typeof block === 'object' && typeof block.text === 'string') {
-              contentLength += block.text.length;
-            }
-          }
-        }
-      }
-    }
-    return Math.ceil(contentLength / 4) + maxTokens;
+    const model =
+      typeof Reflect.get(b, 'model') === 'string' ? (Reflect.get(b, 'model') as string) : 'claude';
+    const promptTokens = estimateAnthropicTokens(
+      b.messages as Array<{ role?: string; content?: string | Array<unknown> }>,
+      model
+    );
+    return promptTokens + maxTokens;
   }
 
   return maxTokens;

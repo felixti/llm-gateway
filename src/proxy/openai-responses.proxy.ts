@@ -7,6 +7,110 @@ import type { DeploymentConfig } from '@/config/deployments';
 import type { ProxyRequestContext } from '@/routes/factories/types';
 import { proxyNonStreamingChat, proxyStreamingChat } from './openai-chat.proxy';
 
+type ResponsesInputItem = {
+  role?: string;
+  content?: unknown;
+};
+
+type ResponsesTool = {
+  type: string;
+  name?: string;
+  description?: string;
+  parameters?: Record<string, unknown>;
+  function?: {
+    name?: string;
+    description?: string;
+    parameters?: Record<string, unknown>;
+  };
+};
+
+function stringifyResponseContent(content: unknown): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return '';
+  }
+
+  return content
+    .map((part) => {
+      if (typeof part === 'string') {
+        return part;
+      }
+      if (part && typeof part === 'object' && typeof Reflect.get(part, 'text') === 'string') {
+        return Reflect.get(part, 'text') as string;
+      }
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+function normalizeResponsesTool(tool: ResponsesTool): Record<string, unknown> {
+  if (tool.type === 'function') {
+    const fn = tool.function ?? tool;
+    return {
+      type: 'function',
+      function: {
+        name: fn.name ?? 'function_tool',
+        description: fn.description,
+        parameters: fn.parameters ?? { type: 'object', properties: {} },
+      },
+    };
+  }
+
+  return {
+    type: 'function',
+    function: {
+      name: tool.type,
+      description: `Built-in Responses API tool: ${tool.type}`,
+      parameters: { type: 'object', properties: {}, additionalProperties: true },
+    },
+  };
+}
+
+/**
+ * Transform Responses API request to Chat Completions format.
+ * Keep modern Chat Completions fields where Azure can understand them.
+ */
+export function transformResponsesToChatCompletions(
+  body: Record<string, unknown>
+): Record<string, unknown> {
+  const input = body.input;
+  const messages =
+    typeof input === 'string'
+      ? [{ role: 'user', content: input }]
+      : Array.isArray(input)
+        ? input.map((item: ResponsesInputItem) => ({
+            role: item.role ?? 'user',
+            content: stringifyResponseContent(item.content),
+          }))
+        : [];
+
+  const tools = Array.isArray(body.tools)
+    ? (body.tools as ResponsesTool[]).map(normalizeResponsesTool)
+    : undefined;
+  const reasoning = body.reasoning as { effort?: string } | undefined;
+
+  return {
+    model: body.model,
+    messages,
+    stream: body.stream,
+    max_tokens: body.max_tokens,
+    max_completion_tokens: body.max_completion_tokens,
+    temperature: body.temperature,
+    top_p: body.top_p,
+    user: body.user,
+    stream_options: body.stream_options,
+    response_format: body.response_format,
+    tool_choice: body.tool_choice,
+    modalities: body.modalities,
+    parallel_tool_calls: body.parallel_tool_calls,
+    reasoning_effort: reasoning?.effort,
+    tools,
+  };
+}
+
 // =============================================================================
 // Non-streaming transform
 // =============================================================================

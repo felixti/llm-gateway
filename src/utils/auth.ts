@@ -97,32 +97,6 @@ export function validatePatStructure(rawToken: string): {
 }
 
 /**
- * Check if a JTI (JWT ID) is blocklisted
- * Returns hash for comparison, not the raw token
- */
-export async function isJtiBlocklisted(
-  jti: string,
-  blocklistGetter: (jti: string) => Promise<string | null>
-): Promise<boolean> {
-  const storedHash = await blocklistGetter(jti);
-
-  if (!storedHash) {
-    return false;
-  }
-
-  // Compare hash of provided JTI with stored hash
-  const jtiHash = createHmac('sha256', env.PAT_SECRET).update(jti).digest('hex');
-
-  try {
-    const a = Buffer.from(jtiHash, 'hex');
-    const b = Buffer.from(storedHash, 'hex');
-    return a.length === b.length && timingSafeEqual(a, b);
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Generate a blocklist hash for a JTI
  * This is what we STORE in Redis - never the raw JTI
  */

@@ -63,16 +63,27 @@ class TraceHashRatioSampler implements Sampler {
 const traceSampler = new TraceHashRatioSampler(env.OTEL_TRACING_SAMPLER_RATIO);
 
 // Custom span attribute keys (PRD §4.4.1)
+/** @internal */
 export const ATTR_LLM_USER_ID = 'llm.user_id';
+/** @internal */
 export const ATTR_LLM_MODEL = 'llm.model';
+/** @internal */
 export const ATTR_LLM_DEPLOYMENT = 'llm.deployment';
+/** @internal */
 export const ATTR_LLM_TOKENS_INPUT = 'llm.tokens.input';
+/** @internal */
 export const ATTR_LLM_TOKENS_OUTPUT = 'llm.tokens.output';
+/** @internal */
 export const ATTR_LLM_TOKENS_THINKING = 'llm.tokens.thinking';
+/** @internal */
 export const ATTR_LLM_TOKENS_TOTAL = 'llm.tokens.total';
+/** @internal */
 export const ATTR_LLM_COST_USD = 'llm.cost.usd';
+/** @internal */
 export const ATTR_LLM_PROTOCOL = 'llm.protocol';
+/** @internal */
 export const ATTR_AZURE_AUTH_TYPE = 'azure.auth_type';
+/** @internal */
 export const ATTR_LLM_REQUEST_ID = 'llm.request_id';
 
 // Provider instance
@@ -97,6 +108,7 @@ function createLoggingTraceExporter(exporter: TraceExporterLike): TraceExporterL
   };
 }
 
+/** @internal */
 export function createLoggingTraceExporterForTests(exporter: TraceExporterLike): TraceExporterLike {
   return createLoggingTraceExporter(exporter);
 }
@@ -165,6 +177,7 @@ export function getCurrentTraceId(): string | null {
 
 /**
  * Get tracer instance
+ * @internal
  */
 export function getTracer(name: string): Tracer {
   return trace.getTracer(name);

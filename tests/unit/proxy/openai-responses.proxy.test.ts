@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   transformChatCompletionsToResponse,
   createResponsesStreamTransformer,
+  transformResponsesToChatCompletions,
 } from "../../../src/proxy/openai-responses.proxy";
 
 describe("transformChatCompletionsToResponse", () => {
@@ -67,6 +68,71 @@ describe("transformChatCompletionsToResponse", () => {
     expect(result.object).toBe("response");
     expect(result.output).toEqual([]);
     expect(result.model).toBe("");
+  });
+});
+
+describe("transformResponsesToChatCompletions", () => {
+  test("preserves modern request fields and maps reasoning effort", () => {
+    const result = transformResponsesToChatCompletions({
+      model: "gpt-5.3-codex",
+      input: "Plan the change",
+      reasoning: { effort: "high" },
+      tool_choice: "auto",
+      response_format: { type: "json_object" },
+      modalities: ["text"],
+      max_completion_tokens: 256,
+    });
+
+    expect(result.messages).toEqual([{ role: "user", content: "Plan the change" }]);
+    expect(result.reasoning_effort).toBe("high");
+    expect(result.tool_choice).toBe("auto");
+    expect(result.response_format).toEqual({ type: "json_object" });
+    expect(result.modalities).toEqual(["text"]);
+    expect(result.max_completion_tokens).toBe(256);
+  });
+
+  test("normalizes Responses tools to modern Chat Completions tools", () => {
+    const result = transformResponsesToChatCompletions({
+      model: "gpt-5.3-codex",
+      input: "Read the file",
+      tools: [
+        {
+          type: "function",
+          name: "read_file",
+          description: "Read a file",
+          parameters: {
+            type: "object",
+            properties: { path: { type: "string" } },
+            required: ["path"],
+          },
+        },
+        { type: "file_search" },
+      ],
+    });
+
+    expect(result.functions).toBeUndefined();
+    expect(result.tools).toEqual([
+      {
+        type: "function",
+        function: {
+          name: "read_file",
+          description: "Read a file",
+          parameters: {
+            type: "object",
+            properties: { path: { type: "string" } },
+            required: ["path"],
+          },
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "file_search",
+          description: "Built-in Responses API tool: file_search",
+          parameters: { type: "object", properties: {}, additionalProperties: true },
+        },
+      },
+    ]);
   });
 });
 

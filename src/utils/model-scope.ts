@@ -2,7 +2,7 @@ import type { DeploymentConfig } from '@/config/deployments';
 
 const MODEL_SCOPE_PREFIX = 'models:';
 
-export function isModelScope(scope: unknown): scope is string {
+function isModelScope(scope: unknown): scope is string {
   return typeof scope === 'string' && scope.toLowerCase().startsWith(MODEL_SCOPE_PREFIX);
 }
 
@@ -10,7 +10,7 @@ function getScopedModel(scope: string): string {
   return scope.slice(MODEL_SCOPE_PREFIX.length).toLowerCase();
 }
 
-export function canAccessModel(scope: unknown, model: string): boolean {
+function canAccessModel(scope: unknown, model: string): boolean {
   if (scope === 'all' || scope === 'admin' || scope === 'read') {
     return true;
   }
@@ -22,7 +22,7 @@ export function canAccessModel(scope: unknown, model: string): boolean {
   return getScopedModel(scope) === model.toLowerCase();
 }
 
-export function canAccessDeployment(scope: unknown, deployment: DeploymentConfig): boolean {
+function canAccessDeployment(scope: unknown, deployment: DeploymentConfig): boolean {
   if (canAccessModel(scope, deployment.modelAlias)) {
     return true;
   }

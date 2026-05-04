@@ -111,7 +111,7 @@ const meter = metrics.getMeter('llm-gateway');
 
 const METRIC_MODEL_FAMILIES = ['gpt', 'claude', 'kimi', 'glm', 'minimax'] as const;
 
-export function normalizeMetricModel(model: string): string {
+function normalizeMetricModel(model: string): string {
   const normalized = model.trim().toLowerCase();
   const family = METRIC_MODEL_FAMILIES.find(
     (candidate) => normalized === candidate || normalized.startsWith(`${candidate}-`)
@@ -177,6 +177,7 @@ export const llmRequestDuration = meter.createHistogram('llm_request_duration_ms
   unit: 'ms',
 });
 
+/** @internal */
 export function incrementHttpRequests(method: string, path: string, status: number): void {
   const normalized = normalizePath(path);
   httpRequestsTotal.add(1, { method, path: normalized, status: String(status) });
@@ -238,6 +239,7 @@ export function incrementFallbackSoftOverage(model: string): void {
   incrementCounter('fallback_soft_overage_total');
 }
 
+/** @internal */
 export function setQuotaRemainingRatio(ratio: number): void {
   const clamped = Math.max(0, Math.min(1, ratio));
   llmQuotaRemainingRatio.record(clamped);
@@ -265,24 +267,4 @@ export function recordLlmRequestDuration(
   llmRequestDuration.record(durationMs, { model: normalizeMetricModel(model), protocol });
   inMemoryHistograms.llm_request_duration_ms.count++;
   inMemoryHistograms.llm_request_duration_ms.sum += durationMs;
-}
-
-export function trackRequest(
-  method: string,
-  path: string,
-  status: number,
-  durationMs: number,
-  tokens?: { prompt: number; completion: number; model: string },
-  cost?: { amount: number; model: string }
-): void {
-  incrementHttpRequests(method, path, status);
-  recordHttpRequestDuration(durationMs, method, path);
-
-  if (tokens) {
-    addLlmTokens(tokens.prompt, tokens.completion, tokens.model);
-  }
-
-  if (cost) {
-    addLlmCost(cost.amount, cost.model);
-  }
 }

@@ -47,6 +47,7 @@ export async function writeWalEntry(entry: WalEntry): Promise<void> {
   }
 }
 
+/** @internal */
 export async function readWalEntries(): Promise<WalEntry[]> {
   await ensureDir();
   let names: string[];
@@ -69,6 +70,7 @@ export async function readWalEntries(): Promise<WalEntry[]> {
   return entries;
 }
 
+/** @internal */
 export async function removeWalEntry(requestId: string): Promise<void> {
   try {
     await unlink(entryPath(requestId));

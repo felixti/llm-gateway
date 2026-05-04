@@ -113,8 +113,13 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<Response 
   }
 
   if (!model) {
-    await next();
-    return;
+    const error = errorForProtocol(
+      path,
+      400,
+      'invalid_request',
+      'Model is required for quota enforcement'
+    );
+    return c.json(error, 400);
   }
 
   // Get quota status - fail closed if Redis error
@@ -198,7 +203,12 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<Response 
     wouldExceedBudget && !isHardLimit ? 0 : quotaStatus.remaining_usd
   );
 
+  let released = false;
   const cleanup = async () => {
+    if (released) {
+      return;
+    }
+    released = true;
     if (reservation.reservationId) {
       await releaseReservation(reservation.reservationId);
     }
@@ -208,6 +218,9 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<Response 
 
   try {
     await next();
+    if (c.res?.status && c.res.status >= 400) {
+      await cleanup();
+    }
   } catch (error) {
     await cleanup();
     throw error;

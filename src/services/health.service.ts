@@ -82,6 +82,7 @@ async function checkDeploymentConnectivity(
 
 /**
  * Check health of a single deployment
+ * @internal
  */
 export async function checkDeploymentHealth(
   deployment: DeploymentConfig
@@ -179,6 +180,7 @@ export function getCachedDeploymentHealth(): ReadonlyMap<string, DeploymentHealt
 
 /**
  * Reset the in-memory health cache (testing only).
+ * @internal
  */
 export function resetHealthCacheForTests(): void {
   healthCache.clear();

@@ -10,11 +10,9 @@ import {
   incrementPatRevocationsTotal,
   setQuotaRemainingRatio,
   setCircuitBreakerState,
-  trackRequest,
   recordHttpRequestDuration,
   recordLlmRequestDuration,
   getPrometheusMetrics,
-  normalizeMetricModel,
   llmTokensTotal,
 } from '@/observability/metrics';
 
@@ -48,10 +46,6 @@ describe('Metrics', () => {
 
     expect(calls[0][1].model).toBe('gpt');
     expect(calls[1][1].model).toBe('gpt');
-  });
-
-  it('maps unknown model metric labels to other', () => {
-    expect(normalizeMetricModel('unregistered-model-from-client')).toBe('other');
   });
 
   it('should add LLM cost', () => {
@@ -90,22 +84,6 @@ describe('Metrics', () => {
       setCircuitBreakerState('CLOSED');
       setCircuitBreakerState('OPEN');
       setCircuitBreakerState('HALF_OPEN');
-    }).not.toThrow();
-  });
-
-  it('should track request with tokens and cost', () => {
-    expect(() => {
-      trackRequest('POST', '/v1/chat/completions', 200, 150, {
-        prompt: 100,
-        completion: 200,
-        model: 'gpt-4o',
-      });
-    }).not.toThrow();
-  });
-
-  it('should track request without tokens or cost', () => {
-    expect(() => {
-      trackRequest('GET', '/health', 200, 50);
     }).not.toThrow();
   });
 

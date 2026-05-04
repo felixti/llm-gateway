@@ -74,6 +74,7 @@ export function getInFlightCount(): number {
 
 /**
  * Returns true once shutdown has been initiated.
+ * @internal
  */
 export function isShuttingDown(): boolean {
   return shuttingDown;
@@ -119,6 +120,7 @@ export async function shutdownMiddleware(c: Context, next: Next): Promise<Respon
  * Wait for all in-flight requests to complete, or until timeout.
  * @param timeoutMs - Maximum time to wait in milliseconds (defaults to env.SHUTDOWN_TIMEOUT_MS)
  * @returns true if all requests drained, false if timed out
+ * @internal
  */
 export function waitForDrain(timeoutMs: number = env.SHUTDOWN_TIMEOUT_MS): Promise<boolean> {
   if (!shuttingDown) {
@@ -184,6 +186,7 @@ export async function initiateGracefulShutdown(
 
 /**
  * Reset shutdown state (for testing only).
+ * @internal
  */
 export function resetShutdownState(): void {
   inFlightCount = 0;
