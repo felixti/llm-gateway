@@ -183,6 +183,38 @@ describe("Pricing Service", () => {
       expect(pricing?.thinkingPerMillion?.toNumber()).toBe(15.0);
     });
 
+    it("should find pricing for gpt-5-mini", () => {
+      const pricing = getPricingByPattern("gpt-5-mini");
+      expect(pricing).toBeDefined();
+      expect(pricing?.inputPerMillion.toNumber()).toBe(0.25);
+      expect(pricing?.outputPerMillion.toNumber()).toBe(2.0);
+    });
+
+    it("should find pricing for claude-haiku-4-5", () => {
+      const pricing = getPricingByPattern("claude-haiku-4-5");
+      expect(pricing).toBeDefined();
+      expect(pricing?.inputPerMillion.toNumber()).toBeGreaterThan(0);
+      expect(pricing?.outputPerMillion.toNumber()).toBeGreaterThan(0);
+    });
+
+    it("should find pricing for kimi-k2.5", () => {
+      const pricing = getPricingByPattern("kimi-k2.5");
+      expect(pricing).toBeDefined();
+      expect(pricing?.inputPerMillion.toNumber()).toBeGreaterThan(0);
+    });
+
+    it("should find pricing for glm-5", () => {
+      const pricing = getPricingByPattern("glm-5");
+      expect(pricing).toBeDefined();
+      expect(pricing?.inputPerMillion.toNumber()).toBeGreaterThan(0);
+    });
+
+    it("should find pricing for minimax-m2.5", () => {
+      const pricing = getPricingByPattern("minimax-m2.5");
+      expect(pricing).toBeDefined();
+      expect(pricing?.inputPerMillion.toNumber()).toBeGreaterThan(0);
+    });
+
     it("should be case-insensitive", () => {
       expect(getPricingByPattern("GPT-5.4")?.inputPerMillion.toNumber()).toBe(5.0);
       expect(getPricingByPattern("Claude-Opus-4-6")?.inputPerMillion.toNumber()).toBe(15.0);
@@ -235,6 +267,21 @@ describe("Pricing Service", () => {
 
       expect(loaded).toBe(false);
       expect(getPricingByPattern("gpt-5.4")?.inputPerMillion.toNumber()).toBe(before);
+    });
+  });
+
+  describe("validatePricingData", () => {
+    it("should validate the bundled pricing data passes the schema", async () => {
+      const { validatePricingData } = await import("../../../src/services/pricing.service");
+      expect(validatePricingData()).toBe(true);
+    });
+  });
+
+  describe("calculateCost for additional model families", () => {
+    it("should calculate cost for GPT-5 Mini correctly", () => {
+      const usage: TokenUsage = { prompt_tokens: 1000, completion_tokens: 500 };
+      const cost = calculateCost(usage, "gpt-5-mini");
+      expect(cost.toNumber()).toBeCloseTo(0.00125, 6);
     });
   });
 });

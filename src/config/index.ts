@@ -25,6 +25,5 @@ export {
   calculateCost,
   getAllPricingKeys,
   validatePricingData,
-  pricingData,
-} from './pricing';
-export type { ModelPricing } from './pricing';
+} from '../services/pricing.service';
+export type { ModelPricing } from '../services/pricing.service';
