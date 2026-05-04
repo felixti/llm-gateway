@@ -2,6 +2,8 @@
 
 A production-ready API proxy server for Azure OpenAI and Azure AI Foundry endpoints, built with Bun/Hono.
 
+📝 **What's New?** See [docs/NEWS.md](docs/NEWS.md) for the latest features, improvements, and security updates.
+
 ## Features
 
 - **Multi-Protocol Support**: OpenAI Chat Completions, Anthropic Messages, OpenAI Responses API
@@ -499,6 +501,7 @@ MIT License - see LICENSE file for details.
 
 ## Support
 
+- **What's New**: [docs/NEWS.md](docs/NEWS.md)
 - **Documentation**: [docs/](docs/)
 - **Issues**: [GitHub Issues](https://github.com/your-org/llm-gateway/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/your-org/llm-gateway/discussions)
