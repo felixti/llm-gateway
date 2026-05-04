@@ -166,15 +166,7 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<Response 
 
   if (wouldExceedBudget && !isHardLimit) {
     c.header(HEADER_WARNING, 'Soft quota limit exceeded. Usage is being tracked.');
-    const softLimitIdempotencyKey = `soft:${userId}:${path}:${Date.now()}`;
-    c.set('reservationId', '');
-    c.set('idempotencyKey', softLimitIdempotencyKey);
-    c.set('estimatedCost', estimatedCost);
-    c.set('model', model);
-    c.set('releaseQuota', async () => {});
     c.header(HEADER_QUOTA_REMAINING, '0');
-    await next();
-    return;
   }
 
   const reservation = await checkAndReserve(userId, estimatedCost);
@@ -200,7 +192,11 @@ export async function quotaMiddleware(c: Context, next: Next): Promise<Response 
   }
   c.set('model', model);
 
-  setQuotaHeaders(c, reservation, quotaStatus.remaining_usd);
+  setQuotaHeaders(
+    c,
+    reservation,
+    wouldExceedBudget && !isHardLimit ? 0 : quotaStatus.remaining_usd
+  );
 
   const cleanup = async () => {
     if (reservation.reservationId) {

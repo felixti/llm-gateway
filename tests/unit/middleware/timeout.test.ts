@@ -91,4 +91,35 @@ describe('timeoutMiddleware', () => {
 
     expect(observedSignal?.aborted).toBe(true);
   });
+
+  test('keeps forwarding client aborts after a streaming response is returned', async () => {
+    process.env.REQUEST_TIMEOUT_MS = '5000';
+    resetEnvForTests();
+
+    const app = new Hono();
+    let observedSignal: AbortSignal | undefined;
+    app.use('*', timeoutMiddleware);
+    app.get('/stream', (c) => {
+      observedSignal = c.get(REQUEST_SIGNAL_KEY) as AbortSignal;
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: hello\n\n'));
+        },
+      });
+      return new Response(stream, {
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    });
+
+    const controller = new AbortController();
+    const res = await app.request('/stream', { signal: controller.signal });
+
+    expect(res.status).toBe(200);
+    expect(observedSignal?.aborted).toBe(false);
+
+    controller.abort(new Error('client disconnected'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(observedSignal?.aborted).toBe(true);
+  });
 });

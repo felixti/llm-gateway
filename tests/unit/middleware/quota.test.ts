@@ -22,6 +22,8 @@ vi.mock('../../../src/services/quota.service', () => ({
 
 vi.mock('../../../src/observability/metrics', () => ({
   incrementQuotaExceeded429: vi.fn(),
+  incrementQuotaHydrationFailures: vi.fn(),
+  incrementQuotaReservationNull: vi.fn(),
   setQuotaRemainingRatio: vi.fn(),
 }));
 
@@ -122,7 +124,7 @@ describe('quotaMiddleware — soft limit over-budget', () => {
     vi.clearAllMocks();
   });
 
-  test('soft-limit over-budget calls next() and does NOT call checkAndReserve', async () => {
+  test('soft-limit over-budget still reserves atomically before calling next()', async () => {
     const { quotaMiddleware } = await import('../../../src/middleware/quota');
 
     mockGetQuotaStatus.mockResolvedValue(ok({
@@ -134,6 +136,11 @@ describe('quotaMiddleware — soft limit over-budget', () => {
       hard_limit: false,
     }));
     mockCalculateEstimatedCost.mockReturnValue(new Decimal(5));
+    mockCheckAndReserve.mockResolvedValue({
+      allowed: true,
+      reservationId: 'res_soft_123',
+      estimatedCost: new Decimal(5),
+    });
 
     const { context, vars } = createMockContext({
       parsedBody: { messages: [{ role: 'user', content: 'hello' }], max_tokens: 100 },
@@ -142,13 +149,12 @@ describe('quotaMiddleware — soft limit over-budget', () => {
 
     await quotaMiddleware(context, next);
 
-    // Should call next() to allow the request through
     expect(next).toHaveBeenCalledTimes(1);
-    // Should NOT call checkAndReserve (soft limit skips reservation)
-    expect(mockCheckAndReserve).not.toHaveBeenCalled();
+    expect(mockCheckAndReserve).toHaveBeenCalledTimes(1);
+    expect(vars.get('reservationId')).toBe('res_soft_123');
   });
 
-  test('soft-limit over-budget sets releaseQuota to a no-op function', async () => {
+  test('soft-limit over-budget sets releaseQuota to release the reservation', async () => {
     const { quotaMiddleware } = await import('../../../src/middleware/quota');
 
     mockGetQuotaStatus.mockResolvedValue(ok({
@@ -160,6 +166,11 @@ describe('quotaMiddleware — soft limit over-budget', () => {
       hard_limit: false,
     }));
     mockCalculateEstimatedCost.mockReturnValue(new Decimal(5));
+    mockCheckAndReserve.mockResolvedValue({
+      allowed: true,
+      reservationId: 'res_soft_release',
+      estimatedCost: new Decimal(5),
+    });
 
     const { context, vars } = createMockContext({
       parsedBody: { messages: [{ role: 'user', content: 'hello' }], max_tokens: 100 },
@@ -168,12 +179,10 @@ describe('quotaMiddleware — soft limit over-budget', () => {
 
     await quotaMiddleware(context, next);
 
-    // releaseQuota should be set to a no-op function
     const releaseQuota = vars.get('releaseQuota') as () => Promise<void>;
     expect(typeof releaseQuota).toBe('function');
-    // Calling releaseQuota should not throw and should not call releaseReservation
     await releaseQuota();
-    expect(mockReleaseReservation).not.toHaveBeenCalled();
+    expect(mockReleaseReservation).toHaveBeenCalledWith('res_soft_release');
   });
 
   test('soft-limit over-budget sets X-Warning header', async () => {
@@ -188,6 +197,11 @@ describe('quotaMiddleware — soft limit over-budget', () => {
       hard_limit: false,
     }));
     mockCalculateEstimatedCost.mockReturnValue(new Decimal(5));
+    mockCheckAndReserve.mockResolvedValue({
+      allowed: true,
+      reservationId: 'res_soft_warn',
+      estimatedCost: new Decimal(5),
+    });
 
     const { context, headers } = createMockContext({
       parsedBody: { messages: [{ role: 'user', content: 'hello' }], max_tokens: 100 },
@@ -211,6 +225,11 @@ describe('quotaMiddleware — soft limit over-budget', () => {
       hard_limit: false,
     }));
     mockCalculateEstimatedCost.mockReturnValue(new Decimal(5));
+    mockCheckAndReserve.mockResolvedValue({
+      allowed: true,
+      reservationId: 'res_soft_remaining',
+      estimatedCost: new Decimal(5),
+    });
 
     const { context, headers } = createMockContext({
       parsedBody: { messages: [{ role: 'user', content: 'hello' }], max_tokens: 100 },
@@ -222,7 +241,7 @@ describe('quotaMiddleware — soft limit over-budget', () => {
     expect(headers['X-Quota-Remaining']).toBe('0');
   });
 
-  test('soft-limit over-budget sets reservationId to empty string', async () => {
+  test('soft-limit over-budget sets a real reservationId', async () => {
     const { quotaMiddleware } = await import('../../../src/middleware/quota');
 
     mockGetQuotaStatus.mockResolvedValue(ok({
@@ -234,6 +253,11 @@ describe('quotaMiddleware — soft limit over-budget', () => {
       hard_limit: false,
     }));
     mockCalculateEstimatedCost.mockReturnValue(new Decimal(5));
+    mockCheckAndReserve.mockResolvedValue({
+      allowed: true,
+      reservationId: 'res_soft_real',
+      estimatedCost: new Decimal(5),
+    });
 
     const { context, vars } = createMockContext({
       parsedBody: { messages: [{ role: 'user', content: 'hello' }], max_tokens: 100 },
@@ -242,7 +266,7 @@ describe('quotaMiddleware — soft limit over-budget', () => {
 
     await quotaMiddleware(context, next);
 
-    expect(vars.get('reservationId')).toBe('');
+    expect(vars.get('reservationId')).toBe('res_soft_real');
   });
 
   test('soft-limit over-budget sets estimatedCost for downstream visibility', async () => {
@@ -257,6 +281,11 @@ describe('quotaMiddleware — soft limit over-budget', () => {
       hard_limit: false,
     }));
     mockCalculateEstimatedCost.mockReturnValue(new Decimal(5));
+    mockCheckAndReserve.mockResolvedValue({
+      allowed: true,
+      reservationId: 'res_soft_cost',
+      estimatedCost: new Decimal(5),
+    });
 
     const { context, vars } = createMockContext({
       parsedBody: { messages: [{ role: 'user', content: 'hello' }], max_tokens: 100 },

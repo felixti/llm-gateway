@@ -137,8 +137,10 @@ export class MockRedis {
     const budget = Number(budgetRaw);
     const spent = Number(this.hashes.get(quotaKey)?.get('spent') || '0');
     const reserved = Number(this.store.get(reservedKey) || '0');
+    const hardLimitRaw = this.hashes.get(quotaKey)?.get('hard_limit');
+    const isHard = hardLimitRaw !== '0' && hardLimitRaw !== 'false';
 
-    if (spent + reserved + cost > budget) {
+    if (spent + reserved + cost > budget && isHard) {
       return [0, 'insufficient_quota'];
     }
 
@@ -148,6 +150,10 @@ export class MockRedis {
       this.hashes.set(hashKey, new Map());
     }
     this.hashes.get(hashKey)!.set(reservationId, reservationData);
+
+    if (spent + reserved + cost > budget) {
+      return [1, 'soft_overage'];
+    }
 
     return [1, 'ok'];
   }

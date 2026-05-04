@@ -21,6 +21,72 @@ function forwardAbort(source: AbortSignal, controller: AbortController): () => v
   return () => source.removeEventListener('abort', onAbort);
 }
 
+function isEventStreamResponse(response: Response | undefined): response is Response {
+  return (
+    response?.body !== null &&
+    response?.headers.get('Content-Type')?.includes('text/event-stream') === true
+  );
+}
+
+function wrapBodyWithCleanup(
+  body: ReadableStream<Uint8Array>,
+  cleanup: () => void
+): ReadableStream<Uint8Array> {
+  let cleaned = false;
+  let streamReader: {
+    read: () => Promise<{ done: boolean; value?: Uint8Array }>;
+    releaseLock: () => void;
+    cancel: (reason?: unknown) => Promise<void>;
+  } | null = null;
+  const runCleanup = () => {
+    if (!cleaned) {
+      cleaned = true;
+      cleanup();
+    }
+  };
+
+  return new ReadableStream({
+    async start(controller) {
+      const reader = body.getReader();
+      streamReader = reader;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            controller.close();
+            break;
+          }
+          controller.enqueue(value);
+        }
+      } catch (error) {
+        controller.error(error);
+      } finally {
+        runCleanup();
+        reader.releaseLock();
+      }
+    },
+    cancel(reason) {
+      runCleanup();
+      return streamReader?.cancel(reason);
+    },
+  });
+}
+
+function deferAbortDetachUntilStreamEnds(
+  response: Response,
+  detachClientAbort: () => void
+): Response {
+  if (!response.body) {
+    return response;
+  }
+
+  return new Response(wrapBodyWithCleanup(response.body, detachClientAbort), {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
 /**
  * Timeout middleware.
  *
@@ -38,6 +104,7 @@ export async function timeoutMiddleware(c: Context, next: Next): Promise<Respons
   const requestTimeoutMs = env.REQUEST_TIMEOUT_MS;
   const controller = new AbortController();
   const detachClientAbort = forwardAbort(c.req.raw.signal, controller);
+  let detachInFinally = true;
 
   let timedOut = false;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -69,11 +136,19 @@ export async function timeoutMiddleware(c: Context, next: Next): Promise<Respons
       return c.json(timeoutError, 504);
     }
 
+    if (isEventStreamResponse(c.res)) {
+      c.res = deferAbortDetachUntilStreamEnds(c.res, detachClientAbort);
+      detachInFinally = false;
+      return undefined;
+    }
+
     return undefined;
   } finally {
     if (timeoutId !== null) {
       clearTimeout(timeoutId);
     }
-    detachClientAbort();
+    if (detachInFinally) {
+      detachClientAbort();
+    }
   }
 }

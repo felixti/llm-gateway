@@ -17,6 +17,7 @@ let policyCalls = 0;
 vi.mock('../../../src/db/data-access', () => ({
   resolveUserId: vi.fn(),
   logRequestAudit: vi.fn(),
+  insertRequestAuditOrThrow: vi.fn(),
   getUserQuotaPolicyByPatSubject: async () => {
     policyCalls += 1;
     return policyResolver();
@@ -106,6 +107,23 @@ describe('quota.service Postgres policy sync', () => {
     const result = await checkAndReserve('user-3', new Decimal('0.001'));
     expect(result.allowed).toBe(true);
     expect(result.reservationId).toMatch(/^res_[0-9a-f-]{36}$/i);
+  });
+
+  test('checkAndReserve allows over-budget reservations for soft-limit users', async () => {
+    policyResolver = async () => ({
+      monthly_budget_usd: '1',
+      hard_limit: false,
+    });
+
+    const { checkAndReserve, getQuotaStatus } = await import('../../../src/services/quota.service');
+    const result = await checkAndReserve('user-soft-atomic', new Decimal('2'));
+
+    expect(result.allowed).toBe(true);
+    expect(result.reservationId).toMatch(/^res_[0-9a-f-]{36}$/i);
+
+    const statusResult = await getQuotaStatus('user-soft-atomic');
+    if (!statusResult.ok) throw new Error('getQuotaStatus failed: ' + String(statusResult.error));
+    expect(statusResult.value.reserved_usd).toBe(2);
   });
 
   test('checkAndReserve passes TTL to Redis eval script', async () => {

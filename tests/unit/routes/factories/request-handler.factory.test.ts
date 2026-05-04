@@ -332,6 +332,88 @@ describe('Request Handler Factory', () => {
       expect(mockGetFallbackChain).toHaveBeenCalledWith(primaryDeployment);
     });
 
+    it('should not attempt fallback when primary returns a non-retryable client error', async () => {
+      const fallbackDeployment: DeploymentConfig = {
+        ...mockDeployment,
+        name: 'test-fallback',
+        modelAlias: 'fallback-model',
+        fallbackDeployment: undefined,
+      };
+      const primaryDeployment: DeploymentConfig = {
+        ...mockDeployment,
+        fallbackDeployment: 'test-fallback',
+      };
+
+      mockGetDeploymentByAlias.mockReturnValue(primaryDeployment);
+      mockGetFallbackChain.mockReturnValue([fallbackDeployment]);
+      mockIsRequestAllowed.mockReturnValue(true);
+      mockGetAuthHeaders.mockResolvedValue({ Authorization: 'Bearer test' });
+
+      const proxyFn = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'invalid request' } }), { status: 400 })
+      );
+
+      const app = new Hono();
+      const deps = createRequestHandlerDeps();
+      deps.proxyNonStreaming = proxyFn;
+      const handler = createRequestHandler(deps);
+      app.post('/', handler);
+
+      const res = await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'test-model', messages: [], stream: false }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(proxyFn).toHaveBeenCalledTimes(1);
+      expect(mockGetFallbackChain).not.toHaveBeenCalled();
+    });
+
+    it('should attempt fallback when primary returns a retryable rate limit error', async () => {
+      const fallbackDeployment: DeploymentConfig = {
+        ...mockDeployment,
+        name: 'test-fallback',
+        modelAlias: 'fallback-model',
+        fallbackDeployment: undefined,
+      };
+      const primaryDeployment: DeploymentConfig = {
+        ...mockDeployment,
+        fallbackDeployment: 'test-fallback',
+      };
+
+      mockGetDeploymentByAlias.mockReturnValue(primaryDeployment);
+      mockGetFallbackChain.mockReturnValue([fallbackDeployment]);
+      mockIsRequestAllowed.mockReturnValue(true);
+      mockGetAuthHeaders.mockResolvedValue({ Authorization: 'Bearer test' });
+
+      let proxyCallCount = 0;
+      const proxyFn = vi.fn().mockImplementation(async () => {
+        proxyCallCount++;
+        if (proxyCallCount === 1) {
+          return new Response(JSON.stringify({ error: { message: 'rate limited' } }), {
+            status: 429,
+          });
+        }
+        return new Response(JSON.stringify({ choices: [] }), { status: 200 });
+      });
+
+      const app = new Hono();
+      const deps = createRequestHandlerDeps();
+      deps.proxyNonStreaming = proxyFn;
+      const handler = createRequestHandler(deps);
+      app.post('/', handler);
+
+      const res = await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'test-model', messages: [], stream: false }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(proxyFn).toHaveBeenCalledTimes(2);
+    });
+
     it('should return primary error when fallback also fails', async () => {
       const fallbackDeployment: DeploymentConfig = {
         ...mockDeployment,

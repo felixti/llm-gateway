@@ -12,14 +12,20 @@ export const CHECK_AND_RESERVE_SCRIPT = `
   local budget = tonumber(redis.call('hget', quotaKey, 'budget') or defaultBudget)
   local spent = tonumber(redis.call('hget', quotaKey, 'spent') or 0)
   local reserved = tonumber(redis.call('get', reservedKey) or 0)
+  local hardLimit = redis.call('hget', quotaKey, 'hard_limit')
+  local isHard = (hardLimit ~= '0' and hardLimit ~= 'false')
 
-  if spent + reserved + cost > budget then
+  if spent + reserved + cost > budget and isHard then
     return {0, 'insufficient_quota'}
   end
 
   redis.call('incrby', reservedKey, math.floor(cost))
   redis.call('set', reservationKey, reservationData, 'EX', ttl)
   redis.call('hset', hashKey, reservationId, reservationData)
+
+  if spent + reserved + cost > budget then
+    return {1, 'soft_overage'}
+  end
 
   return {1, 'ok'}
 `;

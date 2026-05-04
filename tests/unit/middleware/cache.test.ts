@@ -109,5 +109,33 @@ describe('cacheMiddleware', () => {
     await app.request('/models');
 
     const cachedRes = await app.request('/models');
+
+    expect(cachedRes.headers.get('Vary')).toBe('Authorization');
+  });
+
+  test('cache preserves content type and custom response headers on cache hits', async () => {
+    const app = new Hono();
+    let requestCount = 0;
+
+    app.use('*', async (c, next) => {
+      c.set('userId', 'header-test-user');
+      await next();
+    });
+
+    app.use('/models', cacheMiddleware({ ttl: 60 }));
+    app.get('/models', (c) => {
+      requestCount++;
+      c.header('X-Model-Source', 'registry');
+      return c.json({ requestCount });
+    });
+
+    const initialRes = await app.request('/models');
+    expect(initialRes.headers.get('Content-Type')).toContain('application/json');
+
+    const cachedRes = await app.request('/models');
+
+    expect(cachedRes.headers.get('Content-Type')).toContain('application/json');
+    expect(cachedRes.headers.get('X-Model-Source')).toBe('registry');
+    expect(await cachedRes.json()).toEqual({ requestCount: 1 });
   });
 });

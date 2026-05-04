@@ -85,6 +85,10 @@ async function checkCircuitBreaker(
   return ok(undefined);
 }
 
+function canFallbackForStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
 async function tryFallbacks(options: {
   deps: RequestHandlerDeps;
   bodyRecord: Record<string, unknown>;
@@ -290,24 +294,26 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
           );
         }
 
-        // 8. Fallback: if primary request failed, try same-protocol fallback deployments.
+        // 8. Fallback: only retry backend/rate-limit failures on same-protocol deployments.
         if (!response.ok) {
-          const fallbackResponse = await tryFallbacks({
-            deps,
-            bodyRecord,
-            deployment: deployment.value,
-            proxyContext,
-            authManager,
-            useStreaming,
-            span,
-            startTime,
-            userId,
-          });
-          if (fallbackResponse) {
-            return fallbackResponse;
+          if (canFallbackForStatus(response.status)) {
+            const fallbackResponse = await tryFallbacks({
+              deps,
+              bodyRecord,
+              deployment: deployment.value,
+              proxyContext,
+              authManager,
+              useStreaming,
+              span,
+              startTime,
+              userId,
+            });
+            if (fallbackResponse) {
+              return fallbackResponse;
+            }
           }
 
-          // All fallbacks exhausted — release the quota reservation that will
+          // No proxy succeeded — release the quota reservation that will
           // never be reconciled (no proxy succeeded).
           await releaseReservedQuota(reservationId, requestId);
         }
