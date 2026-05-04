@@ -1,7 +1,8 @@
 /**
  * Scope Enforcement Middleware
  * Enforces PAT scope restrictions after authentication
- * Scopes: 'admin' (full LLM API access + operator routes), 'all' (full access), 'read' (GET/HEAD/OPTIONS only)
+ * Scopes: 'admin' (full LLM API access + operator routes), 'all' (full access),
+ * 'read' (GET/HEAD/OPTIONS only), 'models:<name>' (read plus scoped model calls)
  */
 
 import { errorForProtocol } from '@/utils/errors';
@@ -56,17 +57,6 @@ export async function scopeMiddleware(c: Context, next: Next): Promise<Response 
   }
 
   if (typeof scope === 'string' && scope.startsWith('models:')) {
-    if (!READ_ONLY_METHODS.has(method)) {
-      return c.json(
-        errorForProtocol(
-          path,
-          403,
-          'permission_error',
-          `Scope '${scope}' does not allow ${method} requests`
-        ),
-        403
-      );
-    }
     await next();
     return;
   }

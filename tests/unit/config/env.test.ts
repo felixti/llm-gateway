@@ -164,5 +164,16 @@ describe("Environment Configuration", () => {
       expect(parsed.AZURE_OPENAI_ENDPOINT).toBe("https://prod-openai.openai.azure.com");
       expect(parsed.AZURE_AI_FOUNDRY_ENDPOINT).toBe("https://prod-foundry.ai.azure.com");
     });
+
+    it("accepts production config that uses REDIS_URL without REDIS_HOST", () => {
+      const parsed = parseEnvForTests({
+        ...validProductionEnv,
+        REDIS_HOST: undefined,
+        REDIS_URL: "redis://redis.internal:6379",
+      });
+
+      expect(parsed.REDIS_URL).toBe("redis://redis.internal:6379");
+      expect(parsed.REDIS_HOST).toBe("localhost");
+    });
   });
 });

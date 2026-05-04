@@ -7,6 +7,7 @@
 
 import { type ModelFamily, getModelFamily } from '@/config/deployments';
 import { errorForProtocol } from '@/utils/errors';
+import { canAccessModel, isModelScope } from '@/utils/model-scope';
 import type { Context, Next } from 'hono';
 
 // Model families allowed per endpoint
@@ -93,6 +94,14 @@ export async function protocolGuardMiddleware(
     }
 
     return c.json(errorForProtocol(path, 400, 'model_not_supported', errorMessage), 400);
+  }
+
+  const scope = c.get('scope');
+  if (isModelScope(scope) && !canAccessModel(scope, model)) {
+    return c.json(
+      errorForProtocol(path, 403, 'permission_error', `Scope '${scope}' cannot access ${model}`),
+      403
+    );
   }
 
   // Set model in context for downstream use

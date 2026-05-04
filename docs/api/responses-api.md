@@ -37,12 +37,17 @@ This means any feature that depends on native Responses API engine behavior (ima
 | `model` | `string` | Required. Must be a GPT family model (see Protocol Restrictions). |
 | `input` | `string` or `Array<{role: "user", content: string}>` | Required. Single-turn or multi-turn user input only. |
 | `stream` | `boolean` | Optional (default: `false`). |
-| `tools` | `Array<{type: "function", name, description?, parameters}>` | Optional. Only `type: "function"` is accepted. |
-| `reasoning.effort` | `enum("low" \| "medium" \| "high")` | Parsed by validation schema but **not forwarded** to the upstream model. |
+| `tools` | `Array<{type, name?, description?, parameters?, function?}>` | Optional. Function tools and simple built-in tool shims are normalized to Chat Completions tools. |
+| `reasoning.effort` | `enum("low" \| "medium" \| "high")` | Forwarded upstream as `reasoning_effort`. |
 | `max_tokens` | `integer` | Optional. Passed through to Chat Completions. |
 | `max_completion_tokens` | `integer` | Optional. Passed through to Chat Completions. |
 | `temperature` | `number` (0-2) | Optional. Passed through to Chat Completions. |
 | `user` | `string` | Optional. Passed through to Chat Completions. |
+| `stream_options` | `object` | Optional. Passed through to Chat Completions. |
+| `response_format` | `object` | Optional. Passed through to Chat Completions. |
+| `tool_choice` | `string` or `object` | Optional. Passed through to Chat Completions. |
+| `modalities` | `string[]` | Optional. Passed through to Chat Completions. |
+| `parallel_tool_calls` | `boolean` | Optional. Passed through to Chat Completions. |
 
 ## Unsupported Features {#unsupported-features}
 
@@ -52,17 +57,15 @@ The following fields are rejected or silently ignored because there is no equiva
 - `instructions` (system-level behavior)
 - `metadata`
 - `store`
-- `tool_choice`
-- `parallel_tool_calls` (passed through as hardcoded `true` in response only)
 - Structured output via `text.format` / JSON Schema
 - Image input or any multimodal content in `input` items
 - Audio input
 - File references or citations
-- `top_p`, `presence_penalty`, `frequency_penalty`
+- `presence_penalty`, `frequency_penalty`
 
 ## Tool Calling Support
 
-Only function tools are supported.
+Function tools are supported. Built-in Responses tool types such as `file_search`, `file_read`, and `shell_exec` are represented to Azure as function tools with an open object parameter schema. The gateway does not implement the underlying built-in tool behavior itself.
 
 Accepted tool shape:
 
@@ -81,9 +84,9 @@ Accepted tool shape:
 }
 ```
 
-The gateway maps these into the legacy `functions` array on the Chat Completions request.
+The gateway maps tools into modern Chat Completions `tools` entries.
 
-`tool_choice` and `parallel_tool_calls` are not configurable. The response always reports `parallel_tool_calls: true` as a static value.
+Non-streaming Chat Completions `message.tool_calls` are returned as Responses `function_call` output items. Streaming tool-call deltas are not yet translated with full Responses event fidelity.
 
 ## Protocol Restrictions
 
@@ -110,7 +113,7 @@ The non-streaming response is synthesized from the Chat Completions result with 
 - `top_p`: `1`
 - `temperature`: `1`
 
-Output items are always of type `message` with content parts of type `output_text`.
+Output items are type `message` with `output_text` content parts for normal assistant text. Non-streaming assistant tool calls are type `function_call` with `call_id`, `name`, and `arguments`.
 
 ## Streaming Behavior
 
@@ -142,6 +145,7 @@ Error responses use the Responses API error shape. Errors map as follows:
 
 - This endpoint is a convenience translation layer, not a full Responses API implementation.
 - Only single-turn or simple multi-turn `user` messages are supported.
-- Reasoning effort is accepted in the request schema but is **not forwarded** upstream.
+- Reasoning effort is forwarded as `reasoning_effort`.
 - Token usage in streaming mode is reported in the final `response.done` event.
+- Streaming text events are translated, but streaming tool-call events remain partial.
 - Quota and rate limiting apply to this endpoint the same way they do to `/v1/chat/completions`.

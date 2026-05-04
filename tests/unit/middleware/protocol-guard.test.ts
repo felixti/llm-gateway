@@ -21,6 +21,12 @@ function createProtocolContext(path: string, body: unknown): Context {
   } as unknown as Context;
 }
 
+function createScopedProtocolContext(path: string, body: unknown, scope: string): Context {
+  const ctx = createProtocolContext(path, body);
+  ctx.set('scope', scope);
+  return ctx;
+}
+
 describe('protocolGuardMiddleware — /v1/messages/count_tokens', () => {
   test('allows Claude deployment alias on count_tokens', async () => {
     const next = vi.fn() as Next;
@@ -66,5 +72,36 @@ describe('protocolGuardMiddleware — /v1/messages/count_tokens', () => {
     expect(result).toBeUndefined();
     expect(next).toHaveBeenCalled();
     expect(ctx.get('model')).toBe('claude-opus-4-6');
+  });
+});
+
+describe('protocolGuardMiddleware — model scopes', () => {
+  test('allows a model-scoped PAT to call its model', async () => {
+    const next = vi.fn() as Next;
+    const ctx = createScopedProtocolContext(
+      '/v1/chat/completions',
+      { model: 'gpt-5.4', messages: [{ role: 'user', content: 'Hello' }] },
+      'models:gpt-5.4'
+    );
+
+    const result = await protocolGuardMiddleware(ctx, next);
+
+    expect(result).toBeUndefined();
+    expect(next).toHaveBeenCalled();
+  });
+
+  test('rejects a model-scoped PAT calling a different model', async () => {
+    const next = vi.fn() as Next;
+    const ctx = createScopedProtocolContext(
+      '/v1/chat/completions',
+      { model: 'gpt-5.4', messages: [{ role: 'user', content: 'Hello' }] },
+      'models:gpt-5.3-codex'
+    );
+
+    const result = await protocolGuardMiddleware(ctx, next);
+
+    expect(result).toBeInstanceOf(Response);
+    expect((result as Response).status).toBe(403);
+    expect(next).not.toHaveBeenCalled();
   });
 });

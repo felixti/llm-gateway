@@ -187,11 +187,11 @@ const envSchema = z
       );
     }
 
-    if (data.REDIS_HOST === 'localhost') {
+    if (!data.REDIS_URL && data.REDIS_HOST === 'localhost') {
       addProductionIssue(
         ctx,
         'REDIS_HOST',
-        'REDIS_HOST must be explicitly configured in production'
+        'REDIS_HOST must be explicitly configured in production when REDIS_URL is not set'
       );
     }
   });

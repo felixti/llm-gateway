@@ -89,6 +89,12 @@ describe("scopeMiddleware", () => {
     expect(body.error.message).toContain("Unknown scope: write");
   });
 
+  test("model scope + POST → should call next() for model enforcement downstream", async () => {
+    const c = createMockContext({ scope: "models:gpt-5.4", method: "POST" });
+    const result = await scopeMiddleware(c, next);
+    expect(result).toBeUndefined();
+  });
+
   test("scope 'read' + HEAD → should call next()", async () => {
     const c = createMockContext({ scope: "read", method: "HEAD" });
     const result = await scopeMiddleware(c, next);

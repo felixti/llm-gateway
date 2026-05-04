@@ -6,22 +6,15 @@
 import type { DeploymentConfig } from '@/config/deployments';
 import type { ProxyRequestContext } from '@/routes/factories/types';
 import { proxyNonStreamingChat, proxyStreamingChat } from './openai-chat.proxy';
+import {
+  type ChatChoiceWithTools,
+  choiceToResponsesOutput,
+  normalizeResponsesTool,
+} from './responses-tools';
 
 type ResponsesInputItem = {
   role?: string;
   content?: unknown;
-};
-
-type ResponsesTool = {
-  type: string;
-  name?: string;
-  description?: string;
-  parameters?: Record<string, unknown>;
-  function?: {
-    name?: string;
-    description?: string;
-    parameters?: Record<string, unknown>;
-  };
 };
 
 function stringifyResponseContent(content: unknown): string {
@@ -46,29 +39,6 @@ function stringifyResponseContent(content: unknown): string {
     .join('\n');
 }
 
-function normalizeResponsesTool(tool: ResponsesTool): Record<string, unknown> {
-  if (tool.type === 'function') {
-    const fn = tool.function ?? tool;
-    return {
-      type: 'function',
-      function: {
-        name: fn.name ?? 'function_tool',
-        description: fn.description,
-        parameters: fn.parameters ?? { type: 'object', properties: {} },
-      },
-    };
-  }
-
-  return {
-    type: 'function',
-    function: {
-      name: tool.type,
-      description: `Built-in Responses API tool: ${tool.type}`,
-      parameters: { type: 'object', properties: {}, additionalProperties: true },
-    },
-  };
-}
-
 /**
  * Transform Responses API request to Chat Completions format.
  * Keep modern Chat Completions fields where Azure can understand them.
@@ -88,7 +58,7 @@ export function transformResponsesToChatCompletions(
         : [];
 
   const tools = Array.isArray(body.tools)
-    ? (body.tools as ResponsesTool[]).map(normalizeResponsesTool)
+    ? (body.tools as Parameters<typeof normalizeResponsesTool>[0][]).map(normalizeResponsesTool)
     : undefined;
   const reasoning = body.reasoning as { effort?: string } | undefined;
 
@@ -118,24 +88,18 @@ export function transformResponsesToChatCompletions(
 export function transformChatCompletionsToResponse(
   chatBody: Record<string, unknown>
 ): Record<string, unknown> {
-  const choices = (chatBody.choices || []) as Array<{
-    index?: number;
-    message?: { role?: string; content?: string };
-    finish_reason?: string;
-  }>;
+  const choices = (chatBody.choices || []) as Array<
+    ChatChoiceWithTools & {
+      finish_reason?: string;
+    }
+  >;
 
   return {
     id: chatBody.id || '',
     object: 'response',
     created_at: typeof chatBody.created === 'number' ? chatBody.created : getCurrentUnixTime(),
     model: chatBody.model || '',
-    output: choices.map((choice) => ({
-      type: 'message',
-      id: `${chatBody.id}-${choice.index ?? 0}`,
-      status: 'completed',
-      role: choice.message?.role || 'assistant',
-      content: [{ type: 'output_text', text: choice.message?.content || '' }],
-    })),
+    output: choices.flatMap((choice) => choiceToResponsesOutput(chatBody.id, choice)),
     usage: chatBody.usage,
     parallel_tool_calls: true,
     text: {

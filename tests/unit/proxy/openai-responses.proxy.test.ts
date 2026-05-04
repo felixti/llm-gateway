@@ -69,6 +69,45 @@ describe("transformChatCompletionsToResponse", () => {
     expect(result.output).toEqual([]);
     expect(result.model).toBe("");
   });
+
+  test("maps assistant tool calls to Responses function_call output items", () => {
+    const result = transformChatCompletionsToResponse({
+      id: "chatcmp-tools",
+      created: 1700000004,
+      model: "gpt-test",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                id: "call_123",
+                type: "function",
+                function: {
+                  name: "file_search",
+                  arguments: "{\"query\":\"quota\"}",
+                },
+              },
+            ],
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
+    }) as Record<string, any>;
+
+    expect(result.output).toEqual([
+      {
+        type: "function_call",
+        id: "call_123",
+        call_id: "call_123",
+        name: "file_search",
+        arguments: "{\"query\":\"quota\"}",
+        status: "completed",
+      },
+    ]);
+  });
 });
 
 describe("transformResponsesToChatCompletions", () => {
