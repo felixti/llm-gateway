@@ -191,11 +191,11 @@ export async function recordUsageOnly(
   if (idempotencyKey) {
     const key = `${IDEMPOTENCY_RECORD_ONLY_PREFIX}${idempotencyKey}`;
     const ttl = getIdempotencyTtlSeconds();
-    const set = await redis.setnx(key, '1');
-    if (set === 0) {
+    // Atomic NX+EX: avoids leaking a TTL-less key if EXPIRE were a separate call.
+    const set = await redis.set(key, '1', 'EX', ttl, 'NX');
+    if (set !== 'OK') {
       return new Decimal(0);
     }
-    await redis.expire(key, ttl);
   }
 
   await redis.hincrby(quotaKey, 'spent', Number(costMicro));

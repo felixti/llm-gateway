@@ -129,6 +129,15 @@ const envSchema = z
     WAL_DIR: z.string().default('/var/lib/llm-gateway/dlq'),
     /** Quota reconciler job interval (rebuilds Redis spent from Postgres) */
     RECONCILER_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+    /** WAL replayer job interval (drains unbilled DLQ entries to Postgres) */
+    WAL_REPLAY_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+
+    /** Expose interactive `/docs` (Scalar UI) and `/openapi.json`. Off in production by default. */
+    DOCS_ENABLED: z
+      .enum(['true', 'false'])
+      .optional()
+      .default('false')
+      .transform((v) => v === 'true'),
   })
   .superRefine((data, ctx) => {
     if (data.NODE_ENV !== 'production') {
@@ -203,6 +212,7 @@ function buildEnvInput(): Record<string, string | undefined> {
 
   if (process.env.NODE_ENV === 'test') {
     input.PAT_SECRET = input.PAT_SECRET || TEST_PAT_SECRET;
+    input.DOCS_ENABLED = input.DOCS_ENABLED ?? 'true';
 
     if (input.ADMIN_OPERATOR_SECRET && input.ADMIN_OPERATOR_SECRET.length < 16) {
       input.ADMIN_OPERATOR_SECRET = undefined;

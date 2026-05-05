@@ -2,13 +2,14 @@ import { createApp } from './app';
 import { env } from './config/env';
 import { closeDatabase } from './db/client';
 import { closeRedis } from './db/redis';
-import { logger } from './observability/logger';
+import { flushLogger, logger } from './observability/logger';
 import { initMetrics, shutdownMetrics } from './observability/metrics';
 import { initTracing, shutdownTracing } from './observability/tracing';
 import { startHealthChecks, stopHealthChecks } from './services/health.service';
 import { startPricingWatcher } from './services/pricing.service';
 import { startBackgroundJobs, stopBackgroundJobs } from './services/scheduler.service';
 import { getInFlightCount, initiateGracefulShutdown } from './services/shutdown.service';
+import { startWalReplayer, stopWalReplayer } from './services/wal-replayer.service';
 
 type GatewayServer = ReturnType<typeof Bun.serve>;
 
@@ -20,6 +21,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
   stopHealthChecks();
   stopBackgroundJobs();
+  stopWalReplayer();
   stopPricingWatcher?.();
 
   if (server) {
@@ -40,6 +42,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   await closeDatabase();
 
   logger.info('Shutdown complete');
+  await flushLogger();
   process.exit(0);
 }
 
@@ -53,6 +56,7 @@ export function startServer(): GatewayServer {
   initTracing();
   startHealthChecks();
   startBackgroundJobs();
+  startWalReplayer();
   stopPricingWatcher = startPricingWatcher();
 
   const app = createApp();

@@ -19,10 +19,27 @@ import type { Decimal } from 'decimal.js';
 const PG_AUDIT_RETRIES = 3;
 const PG_AUDIT_BACKOFF_MS = [200, 400, 800];
 
+async function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 async function logRequestAuditDurable(
-  payload: Parameters<typeof insertRequestAuditOrThrow>[0]
+  payload: Parameters<typeof insertRequestAuditOrThrow>[0],
+  signal?: AbortSignal
 ): Promise<AuditWriteResult | 'failed'> {
   for (let attempt = 0; attempt < PG_AUDIT_RETRIES; attempt++) {
+    if (signal?.aborted) return 'failed';
     try {
       return await insertRequestAuditOrThrow(payload);
     } catch (err) {
@@ -31,7 +48,7 @@ async function logRequestAuditDurable(
         'Postgres audit insert failed, retrying'
       );
       if (attempt < PG_AUDIT_RETRIES - 1) {
-        await new Promise((r) => setTimeout(r, PG_AUDIT_BACKOFF_MS[attempt]));
+        await sleepWithAbort(PG_AUDIT_BACKOFF_MS[attempt], signal);
       }
     }
   }
@@ -56,6 +73,7 @@ interface FinalizeUsageOptions {
   startTime: number;
   thinkingEnabled?: boolean;
   idempotencyKey?: string;
+  abortSignal?: AbortSignal;
 }
 
 export function normalizeProxyContext(
@@ -158,6 +176,7 @@ export async function finalizeProxyUsage({
   startTime,
   thinkingEnabled = false,
   idempotencyKey,
+  abortSignal,
 }: FinalizeUsageOptions): Promise<void> {
   if (!usage) {
     if (reservationId) {
@@ -202,21 +221,25 @@ export async function finalizeProxyUsage({
     deployment.protocolFamily
   );
 
-  const auditResult = await logRequestAuditDurable({
-    userId: userId || 'unknown',
-    requestId,
-    model: deployment.azureModelName,
-    deployment: deployment.name,
-    protocolFamily: deployment.protocolFamily,
-    tokensInput: usage.prompt_tokens,
-    tokensOutput: usage.completion_tokens,
-    tokensThinking: usage.thinking_tokens || 0,
-    costUsd: actualCost.toString(),
-    thinkingEnabled,
-    azureAuthType: deployment.authConfig.type,
-    durationMs: Date.now() - startTime,
-    statusCode: 200,
-  });
+  const durationMs = Date.now() - startTime;
+  const auditResult = await logRequestAuditDurable(
+    {
+      userId: userId || 'unknown',
+      requestId,
+      model: deployment.azureModelName,
+      deployment: deployment.name,
+      protocolFamily: deployment.protocolFamily,
+      tokensInput: usage.prompt_tokens,
+      tokensOutput: usage.completion_tokens,
+      tokensThinking: usage.thinking_tokens || 0,
+      costUsd: actualCost.toString(),
+      thinkingEnabled,
+      azureAuthType: deployment.authConfig.type,
+      durationMs,
+      statusCode: 200,
+    },
+    abortSignal
+  );
 
   if (auditResult === 'failed') {
     const reason: 'redis_fail' | 'pg_fail' | 'both_fail' = redisOk ? 'pg_fail' : 'both_fail';
@@ -225,6 +248,12 @@ export async function finalizeProxyUsage({
         requestId,
         userId: userId || 'unknown',
         model: deployment.azureModelName,
+        deployment: deployment.name,
+        protocolFamily: deployment.protocolFamily,
+        azureAuthType: deployment.authConfig.type,
+        thinkingEnabled,
+        durationMs,
+        statusCode: 200,
         tokensInput: usage.prompt_tokens,
         tokensOutput: usage.completion_tokens,
         tokensThinking: usage.thinking_tokens || 0,

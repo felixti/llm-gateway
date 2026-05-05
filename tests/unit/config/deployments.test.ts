@@ -199,6 +199,26 @@ describe("Deployment Registry", () => {
       const chain = getFallbackChain(deployment);
       expect(chain.length).toBe(0);
     });
+
+    it("does not infinite loop when fallback chain forms a cycle", () => {
+      const deploymentA: import("@/config/deployments").DeploymentConfig = {
+        name: "cycle-a",
+        modelAlias: "cycle-a",
+        modelFamily: "gpt",
+        protocolFamily: "chat-completions",
+        azureModelName: "cycle-a",
+        endpoint: "https://example.com",
+        authConfig: { type: "api-key", apiKey: "k", keyHeader: "api-key" },
+        apiVersion: "2024-06-01",
+        fallbackDeployment: "claude-opus-4-6",
+        enabled: true,
+      };
+
+      const chain = getFallbackChain(deploymentA);
+      expect(Array.isArray(chain)).toBe(true);
+      const names = chain.map((d) => d.name);
+      expect(names).not.toContain(deploymentA.name);
+    });
   });
 
   describe("getAllModelAliases", () => {

@@ -142,9 +142,13 @@ healthRoutes.get('/ready', async (c) => {
 
 /**
  * GET /openapi.json
- * Returns the OpenAPI 3.1 specification
+ * Returns the OpenAPI 3.1 specification.
+ * Gated by `DOCS_ENABLED` to avoid exposing the admin surface in production.
  */
 healthRoutes.get('/openapi.json', async (c) => {
+  if (!env.DOCS_ENABLED) {
+    return c.json({ error: 'Not found' }, 404);
+  }
   const spec = await getOpenApiSpec();
   return c.json(spec);
 });
@@ -166,13 +170,18 @@ healthRoutes.get('/metrics', (c) => {
 
 /**
  * GET /docs
- * Interactive API documentation powered by Scalar
+ * Interactive API documentation powered by Scalar.
+ * Gated by `DOCS_ENABLED` so the admin/auth surface is not browseable in prod.
  */
-healthRoutes.get(
-  '/docs',
-  Scalar({
-    url: '/openapi.json',
-    pageTitle: 'LLM Gateway API Reference',
-    theme: 'purple',
-  })
-);
+const scalarHandler = Scalar({
+  url: '/openapi.json',
+  pageTitle: 'LLM Gateway API Reference',
+  theme: 'purple',
+});
+
+healthRoutes.get('/docs', async (c, next) => {
+  if (!env.DOCS_ENABLED) {
+    return c.json({ error: 'Not found' }, 404);
+  }
+  return scalarHandler(c, next);
+});

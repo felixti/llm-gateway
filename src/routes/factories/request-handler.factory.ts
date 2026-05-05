@@ -28,6 +28,7 @@ import {
 import { releaseReservedQuota } from '@/proxy/shared';
 import { getAzureAuthManager } from '@/services/azure-auth';
 import { isRequestAllowed } from '@/services/circuit-breaker';
+import { getQuotaMultiplier } from '@/services/pricing.service';
 import { topUpReservation } from '@/services/quota.service';
 import { fromMicrodollars } from '@/services/quota/money';
 import { type Result, err, ok } from '@/utils/result';
@@ -133,7 +134,7 @@ async function tryFallbacks(options: {
           const originalAmountMicro = Number(parts[0]) || 0;
           const originalCost = fromMicrodollars(String(originalAmountMicro));
 
-          const fallbackEstimate = originalCost.times(1.2);
+          const fallbackEstimate = originalCost.times(getQuotaMultiplier());
           const delta = fallbackEstimate.minus(originalCost);
 
           if (delta.gt(0)) {

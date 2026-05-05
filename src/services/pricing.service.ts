@@ -5,6 +5,7 @@
  */
 
 import { type FSWatcher, watch } from 'node:fs';
+import { env } from '@/config/env';
 import { Decimal } from 'decimal.js';
 import pricingData from '../config/pricing.json';
 
@@ -242,7 +243,15 @@ export function calculateCost(usage: TokenUsage, model: string): Decimal {
 }
 
 /**
- * Calculate estimated cost for reservation (120% multiplier)
+ * Quota multiplier applied to base cost when reserving (`env.QUOTA_MULTIPLIER`,
+ * default 1.2). Exported so the fallback top-up path uses the same factor.
+ */
+export function getQuotaMultiplier(): Decimal {
+  return new Decimal(env.QUOTA_MULTIPLIER);
+}
+
+/**
+ * Calculate estimated cost for reservation (env.QUOTA_MULTIPLIER, default 1.2)
  */
 export function calculateEstimatedCost(
   promptTokens: number,
@@ -258,9 +267,7 @@ export function calculateEstimatedCost(
 
   const baseCost = calculateCost(usage, model);
 
-  // Apply 120% multiplier for reservation estimation
-  const multiplier = new Decimal(1.2);
-  return baseCost.times(multiplier).toDecimalPlaces(6);
+  return baseCost.times(getQuotaMultiplier()).toDecimalPlaces(6);
 }
 
 /**

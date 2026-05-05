@@ -254,15 +254,22 @@ export function getAllDeployments(): DeploymentConfig[] {
 }
 
 /**
- * Resolve fallback chain for a deployment (same protocol family only)
+ * Resolve fallback chain for a deployment (same protocol family only).
+ * Cycle-safe: tracks visited deployments to avoid infinite loops on misconfig.
  */
 export function getFallbackChain(deployment: DeploymentConfig): DeploymentConfig[] {
   const chain: DeploymentConfig[] = [];
+  const visited = new Set<string>([deployment.name]);
   let current: DeploymentConfig | undefined = deployment;
 
   while (current?.fallbackDeployment) {
-    const fallback = DEPLOYMENTS.find((d) => d.name === current!.fallbackDeployment);
+    const fallbackName: string = current.fallbackDeployment;
+    if (visited.has(fallbackName)) {
+      break;
+    }
+    const fallback: DeploymentConfig | undefined = DEPLOYMENTS.find((d) => d.name === fallbackName);
     if (fallback?.enabled && fallback.protocolFamily === current.protocolFamily) {
+      visited.add(fallback.name);
       chain.push(fallback);
       current = fallback;
     } else {

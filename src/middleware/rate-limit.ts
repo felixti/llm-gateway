@@ -44,6 +44,9 @@ const CHECK_REQUEST_LIMIT_SCRIPT = `
   return {1, count + 1}
 `;
 
+// Member format: "tpm|<tokenCount>|<uniqueSuffix>". Score is the timestamp,
+// so token counts are read out of an explicit pipe-separated field rather
+// than depending on the regex matching arbitrary suffix characters.
 const CHECK_TOKEN_LIMIT_SCRIPT = `
   local key = KEYS[1]
   local now = tonumber(ARGV[1])
@@ -54,11 +57,11 @@ const CHECK_TOKEN_LIMIT_SCRIPT = `
   local uniqueSuffix = ARGV[6]
 
   redis.call('zremrangebyscore', key, 0, windowStart)
-  local entries = redis.call('zrange', key, 0, -1, 'WITHSCORES')
+  local members = redis.call('zrange', key, 0, -1)
   local total = 0
 
-  for i = 1, #entries, 2 do
-    local tokens = tonumber(entries[i]:match(':(%d+):') or 0)
+  for i = 1, #members do
+    local tokens = tonumber(members[i]:match('^tpm|(%d+)|') or 0)
     total = total + tokens
   end
 
@@ -66,7 +69,7 @@ const CHECK_TOKEN_LIMIT_SCRIPT = `
     return {0, total}
   end
 
-  local member = now .. ':' .. tokenCount .. ':' .. uniqueSuffix
+  local member = 'tpm|' .. tokenCount .. '|' .. uniqueSuffix
   redis.call('zadd', key, now, member)
   redis.call('expire', key, windowSeconds)
 

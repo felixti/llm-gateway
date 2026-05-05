@@ -10,11 +10,18 @@ import { sanitizePII } from './sanitize-pii';
 
 export { sanitizePII };
 
+// Async destinations are non-blocking but must be flushed on exit.
+// In tests we use sync writes so log assertions remain deterministic.
+const SYNC_LOG_WRITES = process.env.NODE_ENV === 'test';
+
+let baseDestination: ReturnType<typeof pino.destination> | null = null;
+
 /**
  * Create pino logger instance with structured output
  */
 export function createLogger(name?: string): pino.Logger {
-  const piiStream = createPIISanitizeStream(pino.destination({ sync: true }));
+  baseDestination = pino.destination({ sync: SYNC_LOG_WRITES });
+  const piiStream = createPIISanitizeStream(baseDestination);
 
   const baseLogger = pino(
     {
@@ -33,6 +40,34 @@ export function createLogger(name?: string): pino.Logger {
 
 // Default logger instance
 export const logger = createLogger('llm-gateway');
+
+/**
+ * Flush the async pino destination on shutdown so buffered lines are written
+ * before the process exits. Safe to call multiple times.
+ */
+export async function flushLogger(): Promise<void> {
+  if (!baseDestination) return;
+  await new Promise<void>((resolve) => {
+    try {
+      baseDestination?.flush(() => resolve());
+    } catch {
+      resolve();
+    }
+  });
+}
+
+// Best-effort flush on unexpected exit. Matches pino's recommendation for
+// async destinations.
+const FLUSH_SIGNALS = ['beforeExit', 'exit'] as const;
+for (const event of FLUSH_SIGNALS) {
+  process.on(event, () => {
+    try {
+      baseDestination?.flushSync();
+    } catch {
+      // best effort
+    }
+  });
+}
 
 /**
  * Request log context interface

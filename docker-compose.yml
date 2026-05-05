@@ -1,4 +1,4 @@
-version: '3.9'
+version: "3.9"
 
 services:
   gateway:
@@ -8,10 +8,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.0'
+          cpus: "1.0"
           memory: 512M
         reservations:
-          cpus: '0.25'
+          cpus: "0.25"
           memory: 128M
     ports:
       - "3000:3000"
@@ -62,15 +62,15 @@ services:
     volumes:
       - ./etc/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
     ports:
-      - "4317:4317"   # OTLP gRPC receiver
-      - "4318:4318"   # OTLP HTTP receiver
+      - "4317:4317" # OTLP gRPC receiver
+      - "4318:4318" # OTLP HTTP receiver
     restart: unless-stopped
 
   jaeger:
     image: jaegertracing/all-in-one:1.59
     ports:
       - "16686:16686" # Jaeger UI
-      - "6831:6831"   # Jaeger agent (ZIPKIN compact format)
+      - "6831:6831" # Jaeger agent (ZIPKIN compact format)
     environment:
       - COLLECTOR_OTLP_ENABLED=true
       - COLLECTOR_OTLP_GRPC_HOST_PORT=otel-collector:4317
@@ -83,7 +83,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 256M
     ports:
       - "6379:6379"
@@ -101,7 +101,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
     ports:
       - "5432:5432"

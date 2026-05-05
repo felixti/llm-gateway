@@ -8,6 +8,12 @@ export interface WalEntry {
   requestId: string;
   userId: string;
   model: string;
+  deployment?: string;
+  protocolFamily?: string;
+  azureAuthType?: string;
+  thinkingEnabled?: boolean;
+  durationMs?: number;
+  statusCode?: number;
   tokensInput: number;
   tokensOutput: number;
   tokensThinking: number;

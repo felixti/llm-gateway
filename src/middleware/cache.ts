@@ -24,8 +24,23 @@ function generateCacheKey(c: Context): string {
   return `${CACHE_PREFIX}${userId}:${method}:${path}${query}`;
 }
 
+// Per-request or sensitive headers MUST NOT be persisted in the shared cache;
+// otherwise a replay could leak Set-Cookie / Authorization across users or
+// cause stale tracing IDs to surface on later requests.
+const NON_CACHEABLE_HEADERS = new Set([
+  'set-cookie',
+  'authorization',
+  'x-request-id',
+  'x-quota-reserved',
+]);
+
 function headersToObject(headers: Headers): Record<string, string> {
-  return Object.fromEntries(headers.entries());
+  const out: Record<string, string> = {};
+  for (const [name, value] of headers.entries()) {
+    if (NON_CACHEABLE_HEADERS.has(name.toLowerCase())) continue;
+    out[name] = value;
+  }
+  return out;
 }
 
 function withAuthorizationVary(headers: ConstructorParameters<typeof Headers>[0]): Headers {
