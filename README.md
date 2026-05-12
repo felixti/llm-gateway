@@ -7,14 +7,67 @@ A production-ready API proxy server for Azure OpenAI and Azure AI Foundry endpoi
 ## Features
 
 - **Multi-Protocol Support**: OpenAI Chat Completions, Anthropic Messages, OpenAI Responses API
-- **PAT Authentication**: HMAC-SHA256 token validation with Redis blocklist
-- **Quota Management**: USD-based quota with Redis atomic reservations
-- **Rate Limiting**: Per-user RPM/TPM with Redis sliding window
-- **Circuit Breaker**: Distributed Redis-backed resilience pattern
+- **PAT Authentication**: HMAC-SHA256 token validation with Redis blocklist, model-scoped tokens (`models:<name>`)
+- **Quota Management**: USD-based quota with Redis atomic reservations, Postgres-as-truth reconciler
+- **Rate Limiting**: Per-user RPM/TPM with Redis sliding window (fail-closed)
+- **Circuit Breaker**: Distributed Redis-backed resilience pattern with fallback chains
 - **Streaming**: Real-time usage extraction from SSE streams
-- **Observability**: OpenTelemetry traces, metrics, and structured logging
+- **Observability**: OpenTelemetry traces, Prometheus metrics, structured logging with PII redaction
+- **Write-Ahead Log**: Disk-based DLQ for unbilled requests when Redis and PostgreSQL both fail
+- **Background Jobs**: Orphan cleanup, monthly archive, quota reconciler with distributed locking
 - **Graceful Shutdown**: Connection draining with configurable timeout
-- **Security**: CORS, security headers, body size limits, request timeout
+- **Security**: CORS, security headers, body size limits, request timeout, admin operator secret
+- **Response Caching**: Redis-backed caching for read-only endpoints
+
+## Architecture
+
+```
+                        ┌──────────── Clients ────────────┐
+                        │  HTTP (Bearer PAT lg_*)          │
+                        └──────────────┬───────────────────┘
+                                       │
+        ┌──────────────────────────────▼──────────────────────────────────┐
+        │                    LLM Gateway (Bun.serve)                      │
+        │                                                                 │
+        │  Global mw: compress → secureHeaders → cors → request-id →      │
+        │             shutdown → timeout → performance/metrics            │
+        │                                                                 │
+        │  Proxy chain: auth(PAT) → scope → protocol-guard →              │
+        │               rate-limit → quota → handler-factory              │
+        │                            │                                    │
+        │                            ▼                                    │
+        │     ┌────────────┬───────────────────┬────────────────┐         │
+        │     │ openai-chat│ anthropic.messages│ openai-responses│        │
+        │     │  .proxy    │     .proxy        │ .proxy + tools │         │
+        │     └─────┬──────┴────────┬──────────┴────────┬───────┘         │
+        │           ▼               ▼                   ▼                 │
+        │  retry (exp+jitter) · circuit-breaker · azure-auth (key|Entra) │
+        │  streaming utils · tokens (tiktoken) · pricing (decimal.js)    │
+        │                                                                 │
+        │  Operator:  /health · /quota · /v1/models(cache) · /admin(HMAC) │
+        │                                                                 │
+        │  Workers:   scheduler (orphan sweep · archive · reconcile)      │
+        │             wal-replayer · health-checks · pricing-watcher      │
+        └──────┬──────────────────────────────┬───────────────────────────┘
+               ▼                              ▼
+        ┌────────────┐                ┌──────────────┐
+        │   Redis    │                │ PostgreSQL   │
+        │ rate/quota │                │ request_audit│
+        │ blocklist  │                │ archives     │
+        │ resp-cache │                │ revocations  │
+        │ az-tokens  │                └──────┬───────┘
+        └────────────┘                       │
+                                      ┌──────▼──────┐
+                                      │ WAL (disk)  │
+                                      │  DLQ→replay │
+                                      └─────────────┘
+               ▼
+        Azure OpenAI (api-key)  ·  Azure AI Foundry (Entra)
+
+    Observability:  OTel Collector :4317/:4318 → Jaeger :16686
+                    Pino JSON + PII-redact transport
+                    counters/histograms via OTel SDK
+```
 
 ## Quick Start
 
@@ -85,9 +138,12 @@ docker compose up -d
 ### Database Setup
 
 ```bash
-# Run migrations
+# Run migrations (migrations are at project root, not under src/)
+psql -U postgres -d llm_gateway -f migrations/000_migration_tracking.sql
 psql -U postgres -d llm_gateway -f migrations/001_initial_schema.sql
 psql -U postgres -d llm_gateway -f migrations/002_pat_subject.sql
+psql -U postgres -d llm_gateway -f migrations/003_request_audit_monthly_range.sql
+psql -U postgres -d llm_gateway -f migrations/004_check_constraints.sql
 ```
 
 ## API Endpoints
@@ -98,6 +154,7 @@ psql -U postgres -d llm_gateway -f migrations/002_pat_subject.sql
 |----------|--------|-------------|
 | `/v1/chat/completions` | POST | OpenAI Chat Completions |
 | `/v1/messages` | POST | Anthropic Messages |
+| `/v1/messages/count_tokens` | POST | Token counting (Anthropic format) |
 | `/v1/responses` | POST | OpenAI Responses API |
 | `/v1/models` | GET | List available models |
 
@@ -107,6 +164,7 @@ psql -U postgres -d llm_gateway -f migrations/002_pat_subject.sql
 |----------|--------|-------------|
 | `/health` | GET | Liveness probe (always 200) |
 | `/ready` | GET | Readiness probe (checks Redis, PostgreSQL, Azure) |
+| `/metrics` | GET | Prometheus metrics (optional bearer auth) |
 | `/openapi.json` | GET | OpenAPI 3.1 specification |
 | `/docs` | GET | Interactive API documentation (Scalar) |
 
@@ -126,8 +184,8 @@ lg_{userId}_{header}.{payload}.{signature}
 ```
 
 - **Algorithm**: HMAC-SHA256
-- **Scopes**: `all`, `read`, `admin`
-- **Revocation**: Redis blocklist (no TTL)
+- **Scopes**: `all` (full access), `read` (GET/HEAD/OPTIONS only), `admin` (full + `/admin/*`), `models:<name>` (specific model only)
+- **Revocation**: Redis blocklist (no TTL, permanent)
 
 ### Creating a PAT
 
@@ -145,9 +203,11 @@ curl -X POST http://localhost:3000/admin/pat/create \
 
 1. **PostgreSQL is authoritative** for budget policy (`monthly_budget_usd`, `hard_limit`)
 2. **Redis is fast path** for real-time enforcement (spent/reserved amounts)
-3. **Atomic reservations** via Redis Lua scripts
-4. **120% multiplier** for reservation safety margin
-5. **300s TTL** for orphan reservation cleanup
+3. **Background reconciler** rebuilds Redis `spent` from PostgreSQL audit logs (1 min interval)
+4. **Atomic reservations** via Redis Lua scripts
+5. **120% multiplier** for reservation safety margin
+6. **300s TTL** for orphan reservation cleanup
+7. **Write-Ahead Log** on disk when both Redis and PostgreSQL fail simultaneously
 
 ### Quota Headers
 

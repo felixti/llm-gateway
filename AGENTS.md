@@ -50,11 +50,17 @@ An LLM Gateway API proxy server built in **Bun/Hono** that proxies requests to A
 
 ## Supported Models & Protocols
 
-| Model Family | Protocol | Deployment Type |
-|--------------|----------|-----------------|
-| GPT-4o, GPT-4o-Mini, GPT-5-Codex | OpenAI Chat Completions | Azure OpenAI |
-| Claude-3.5-Sonnet, Claude-3.7-Sonnet | Anthropic Messages | Azure AI Foundry |
-| Kimi, GLM, MiniMax | OpenAI Chat Completions | Azure AI Foundry |
+| Deployment Name | Model Alias | Protocol | Deployment Type | Fallback |
+|-----------------|-------------|----------|-----------------|----------|
+| gpt-5-mini | gpt-5-mini | OpenAI Chat Completions | Azure OpenAI | → gpt-5.3-codex |
+| gpt-5.4-global | gpt-5.4 | OpenAI Chat Completions | Azure OpenAI | → gpt-5.3-codex |
+| gpt-5.3-codex | gpt-5.3-codex | OpenAI Chat Completions | Azure OpenAI | — |
+| claude-opus-4-6 | claude-opus-4-6 | Anthropic Messages | Azure AI Foundry | → claude-sonnet-4-6 |
+| claude-sonnet-4-6 | claude-sonnet-4-6 | Anthropic Messages | Azure AI Foundry | → claude-haiku-4-5 |
+| claude-haiku-4-5 | claude-haiku-4-5 | Anthropic Messages | Azure AI Foundry | — |
+| kimi-k2.5 | kimi-k2.5 | OpenAI Chat Completions | Azure AI Foundry | — |
+| glm-5 | glm-5 | OpenAI Chat Completions | Azure AI Foundry | — |
+| minimax-m2.5 | minimax-m2.5 | OpenAI Chat Completions | Azure AI Foundry | — |
 
 ---
 
@@ -118,10 +124,24 @@ An LLM Gateway API proxy server built in **Bun/Hono** that proxies requests to A
 - OpenTelemetry tracing with custom spans: `llm.user_id`, `llm.model`, `llm.tokens.*`, `llm.cost.usd`
 - In-process metrics (`metrics.ts`): quota 429s, rate-limit 429s, Postgres hydration failures, PAT revocations — Prometheus text via `getPrometheusMetrics()`
 - Structured logging with pino (JSON format)
+- PII sanitization in logs (email patterns, token prefixes) via `sanitize-pii.ts` and `pino-pii-transport.ts`
 - Never log message content - only metadata
+
+### Background Jobs (scheduler.service.ts)
+Three background jobs run on intervals with distributed Redis locks:
+1. **Orphan Cleanup** (5 min) — Removes expired quota reservations, releases reserved amounts
+2. **Monthly Archive** (1 hr) — Archives prior-month Redis quota data into PostgreSQL `usage_history`
+3. **Quota Reconciler** (1 min, configurable via `RECONCILER_INTERVAL_MS`) — Rebuilds Redis `spent` from PostgreSQL audit logs
+
+### Write-Ahead Log (wal.service.ts)
+Disk-based DLQ for unbilled requests when both Redis and PostgreSQL fail simultaneously:
+- **Directory**: Configurable via `WAL_DIR` (default: `/var/lib/llm-gateway/dlq`)
+- **Security**: WAL files created with `0o600` permissions inside `0o700` directory
+- **Recovery**: `wal-replayer.service.ts` drains entries to PostgreSQL on configurable interval
 
 ### Operations Docs
 - Runbooks: `docs/operations/` (PAT rotation, operator secret rotation, quota drift, migrations, observability/SLOs)
+- Migrations: `migrations/` at project root (not under `src/`)
 
 ---
 
@@ -129,69 +149,150 @@ An LLM Gateway API proxy server built in **Bun/Hono** that proxies requests to A
 
 ```
 src/
+├── index.ts                 # Bun.serve bootstrap, graceful shutdown, starts all workers
+├── app.ts                   # Hono app factory: global middleware + routes + error handler
+├── types.ts                 # Shared TypeScript type definitions
 ├── config/
-│   ├── env.ts           # Zod environment validation
-│   ├── deployments.ts   # Deployment registry
-│   └── pricing.json     # Model pricing (hot-reload)
+│   ├── index.ts             # Barrel re-exports
+│   ├── env.ts               # Zod environment validation (lazy singleton)
+│   ├── deployments.ts       # 9 deployment registry + alias/fallback resolution
+│   └── pricing.json         # Model pricing per-million tokens (hot-reload via watcher)
 ├── middleware/
-│   ├── request-id.ts    # UUID generation
-│   ├── auth.ts          # PAT authentication
-│   ├── admin-scope.ts # Require `admin` scope for operator routes
-│   ├── protocol-guard.ts # Model-endpoint validation
-│   ├── rate-limit.ts    # Redis rate limiting
-│   └── quota.ts         # Quota reservation
+│   ├── request-id.ts        # UUID generation, X-Request-Id header
+│   ├── auth.ts              # PAT authentication (HMAC-SHA256)
+│   ├── scope.ts             # Scope enforcement (all/read/admin/models:<name>)
+│   ├── admin-scope.ts       # Admin scope + optional X-Operator-Secret check
+│   ├── protocol-guard.ts    # Model-endpoint compatibility validation
+│   ├── rate-limit.ts        # Redis RPM/TPM rate limiting (fail-closed)
+│   ├── quota.ts             # Quota estimation, reservation, release on abort
+│   ├── cache.ts             # Redis-backed response caching (GET endpoints)
+│   ├── performance.ts       # Request duration histogram + counter
+│   └── timeout.ts           # AbortSignal-based request timeout
 ├── services/
-│   ├── azure-auth.ts    # Entra ID + API Key
-│   ├── circuit-breaker.ts
-│   ├── retry.ts
-│   ├── pricing.service.ts
-│   ├── quota.service.ts
-│   └── health.service.ts
+│   ├── azure-auth.ts        # Entra ID (OAuth2 client creds) + API Key auth manager
+│   ├── circuit-breaker.ts   # Per-deployment circuit breaker (Redis-backed)
+│   ├── retry.ts             # Exponential backoff with jitter (skip 400/401/403)
+│   ├── pricing.service.ts   # Cost calculation (Decimal.js 6dp), pricing watcher
+│   ├── quota.service.ts     # Quota reserve/reconcile/release, orphan cleanup, top-up
+│   ├── health.service.ts    # Non-billing health probes with in-memory cache
+│   ├── scheduler.service.ts # Background jobs: orphan cleanup, archive, reconciler
+│   ├── shutdown.service.ts  # In-flight request tracking, graceful drain
+│   ├── wal.service.ts       # Write-Ahead Log for unbilled requests (disk DLQ)
+│   ├── wal-replayer.service.ts # WAL replay to PostgreSQL (background job)
+│   └── quota/
+│       ├── constants.ts     # Key prefixes, TTLs, default budget
+│       ├── keys.ts          # Redis key generation helpers
+│       ├── money.ts         # Microdollars conversion (Decimal → micro integer)
+│       ├── policy.ts        # Postgres → Redis quota policy sync
+│       └── scripts.ts       # Redis Lua scripts (reserve, release, reconcile, cleanup, top-up)
 ├── proxy/
-│   ├── openai-chat.proxy.ts
-│   ├── anthropic.proxy.ts
-│   └── openai-responses.proxy.ts
+│   ├── openai-chat.proxy.ts     # GPT/Kimi/GLM/MiniMax Chat Completions proxy
+│   ├── anthropic.proxy.ts       # Claude Messages API proxy + count_tokens
+│   ├── openai-responses.proxy.ts # OpenAI Responses API proxy
+│   ├── responses-tools.ts       # Tool normalization for Responses API
+│   └── shared.ts                # Quota release, audit logging, WAL fallback, error sanitization
 ├── routes/
-│   ├── chat.routes.ts
-│   ├── messages.routes.ts
-│   ├── responses.routes.ts
-│   ├── models.routes.ts
-│   ├── health.routes.ts
-│   ├── quota.routes.ts
-│   └── admin.routes.ts
+│   ├── chat.routes.ts       # POST /v1/chat/completions
+│   ├── messages.routes.ts   # POST /v1/messages, POST /v1/messages/count_tokens
+│   ├── responses.routes.ts  # POST /v1/responses
+│   ├── models.routes.ts     # GET /v1/models (with response cache, PAT-scope filtering)
+│   ├── health.routes.ts     # GET /health, /ready, /metrics, /openapi.json, /docs
+│   ├── quota.routes.ts      # GET /quota
+│   ├── admin.routes.ts      # POST /admin/pat/revoke
+│   └── factories/
+│       ├── request-handler.factory.ts # Handler factory with fallback chain support
+│       ├── errors.ts                  # Protocol-aware error response builders
+│       └── types.ts                   # ProxyRequestContext, handler deps types
 ├── utils/
-│   ├── errors.ts        # Protocol-aware errors
-│   ├── tokens.ts        # Token estimation
-│   └── streaming.ts     # SSE parsing
+│   ├── errors.ts        # Protocol-aware error factories (OpenAI vs Anthropic)
+│   ├── tokens.ts        # Token estimation (tiktoken cl100k_base)
+│   ├── streaming.ts     # SSE TransformStreams, usage extraction
+│   ├── auth.ts          # PAT structure validation, JTI hashing
+│   ├── result.ts        # Either monad (ok/err/isOk/isErr)
+│   ├── fetch.ts         # HTTPS-only upstream fetch wrapper
+│   ├── functional.ts    # compose, pipe, curry, throttle, partial
+│   ├── model-scope.ts   # Model-scoped PAT validation (models:<name>)
+│   └── mutex.ts         # Async mutex for critical sections
 ├── observability/
-│   ├── tracing.ts       # OpenTelemetry
-│   ├── logger.ts        # Pino structured logging
-│   └── metrics.ts       # Counters/gauges
+│   ├── tracing.ts           # OpenTelemetry SDK (OTLP gRPC), custom span attributes
+│   ├── logger.ts            # Pino structured JSON logging + request log helpers
+│   ├── metrics.ts           # Prometheus counters/gauges/histograms
+│   ├── sanitize-pii.ts      # PII sanitization (email, token prefixes)
+│   ├── pino-pii-transport.ts # Pino stream that redacts PII
+│   └── otlp-http-url.ts     # OTLP HTTP endpoint URL parsing
 ├── db/
-│   ├── migrations/      # PostgreSQL schema migrations (001_initial_schema.sql, etc.)
-│   └── data-access.ts   # Audit logging
-└── index.ts             # Hono app bootstrap
+│   ├── client.ts        # PostgreSQL via postgres.js (pool 20, idle 30s)
+│   ├── redis.ts         # Redis via ioredis (lazy connect in test)
+│   └── data-access.ts   # Audit logging, user resolution, batch archive/stats
+migrations/                  # PostgreSQL schema migrations (project root)
+├── 000_migration_tracking.sql
+├── 001_initial_schema.sql
+├── 002_pat_subject.sql
+├── 003_request_audit_monthly_range.sql
+└── 004_check_constraints.sql
 ```
 
 ---
 
 ## Testing Requirements
 
-### Unit Tests
-- Config validation
+### Unit Tests (63 files in `tests/unit/`)
+- Config validation (`config/env.test.ts`, `config/deployments.test.ts`)
 - Deployment registry (alias resolution, family classification, fallback chain)
-- Token estimation
-- Pricing calculations
-- Circuit breaker state transitions
-- Retry backoff timing
-- PAT authentication (valid/expired/invalid/revoked)
-- Protocol guard (model-endpoint combinations)
-- Error factories (all code mappings)
+- Token estimation (`utils/tokens.test.ts`, `utils/tokens.extended.test.ts`)
+- Pricing calculations (`services/pricing.service.test.ts`, `services/pricing.service.extended.test.ts`)
+- Circuit breaker state transitions (`services/circuit-breaker.test.ts`)
+- Circuit breaker probe TTL (`services/circuit-breaker-probe-ttl.test.ts`)
+- Retry backoff timing (`services/retry.test.ts`)
+- PAT authentication (valid/expired/invalid/revoked) (`middleware/auth.test.ts`)
+- Protocol guard (model-endpoint combinations) (`middleware/protocol-guard.test.ts`)
+- Scope enforcement (`middleware/scope.test.ts`)
+- Admin scope guard (`middleware/admin-scope.test.ts`)
+- Cache middleware (`middleware/cache.test.ts`)
+- Timeout middleware (`middleware/timeout.test.ts`)
+- Quota middleware (`middleware/quota.test.ts`)
+- Rate limiting (`middleware/rate-limit.test.ts`)
+- Error factories (all code mappings) (`utils/errors.test.ts`)
+- Result/Either monad (`utils/result.test.ts`, `utils/result-full.test.ts`)
+- Streaming SSE (`utils/streaming.test.ts`)
+- Functional utilities (`utils/functional.test.ts`)
+- Async mutex (`utils/mutex.test.ts`)
+- Auth utilities (`utils/auth.test.ts`)
+- HTTPS fetch (`utils/fetch.test.ts`)
+- Azure auth manager (`services/azure-auth.test.ts`)
+- Health service (`services/health.service.test.ts`, `services/health.service.extended.test.ts`)
+- Scheduler service (`services/scheduler.service.test.ts`, `services/scheduler.service.extended.test.ts`)
+- Shutdown service (`services/shutdown.service.test.ts`, `services/shutdown.service.extended.test.ts`)
+- WAL service (`services/wal.service.test.ts`)
+- WAL replayer (`services/wal-replayer.service.test.ts`)
+- Quota Lua scripts (`services/quota-lua-prefix-alignment.test.ts`)
+- Quota atomic operations (`services/quota-atomic-operations.test.ts`)
+- Quota concurrency (`services/quota-concurrency.test.ts`)
+- Quota orphan cleanup (`services/quota-orphan-cleanup.test.ts`)
+- Quota top-up (`services/quota-topup.test.ts`)
+- Quota service (`services/quota.service.test.ts`, `services/quota.service.extended.test.ts`)
+- Proxy implementations (`proxy/openai-chat.proxy.test.ts`, `proxy/anthropic.proxy.test.ts`, `proxy/openai-responses.proxy.test.ts`, `proxy/shared.test.ts`)
+- Request handler factory (`routes/factories/request-handler.factory.test.ts`)
+- Route handlers (`routes/chat.test.ts`, `routes/health.routes.test.ts`, `routes/quota.routes.test.ts`)
+- Observability (`observability/logger.test.ts`, `observability/tracing.test.ts`, `observability/metrics.test.ts`, `observability/otlp-http-url.test.ts`, `observability/pino-pii-transport.test.ts`)
+- Security (`security/sanitization.test.ts`, `security/gitignore.test.ts`, `security/pat-contract-doc.test.ts`)
+- App bootstrap (`app.test.ts`)
+- Database (`db/resolve-user-id.test.ts`)
 
-### Integration Tests
+### Integration Tests (11 files in `tests/integration/`)
+- PostgreSQL data access (`db/data-access.test.ts`, `db/audit-stats-batch.test.ts`)
 - Redis: reserve, reconcile, release, orphan cleanup
 - Quota middleware: hard limit → 429, soft limit → warn
-- Health/readiness endpoints
+- Health/readiness endpoints (`routes/health.test.ts`)
+- Route integration: chat, messages, responses, models, quota, admin
+- Observability synthetic (`observability/synthetic.test.ts`)
+- Redis-down chaos (`proxy/redis-down-chaos.test.ts`)
+
+### Chaos Tests (4 files in `tests/chaos/`)
+- PostgreSQL failure (`postgres-failure.test.ts`)
+- Redis failure (`redis-failure.test.ts`)
+- Network partition (`network-partition.test.ts`)
+- Partial commit (`partial-commit.test.ts`)
 
 ### HTTP Test Files
 - `http/chat-completions.http`
@@ -235,15 +336,17 @@ When working on any component, always load:
 
 ## Middleware Chain & Request Flow
 
-### Global Middleware (in index.ts)
+### Global Middleware (in app.ts)
 
 Applied to **all routes** via `app.use('*', ...)`:
 ```
-1. secureHeaders()     - Security headers (HSTS, X-Frame-Options, etc.)
-2. cors()              - CORS handling
-3. requestIdMiddleware - Sets 'requestId' (UUID), adds X-Request-Id header
-4. shutdownMiddleware  - Tracks in-flight requests, rejects with 503 during shutdown
-5. timeoutMiddleware   - Enforces REQUEST_TIMEOUT_MS, returns 504 on timeout
+1. compress()            - Response compression (gzip/brotli, skips SSE)
+2. secureHeaders()       - Security headers (HSTS, X-Frame-Options, etc.)
+3. cors()                - CORS handling (configurable origins)
+4. requestIdMiddleware   - Sets 'requestId' (UUID), adds X-Request-Id header
+5. shutdownMiddleware    - Tracks in-flight requests, rejects with 503 during shutdown
+6. timeoutMiddleware     - Sets 'requestSignal' (AbortSignal), enforces REQUEST_TIMEOUT_MS
+7. performanceMiddleware - Records request duration histogram + counter
 ```
 
 ### Per-Route Middleware Chain
@@ -253,9 +356,24 @@ Applied to **all routes** via `app.use('*', ...)`:
 authMiddleware → scopeMiddleware → protocolGuardMiddleware → rateLimitMiddleware → quotaMiddleware → [Handler]
 ```
 
+**Models Route** (`/v1/models`):
+```
+authMiddleware → scopeMiddleware → cacheMiddleware(ttl: 300) → [Handler]
+```
+
+**Quota Route** (`/quota`):
+```
+authMiddleware → scopeMiddleware → [Handler]
+```
+
 **Admin Routes** (`/admin`):
 ```
 authMiddleware → requireAdminScopeMiddleware → [Handler]
+```
+
+**Health/Observability** (`/health`, `/ready`, `/metrics`, `/openapi.json`, `/docs`):
+```
+(none — no auth required)
 ```
 
 ### Context Variables Set by Each Middleware
@@ -266,6 +384,7 @@ authMiddleware → requireAdminScopeMiddleware → [Handler]
 | `authMiddleware` | `userId`, `scope`, `jti`, `patToken` |
 | `protocolGuardMiddleware` | `model`, `modelFamily`, `parsedBody` |
 | `quotaMiddleware` | `reservationId`, `estimatedCost`, `model`, `releaseQuota` |
+| `timeoutMiddleware` | `requestSignal` (AbortSignal) |
 
 ---
 
@@ -370,25 +489,65 @@ Waits for drain with configurable timeout (SHUTDOWN_TIMEOUT_MS).
 
 ## Environment Variables
 
+### Application
+- `NODE_ENV` - Runtime mode: `development`, `production`, `test` (default: `development`)
+- `PORT` - Server port (default: `3000`)
+- `LOG_LEVEL` - Log verbosity: `fatal`, `error`, `warn`, `info`, `debug`, `trace` (default: `info`)
+- `DOCS_ENABLED` - Expose `/docs` (Scalar) and `/openapi.json` (default: `false`)
+
+### Azure Authentication
+- `AZURE_OPENAI_ENDPOINT` - Azure OpenAI endpoint URL (HTTPS required in production)
+- `AZURE_OPENAI_KEY` - Azure OpenAI API key (or use Entra ID credentials)
+- `AZURE_AI_FOUNDRY_ENDPOINT` - Azure AI Foundry endpoint URL (HTTPS required in production)
+- `AZURE_AI_FOUNDRY_KEY` - Azure AI Foundry API key (or use Entra ID credentials)
+- `AZURE_ENTRA_TENANT_ID` - Entra ID tenant UUID (for OAuth2 client credentials)
+- `AZURE_ENTRA_CLIENT_ID` - Entra ID client UUID
+- `AZURE_ENTRA_CLIENT_SECRET` - Entra ID client secret
+
+### Storage
+- `REDIS_URL` - Full Redis URL (alternative to HOST/PORT/PASSWORD)
+- `REDIS_HOST` - Redis host (default: `localhost`; must be explicit in production)
+- `REDIS_PORT` - Redis port (default: `6379`)
+- `REDIS_PASSWORD` - Redis password
+- `DATABASE_URL` - PostgreSQL connection string (default: `postgresql://postgres:postgres@localhost:5432/llm_gateway`; must be explicit in production)
+
 ### Security
-- `CORS_ALLOWED_ORIGINS` - Comma-separated allowed origins (default: `*`)
-- `BODY_SIZE_LIMIT_BYTES` - Max request body size (default: 10MB)
-- `REQUEST_TIMEOUT_MS` - Request timeout (default: 30s)
-- `SHUTDOWN_TIMEOUT_MS` - Graceful shutdown timeout (default: 30s)
+- `PAT_SECRET` - HMAC-SHA256 signing key for PAT tokens (min 32 characters, **required**)
+- `ADMIN_OPERATOR_SECRET` - Optional shared secret for `/admin` routes (header `X-Operator-Secret`; min 16 chars)
+- `CORS_ALLOWED_ORIGINS` - Comma-separated allowed origins (default: `*`; must list explicit origins in production)
+- `BODY_SIZE_LIMIT_BYTES` - Max request body size (default: `10485760` / 10MB)
+- `REQUEST_TIMEOUT_MS` - Request timeout (default: `30000` / 30s)
+- `SHUTDOWN_TIMEOUT_MS` - Graceful shutdown timeout (default: `30000` / 30s)
 
 ### Rate Limiting
-- `RATE_LIMIT_RPM` - Requests per minute per user (default: 100)
-- `RATE_LIMIT_TPM` - Tokens per minute per user (default: 100000)
+- `RATE_LIMIT_RPM` - Requests per minute per user (default: `100`)
+- `RATE_LIMIT_TPM` - Tokens per minute per user (default: `100000`)
 
 ### Quota
-- `QUOTA_RESERVATION_TTL_SECONDS` - Reservation TTL (default: 300)
-- `QUOTA_MULTIPLIER` - Reservation multiplier (default: 1.2)
-- `QUOTA_SOFT_LIMIT_ENABLED` - Soft limit mode (default: false)
+- `QUOTA_RESERVATION_TTL_SECONDS` - Reservation TTL (default: `300`)
+- `QUOTA_IDEMPOTENCY_TTL_SECONDS` - Idempotency key TTL (default: `604800` / 7 days)
+- `QUOTA_MULTIPLIER` - Reservation multiplier (default: `1.2`)
+- `QUOTA_SOFT_LIMIT_ENABLED` - Soft limit mode (default: `false`)
 
 ### Health Checks
-- `HEALTH_CHECK_ENABLED` - Enable background health checks (default: true)
-- `HEALTH_CHECK_INTERVAL_MS` - Health check interval (default: 30000)
-- `HEALTH_CHECK_TIMEOUT_MS` - Health check timeout (default: 5000)
+- `HEALTH_CHECK_ENABLED` - Enable periodic health checks (default: `true`)
+- `HEALTH_CHECK_INTERVAL_MS` - Health check interval (default: `30000`)
+- `HEALTH_CHECK_TIMEOUT_MS` - Health check timeout (default: `5000`)
+- `HEALTH_CHECK_DEPLOYMENTS_ENABLED` - Enable deployment health probes (default: `true`)
+- `HEALTH_CHECK_OTEL_ENABLED` - Report health check results to OTel (default: `true`)
+
+### Observability
+- `OTEL_ENABLED` - Enable OpenTelemetry tracing (default: `false`)
+- `OTEL_EXPORTER_OTLP_GRPC_ENDPOINT` - OpenTelemetry gRPC endpoint URL
+- `OTEL_EXPORTER_OTLP_ENDPOINT` - OpenTelemetry HTTP endpoint URL (alternative to gRPC)
+- `OTEL_SERVICE_NAME` - OpenTelemetry service name (default: `llm-gateway`)
+- `OTEL_TRACING_SAMPLER_RATIO` - Trace sampling ratio 0–1 (default: `0.1`)
+- `METRICS_SCRAPE_BEARER` - Bearer token for `/metrics` endpoint (optional)
+
+### Operations
+- `WAL_DIR` - Write-Ahead Log directory for dual-failure DLQ (default: `/var/lib/llm-gateway/dlq`)
+- `RECONCILER_INTERVAL_MS` - Quota reconciler job interval (default: `60000` / 60s)
+- `WAL_REPLAY_INTERVAL_MS` - WAL replayer job interval (default: `60000` / 60s)
 
 ---
 
