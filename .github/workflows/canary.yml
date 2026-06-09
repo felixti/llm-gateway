@@ -31,7 +31,7 @@ jobs:
           fi
           echo "Gateway URL: ${{ inputs.gateway_url }}"
 
-      - name: Smoke Test: Health Endpoint
+      - name: "Smoke Test: Health Endpoint"
         run: |
           URL="${{ inputs.gateway_url }}"
           echo "Testing health endpoint: $URL/health"
@@ -39,7 +39,7 @@ jobs:
           echo "Response code: $RESP"
           test "$RESP" = "200" && echo "✅ Health check passed" || (echo "❌ Health check failed" && exit 1)
 
-      - name: Smoke Test: Readiness Endpoint
+      - name: "Smoke Test: Readiness Endpoint"
         run: |
           URL="${{ inputs.gateway_url }}"
           echo "Testing readiness endpoint: $URL/ready"
@@ -47,7 +47,7 @@ jobs:
           echo "Response code: $RESP"
           test "$RESP" = "200" && echo "✅ Readiness check passed" || (echo "❌ Readiness check failed" && exit 1)
 
-      - name: Smoke Test: OpenAPI Spec
+      - name: "Smoke Test: OpenAPI Spec"
         run: |
           URL="${{ inputs.gateway_url }}"
           echo "Testing OpenAPI spec: $URL/openapi.json"
@@ -55,7 +55,7 @@ jobs:
           echo "Response code: $RESP"
           test "$RESP" = "200" && echo "✅ OpenAPI spec available" || (echo "❌ OpenAPI spec unavailable" && exit 1)
 
-      - name: Smoke Test: Auth Required Endpoints
+      - name: "Smoke Test: Auth Required Endpoints"
         run: |
           URL="${{ inputs.gateway_url }}"
           echo "Testing auth requirement on /v1/chat/completions"
@@ -63,7 +63,7 @@ jobs:
           echo "Response code: $RESP"
           test "$RESP" = "401" && echo "✅ Auth required" || (echo "❌ Expected 401" && exit 1)
 
-      - name: Smoke Test: Invalid Model
+      - name: "Smoke Test: Invalid Model"
         run: |
           URL="${{ inputs.gateway_url }}"
           echo "Testing invalid model rejection"
