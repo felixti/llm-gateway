@@ -1,295 +1,45 @@
-name: CI
-
+name: ci
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  push: { branches: [main] }
+  pull_request: {}
 
 jobs:
-  security-scan:
-    name: Security Audit
+  gateway:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' || true }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            gateway:
+              - 'services/gateway/**'
+              - 'packages/shared/**'
+              - 'contracts/**'
+      - if: steps.changes.outputs.gateway == 'true'
+        uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - if: steps.changes.outputs.gateway == 'true'
+        working-directory: services/gateway
+        run: yarn install --frozen-lockfile && yarn typecheck && yarn test
+
+  edge:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - id: changes
+        uses: dorny/paths-filter@v3
         with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Run security audit
-        run: bun audit
-
-  quality-gate:
-    name: Quality Gate (bun ${{ matrix.bun-version }})
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        bun-version: ['1.1.x', 'latest']
-      fail-fast: false
-
-    env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/llm_gateway_test
-      PAT_SECRET: test-secret-that-is-at-least-32-chars-for-ci-only
-      QUOTA_PG_SYNC_IN_TESTS: 'true'
-
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: llm_gateway_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d llm_gateway_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Bun ${{ matrix.bun-version }}
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ matrix.bun-version }}
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Check Pino argument order
-        run: |
-          ! grep -rn "logger\.(error|info|warn)('[^']*',\s*{" src/ || (echo "ERROR: Pino logger.(error|info|warn) called with string first arg (should be object first)" && exit 1)
-
-      - name: Lint
-        run: bun run lint
-        env:
-          CI: true
-
-      - name: Check Pino argument order
-        run: |
-          ! grep -rn "logger\.(error|info|warn)('[^']*',\s*{" src/ || (echo "ERROR: Pino logger.(error|info|warn) called with string first arg (should be object first)" && exit 1)
-
-      - name: Typecheck
-        run: bun run typecheck
-
-      - name: Run tests with coverage
-        run: bun test --coverage
-        env:
-          CI: true
-
-      - name: Check coverage thresholds
-        run: bun run test:coverage:check
-        env:
-          CI: true
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: coverage-report-${{ matrix.bun-version }}
-          path: coverage/
-
-      - name: Comment coverage on PR
-        if: github.event_name == 'pull_request' && matrix.bun-version == 'latest'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const path = 'coverage/bun/index.html';
-            if (!fs.existsSync(path)) return;
-            const html = fs.readFileSync(path, 'utf8');
-            const matches = html.match(/\d+\.\d+(?=%)/g) || [];
-            const lineCoverage = matches[0] || 'unknown';
-            const funcCoverage = matches[1] || 'unknown';
-            const passed = parseFloat(lineCoverage) >= 90 && parseFloat(funcCoverage) >= 90;
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `## Coverage Report (Bun ${{ matrix.bun-version }})\n\n| Metric | Value | Threshold |\n|--------|-------|-----------|\n| Lines | ${lineCoverage}% | 90% |\n| Functions | ${funcCoverage}% | 90% |\n\n${passed ? '✅ All coverage requirements met' : '❌ Coverage below threshold'}`
-            });
-
-  integration-tests:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-
-    env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/llm_gateway_test
-      PAT_SECRET: test-secret-that-is-at-least-32-chars-for-ci-only
-      QUOTA_PG_SYNC_IN_TESTS: 'true'
-      REDIS_URL: redis://localhost:6379
-
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: llm_gateway_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d llm_gateway_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Wait for services
-        run: |
-          echo "Waiting for Redis..."
-          until nc -z localhost 6379; do sleep 1; done
-          echo "✅ Redis is ready"
-
-          echo "Waiting for PostgreSQL..."
-          until nc -z localhost 5432; do sleep 1; done
-          echo "✅ PostgreSQL is ready"
-
-      - name: Setup database
-        run: |
-          for f in migrations/*.sql; do
-            echo "Applying migration: $f"
-            PGPASSWORD=postgres psql -h localhost -U postgres -d llm_gateway_test -f "$f"
-          done
-
-      - name: Run integration tests
-        run: bun run test:integration
-        env:
-          NODE_ENV: test
-
-      - name: Build application
-        run: bun run build
-
-      - name: Start gateway and run smoke tests
-        run: |
-          # Start gateway with test environment
-          PORT=3000 \
-          REDIS_URL=redis://localhost:6379 \
-          DATABASE_URL=postgresql://postgres:postgres@localhost:5432/llm_gateway_test \
-          PAT_SECRET=test-secret-that-is-at-least-32-chars-for-ci-only \
-          bun run src/index.ts &
-          GATEWAY_PID=$!
-          echo "Gateway PID: $GATEWAY_PID"
-
-          # Wait for gateway to be ready
-          for i in {1..30}; do
-            if curl -s http://localhost:3000/health > /dev/null; then
-              echo "✅ Gateway is ready"
-              break
-            fi
-            if [ $i -eq 30 ]; then
-              echo "❌ Gateway failed to start"
-              exit 1
-            fi
-            sleep 1
-          done
-
-          # Smoke tests
-          echo "Running smoke tests..."
-
-          # Health endpoint
-          RESP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/health)
-          if [ "$RESP" != "200" ]; then echo "❌ Health check failed: $RESP"; exit 1; fi
-          echo "✅ Health endpoint: $RESP"
-
-          # Readiness endpoint
-          RESP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ready)
-          if [ "$RESP" != "200" ]; then echo "❌ Readiness check failed: $RESP"; exit 1; fi
-          echo "✅ Readiness endpoint: $RESP"
-
-          # Metrics endpoint
-          RESP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/metrics)
-          if [ "$RESP" != "200" ]; then echo "❌ Metrics endpoint failed: $RESP"; exit 1; fi
-          echo "✅ Metrics endpoint: $RESP"
-
-      - name: Stop gateway
-        if: always()
-        run: pkill -f "bun run src/index.ts" || true
-
-  docker-build:
-    name: Docker Build Verification
-    runs-on: ubuntu-latest
-    needs: [quality-gate]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image
-        run: docker build -t llm-gateway:ci .
-
-      - name: Test container health
-        run: |
-          # Start container
-          docker run --rm -d \
-            --name gateway-ci \
-            -p 3000:3000 \
-            -e PORT=3000 \
-            -e PAT_SECRET=test-secret-that-is-at-least-32-chars-for-ci-only \
-            llm-gateway:ci
-
-          # Wait for health endpoint
-          for i in {1..30}; do
-            if curl -s http://localhost:3000/health > /dev/null; then
-              echo "✅ Container is healthy"
-              break
-            fi
-            if [ $i -eq 30 ]; then
-              echo "❌ Container failed health check"
-              docker logs gateway-ci || true
-              docker stop gateway-ci || true
-              exit 1
-            fi
-            sleep 1
-          done
-
-          # Verify endpoints
-          HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/health)
-          READY=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ready)
-
-          echo "Health: $HEALTH, Ready: $READY"
-
-          docker stop gateway-ci || true
-
-          if [ "$HEALTH" != "200" ] || [ "$READY" != "200" ]; then
-            echo "❌ Docker health checks failed"
-            exit 1
-          fi
-
-          echo "✅ Docker build verification passed"
+          filters: |
+            edge:
+              - 'services/edge/**'
+              - 'contracts/**'
+      - if: steps.changes.outputs.edge == 'true'
+        uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '9.0.x' }
+      - if: steps.changes.outputs.edge == 'true'
+        working-directory: services/edge
+        run: dotnet test

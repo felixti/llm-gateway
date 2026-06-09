@@ -1,0 +1,16 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-ingress-from-edge-only
+  namespace: ai-gateway
+spec:
+  podSelector:
+    matchLabels: { app: gateway }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: edge }
+      ports:
+        - protocol: TCP
+          port: 3000
