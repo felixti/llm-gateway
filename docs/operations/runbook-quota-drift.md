@@ -1,5 +1,8 @@
 # Runbook: Quota drift between Postgres and Redis
 
+> **Legacy (Bun/Postgres) — applies to `legacy/` only.** The MVP uses Redis +
+> Table Storage (ADR-0011/0013); PAT is deprecated (ADR-0005). See CONTEXT.md.
+
 ## The model
 
 - **Postgres `users` is authoritative** for `monthly_budget_usd` and `hard_limit`.

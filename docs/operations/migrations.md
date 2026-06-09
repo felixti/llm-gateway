@@ -1,5 +1,8 @@
 # Migrations
 
+> **Legacy (Bun/Postgres) — applies to `legacy/` only.** The MVP uses Redis +
+> Table Storage (ADR-0011/0013); PAT is deprecated (ADR-0005). See CONTEXT.md.
+
 Schema lives in `migrations/`. Files are plain SQL, applied in lexicographic order.
 
 | File | Adds |

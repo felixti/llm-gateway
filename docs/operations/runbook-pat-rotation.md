@@ -1,5 +1,8 @@
 # Runbook: PAT issuance, rotation, and revocation
 
+> **Legacy (Bun/Postgres) — applies to `legacy/` only.** The MVP uses Redis +
+> Table Storage (ADR-0011/0013); PAT is deprecated (ADR-0005). See CONTEXT.md.
+
 ## Background
 
 PATs are HMAC-SHA256-signed tokens with format `lg_{userId}_{header}.{payload}.{signature}`. The payload is base64url JSON containing `jti`, `exp`, and `scope`.

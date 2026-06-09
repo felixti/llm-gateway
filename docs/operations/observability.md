@@ -1,5 +1,8 @@
 # Observability
 
+> **Legacy (Bun/Postgres) — applies to `legacy/` only.** The MVP uses Redis +
+> Table Storage (ADR-0011/0013); PAT is deprecated (ADR-0005). See CONTEXT.md.
+
 ## Redis Error Handling Policy
 
 The LLM Gateway implements a **fail-closed** policy for Redis-dependent operations. When Redis is unavailable or returns errors, the gateway rejects requests rather than bypassing security/quota protections.

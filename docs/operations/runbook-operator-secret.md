@@ -1,5 +1,8 @@
 # Runbook: Operator secret rotation (`ADMIN_OPERATOR_SECRET`)
 
+> **Legacy (Bun/Postgres) — applies to `legacy/` only.** The MVP uses Redis +
+> Table Storage (ADR-0011/0013); PAT is deprecated (ADR-0005). See CONTEXT.md.
+
 ## What it is
 
 When `ADMIN_OPERATOR_SECRET` (≥ 16 chars) is set in the gateway environment, every request to `/admin/*` must include the matching `X-Operator-Secret` header **in addition to** a PAT with `scope: admin`. This is defense-in-depth: even a leaked admin PAT is useless without the second factor.

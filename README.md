@@ -1,8 +1,10 @@
-# LLM Gateway
+# AI Gateway
 
-A production-ready API proxy server for Azure OpenAI and Azure AI Foundry endpoints, built with Bun/Hono.
+Monorepo for an internal AI Gateway: YARP edge + Node.js LLM proxy + usage collector. The live stack lives under `services/{edge,gateway,collector}`, `packages/shared`, and `contracts/`. The retired Bun/Hono gateway is frozen in `legacy/` (read-only reference — [ADR-0015](docs/adr/0015-legacy-bun-app-retirement-reference-and-rewrite.md)).
 
 📝 **What's New?** See [docs/NEWS.md](docs/NEWS.md) for the latest features, improvements, and security updates.
+
+> Glossary and live architecture: [CONTEXT.md](CONTEXT.md). "AI Gateway" = whole repo; "LLM gateway" = `services/gateway`.
 
 ## Features
 
@@ -21,130 +23,50 @@ A production-ready API proxy server for Azure OpenAI and Azure AI Foundry endpoi
 
 ## Architecture
 
-```
-                        ┌──────────── Clients ────────────┐
-                        │  HTTP (Bearer PAT lg_*)          │
-                        └──────────────┬───────────────────┘
-                                       │
-        ┌──────────────────────────────▼──────────────────────────────────┐
-        │                    LLM Gateway (Bun.serve)                      │
-        │                                                                 │
-        │  Global mw: compress → secureHeaders → cors → request-id →      │
-        │             shutdown → timeout → performance/metrics            │
-        │                                                                 │
-        │  Proxy chain: auth(PAT) → scope → protocol-guard →              │
-        │               rate-limit → quota → handler-factory              │
-        │                            │                                    │
-        │                            ▼                                    │
-        │     ┌────────────┬───────────────────┬────────────────┐         │
-        │     │ openai-chat│ anthropic.messages│ openai-responses│        │
-        │     │  .proxy    │     .proxy        │ .proxy + tools │         │
-        │     └─────┬──────┴────────┬──────────┴────────┬───────┘         │
-        │           ▼               ▼                   ▼                 │
-        │  retry (exp+jitter) · circuit-breaker · azure-auth (key|Entra) │
-        │  streaming utils · tokens (tiktoken) · pricing (decimal.js)    │
-        │                                                                 │
-        │  Operator:  /health · /quota · /v1/models(cache) · /admin(HMAC) │
-        │                                                                 │
-        │  Workers:   scheduler (orphan sweep · archive · reconcile)      │
-        │             wal-replayer · health-checks · pricing-watcher      │
-        └──────┬──────────────────────────────┬───────────────────────────┘
-               ▼                              ▼
-        ┌────────────┐                ┌──────────────┐
-        │   Redis    │                │ PostgreSQL   │
-        │ rate/quota │                │ request_audit│
-        │ blocklist  │                │ archives     │
-        │ resp-cache │                │ revocations  │
-        │ az-tokens  │                └──────┬───────┘
-        └────────────┘                       │
-                                      ┌──────▼──────┐
-                                      │ WAL (disk)  │
-                                      │  DLQ→replay │
-                                      └─────────────┘
-               ▼
-        Azure OpenAI (api-key)  ·  Azure AI Foundry (Entra)
+See **[CONTEXT.md](CONTEXT.md)** for the live system glossary and topology.
 
-    Observability:  OTel Collector :4317/:4318 → Jaeger :16686
-                    Pino JSON + PII-redact transport
-                    counters/histograms via OTel SDK
-```
+| Topic | Doc |
+|-------|-----|
+| Monorepo layout (`services/`, `packages/`, `contracts/`, `legacy/`) | [ADR-0014](docs/adr/0014-polyglot-monorepo-vertical-slice-structure.md) |
+| Legacy Bun app retirement (`legacy/` read-only) | [ADR-0015](docs/adr/0015-legacy-bun-app-retirement-reference-and-rewrite.md) |
+| Local compose stack (edge → gateway) | [deploy/compose/README.md](deploy/compose/README.md) |
+
+The sections below describe the **legacy** Bun/Postgres gateway in `legacy/`; they are not the live MVP path.
 
 ## Quick Start
 
 ### Prerequisites
 
-- Bun >= 1.0.0
-- Redis >= 7.0
-- PostgreSQL >= 16
-- Azure OpenAI or AI Foundry account
+- Node.js >= 24 (gateway, collector)
+- .NET 9 SDK (edge)
+- Docker + Docker Compose (recommended for local E2E)
 
-### Installation
+### Per-service build
 
 ```bash
 git clone https://github.com/your-org/llm-gateway.git
 cd llm-gateway
-bun install
+
+# LLM-domain plane (Node.js 24 / Hono)
+cd services/gateway && yarn install && yarn build
+
+# Usage collector (Node.js 24)
+cd ../collector && yarn install && yarn build
 ```
 
-### Configuration
+Edge (.NET 9 YARP): build from `services/edge/` — see that directory's README.
 
-Copy the example environment file and configure it:
+### Docker Compose (full local stack)
 
 ```bash
-cp .env.example .env
+docker compose -f deploy/compose/docker-compose.yml up --build
 ```
 
-Required environment variables:
+Edge listens on **http://localhost:8080**. Details: [deploy/compose/README.md](deploy/compose/README.md).
 
-```bash
-# Azure OpenAI
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
-AZURE_OPENAI_KEY=your-api-key
+### Legacy Bun gateway (`legacy/` only)
 
-# Azure AI Foundry (optional)
-AZURE_AI_FOUNDRY_ENDPOINT=https://your-resource.services.ai.azure.com
-AZURE_AI_FOUNDRY_KEY=your-api-key
-
-# Redis
-REDIS_HOST=localhost
-REDIS_PORT=6379
-
-# PostgreSQL
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/llm_gateway
-
-# PAT Secret (min 32 characters)
-PAT_SECRET=your-secret-key-at-least-32-characters
-
-# Security
-CORS_ALLOWED_ORIGINS=*
-BODY_SIZE_LIMIT_BYTES=10485760
-REQUEST_TIMEOUT_MS=30000
-SHUTDOWN_TIMEOUT_MS=30000
-```
-
-### Running
-
-```bash
-# Development
-bun run dev
-
-# Production
-bun run start
-
-# With Docker
-docker compose up -d
-```
-
-### Database Setup
-
-```bash
-# Run migrations (migrations are at project root, not under src/)
-psql -U postgres -d llm_gateway -f migrations/000_migration_tracking.sql
-psql -U postgres -d llm_gateway -f migrations/001_initial_schema.sql
-psql -U postgres -d llm_gateway -f migrations/002_pat_subject.sql
-psql -U postgres -d llm_gateway -f migrations/003_request_audit_monthly_range.sql
-psql -U postgres -d llm_gateway -f migrations/004_check_constraints.sql
-```
+For the retired Bun/Hono app (Postgres + PAT auth), see `legacy/` and its `.env.example`. Do not use this path for new MVP work.
 
 ## API Endpoints
 

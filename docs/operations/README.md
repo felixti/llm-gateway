@@ -1,5 +1,8 @@
 # Operations Guide
 
+> **Legacy (Bun/Postgres) — applies to `legacy/` only.** The MVP uses Redis +
+> Table Storage (ADR-0011/0013); PAT is deprecated (ADR-0005). See CONTEXT.md.
+
 Runbooks, dashboards, and playbooks for running the LLM Gateway in production.
 
 ## Runbooks
