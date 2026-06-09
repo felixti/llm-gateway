@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-gateway.internal/contracts/usage-event.schema.json",
+  "title": "UsageEvent",
+  "description": "Gateway usage metering event emitted post-upstream (ADR-0012). Metadata only — never message content.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_id",
+    "event_id",
+    "attempt",
+    "ts",
+    "principal_id",
+    "principal_kind",
+    "model",
+    "deployment",
+    "provider",
+    "tokens_prompt",
+    "tokens_completion",
+    "tokens_total",
+    "cost_usd",
+    "status",
+    "latency_ms",
+    "redis_commit_result",
+    "reservation_id",
+    "scope"
+  ],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Gateway-generated ULID/UUIDv7 at ingress; ADX dedup key."
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique per emission; distinguishes retries."
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Retry counter for re-emits."
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Event timestamp (ISO 8601)."
+    },
+    "principal_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "principal_kind": {
+      "type": "string",
+      "enum": ["user", "sp"]
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Client-facing model alias."
+    },
+    "deployment": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Azure deployment name."
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tokens_prompt": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tokens_completion": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tokens_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cost_usd": {
+      "type": "string",
+      "pattern": "^\\d+(\\.\\d{1,6})?$",
+      "description": "Actual cost in USD (decimal string, up to 6 fractional digits)."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "failed"]
+    },
+    "latency_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "redis_commit_result": {
+      "type": "string",
+      "enum": ["ok", "failed"],
+      "description": "Result of the live Redis budget commit attempt."
+    },
+    "reservation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scope": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Budget/rate-limit scope key."
+    }
+  }
+}

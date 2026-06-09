@@ -1,0 +1,6 @@
+.create materialized-view UsageDedup on table Usage
+{
+  Usage
+  | extend _rank = iff(redis_commit_result == 'ok' and tokens_total > 0, ts + 3650d, ts)
+  | summarize arg_max(_rank, *) by request_id
+}
