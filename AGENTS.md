@@ -1,12 +1,19 @@
 # LLM Gateway - Agent Guidelines
 
+> **`legacy/` is the retired Bun/Hono gateway** — read-only reference only
+> (ADR-0015). The live system is `services/{edge,gateway,collector}` +
+> `packages/shared` + `contracts/`. Do not add features to `legacy/`; port
+> logic out of it per the Phase B plan.
+
 ## Project Overview
 
-An LLM Gateway API proxy server built in **Bun/Hono** that proxies requests to Azure OpenAI and Azure AI Foundry endpoints. The gateway handles PAT authentication, quota management (USD-based), rate limiting, circuit breaker resilience, streaming, OpenTelemetry observability, and PostgreSQL audit logging.
+AI Gateway monorepo: an edge-terminated LLM proxy that forwards requests to Azure OpenAI and Azure AI Foundry. The live **LLM-domain plane** (`services/gateway`) handles USD quota, rate limiting, circuit-breaker resilience, streaming, and OpenTelemetry observability. Usage metering flows through `services/collector` into ADX.
 
-**Runtime**: Bun (not Node.js)
-**Framework**: Hono
-**Dependencies**: Redis (rate limiting/quota), PostgreSQL (persistence)
+**Runtime**: Node.js 24 (`services/gateway`, `services/collector`) + .NET 9 YARP (`services/edge`); see [ADR-0010](docs/adr/0010-nodejs-24-runtime-for-mvp.md)
+
+**Stores**: Azure Managed Redis + Table Storage + Storage Queue → Collector → ADX; no PostgreSQL ([ADR-0011](docs/adr/0011-azure-table-storage-config-policy-store-mvp.md), [ADR-0012](docs/adr/0012-usage-metering-storage-queue-collector-adx-mvp.md), [ADR-0013](docs/adr/0013-single-scope-usd-budget-redis-cluster-mvp.md))
+
+**Topology**: monorepo per [ADR-0014](docs/adr/0014-polyglot-monorepo-vertical-slice-structure.md); legacy Bun app frozen under `legacy/` per [ADR-0015](docs/adr/0015-legacy-bun-app-retirement-reference-and-rewrite.md) — **NOT** the live system
 
 ---
 
@@ -579,3 +586,13 @@ Waits for drain with configurable timeout (SHUTDOWN_TIMEOUT_MS).
 - Postgres sync is OFF by default in tests
 - Set `QUOTA_PG_SYNC_IN_TESTS=true` to enable
 - Use `PAT_SECRET` fallback in test environment
+
+## graphify
+
+This project has a graphify knowledge graph at graphify-out/.
+
+Rules:
+- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
+- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
+- For cross-module "how does X relate to Y" questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"` over grep — these traverse the graph's EXTRACTED + INFERRED edges instead of scanning files
+- After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)
