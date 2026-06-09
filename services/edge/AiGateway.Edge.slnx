@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="AiGateway.Edge.csproj" />
+  <Project Path="AiGateway.Edge.Tests/AiGateway.Edge.Tests.csproj" />
+</Solution>
