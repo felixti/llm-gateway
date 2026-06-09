@@ -5,7 +5,7 @@ import { budgetKeys } from '@shared/budget/keys';
 import { createBudgetStore } from './store';
 
 function createTestRedis(): Redis {
-  return new RedisMock() as unknown as Redis;
+  return new RedisMock({ data: {} }) as unknown as Redis;
 }
 
 describe('createBudgetStore', () => {
