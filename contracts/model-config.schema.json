@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-gateway.internal/contracts/model-config.schema.json",
+  "title": "ModelConfig",
+  "description": "Azure Table Storage model row shape (PartitionKey=model, RowKey=alias). ADR-0011.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "alias",
+    "provider",
+    "family",
+    "deploymentName",
+    "enabled",
+    "priceInPerMillion",
+    "priceOutPerMillion"
+  ],
+  "properties": {
+    "alias": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Client-facing model alias; Table Storage RowKey."
+    },
+    "provider": {
+      "type": "string",
+      "enum": ["azure-openai", "azure-foundry"]
+    },
+    "family": {
+      "type": "string",
+      "enum": ["openai-chat", "anthropic-messages"]
+    },
+    "deploymentName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Azure deployment name used for upstream routing."
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "priceInPerMillion": {
+      "type": "string",
+      "pattern": "^\\d+(\\.\\d{1,6})?$",
+      "description": "USD per million input tokens (decimal string, up to 6 fractional digits)."
+    },
+    "priceOutPerMillion": {
+      "type": "string",
+      "pattern": "^\\d+(\\.\\d{1,6})?$",
+      "description": "USD per million output tokens (decimal string, up to 6 fractional digits)."
+    },
+    "fallbackAlias": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional fallback model alias when this deployment is unavailable."
+    }
+  }
+}
