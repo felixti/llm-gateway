@@ -12,14 +12,18 @@
   },
   "dependencies": {
     "@azure/data-tables": "^13.3.0",
+    "decimal.js": "^10.4.3",
     "hono": "^4.6.0",
     "@hono/node-server": "^1.13.0",
+    "ioredis": "^5.4.1",
     "jose": "^5.9.0"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
     "vitest": "^2.1.0",
     "tsup": "^8.3.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "@types/ioredis-mock": "^8.2.5",
+    "ioredis-mock": "^8.9.0"
   }
 }
