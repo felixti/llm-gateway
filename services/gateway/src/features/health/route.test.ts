@@ -1,6 +1,7 @@
 import Redis from 'ioredis';
 import RedisMock from 'ioredis-mock';
 import { describe, it, expect } from 'vitest';
+import { createMemoryUsageQueue } from '@shared/queue/memory-queue';
 import { createApp } from '../../app';
 import { createBudgetStore } from '../../kernel/budget-store/store';
 import { createMemoryConfigStore } from '../../kernel/config-store/memory-store';
@@ -14,6 +15,7 @@ const deps = {
   budgetStore: createBudgetStore(redis),
   rateStore: createRateStore(redis),
   redis,
+  usageQueue: createMemoryUsageQueue(),
   rateLimitRpm: 100,
   rateLimitTpm: 100_000,
   reservationTtlSec: 300,
