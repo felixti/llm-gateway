@@ -1,8 +1,8 @@
 FROM node:24-alpine AS build
 WORKDIR /app
-COPY services/dev-idp/package.json services/dev-idp/yarn.lock ./
+COPY tools/dev-idp/package.json tools/dev-idp/yarn.lock ./
 RUN corepack enable && yarn install --frozen-lockfile
-COPY services/dev-idp/ ./
+COPY tools/dev-idp/ ./
 RUN yarn build
 
 FROM node:24-alpine AS production

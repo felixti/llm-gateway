@@ -9,7 +9,7 @@ services:
   dev-idp:
     build:
       context: ../..
-      dockerfile: services/dev-idp/Dockerfile
+      dockerfile: tools/dev-idp/Dockerfile
     environment:
       PORT: "4000"
       DEV_IDP_ISSUER: http://dev-idp:4000
