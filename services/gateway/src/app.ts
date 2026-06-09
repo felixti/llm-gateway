@@ -3,11 +3,13 @@ import './types';
 import { healthRoutes } from './features/health/route';
 import { authMiddleware, type AuthDeps } from './pipeline/auth';
 import { protocolGuard } from './pipeline/protocol-guard';
-import { scopeMiddleware, type Allowlist } from './pipeline/scope';
+import { scopeMiddleware } from './pipeline/scope';
+import { tenantContextMiddleware } from './pipeline/tenant-context';
+import type { ConfigStore } from './kernel/config-store/types';
 
 export interface AppDeps {
   auth: AuthDeps;
-  allowlist: Allowlist;
+  configStore: ConfigStore;
 }
 
 export function createApp(deps: AppDeps) {
@@ -16,11 +18,12 @@ export function createApp(deps: AppDeps) {
 
   const api = new Hono();
   api.use('*', authMiddleware(deps.auth));
+  api.use('*', tenantContextMiddleware(deps.configStore));
 
-  api.post('/v1/chat/completions', protocolGuard('openai-chat'), scopeMiddleware(deps.allowlist), (c) =>
+  api.post('/v1/chat/completions', protocolGuard('openai-chat'), scopeMiddleware(), (c) =>
     c.json({ stub: true, model: c.get('model'), principal: c.get('userAuth').principalId }));
 
-  api.post('/v1/messages', protocolGuard('anthropic-messages'), scopeMiddleware(deps.allowlist), (c) =>
+  api.post('/v1/messages', protocolGuard('anthropic-messages'), scopeMiddleware(), (c) =>
     c.json({ stub: true, model: c.get('model'), principal: c.get('userAuth').principalId }));
 
   app.route('/', api);

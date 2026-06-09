@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { createApp } from '../../app';
+import { createMemoryConfigStore } from '../../kernel/config-store/memory-store';
 
 const deps = {
   auth: { orgId: 'internal', m2m: { jwks: (async () => { throw new Error('unused'); }) as any, issuer: 'i', audience: 'a', appId: 'x' } },
-  allowlist: {},
+  configStore: createMemoryConfigStore(),
 };
 
 describe('health', () => {

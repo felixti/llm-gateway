@@ -1,6 +1,6 @@
-import type { Allowlist } from '../pipeline/scope';
+type Allowlist = Record<string, string[]>;
 
-/** M0 static seed; M1 replaces with Table Storage tenancy. principalId -> allowed model aliases. */
+/** @deprecated Use kernel/config-store/seed.ts (createSeedData) instead. M0 static seed; replaced by ConfigStore in M1. */
 export function loadSeedAllowlist(): Allowlist {
   return {
     'seed-sp-appid': ['gpt-5.4', 'claude-opus-4-6'],

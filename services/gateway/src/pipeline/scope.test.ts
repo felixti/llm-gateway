@@ -6,9 +6,19 @@ import { scopeMiddleware } from './scope';
 
 function app() {
   const a = new Hono();
-  // simulate auth having run
-  a.use('*', async (c, next) => { c.set('userAuth', { principalId: 'app1', principalKind: 'sp', projectId: 'p', orgId: 'internal', scopes: [] }); await next(); });
-  a.post('/x', protocolGuard('openai-chat'), scopeMiddleware({ app1: ['gpt-5.4'] }), (c) => c.json({ model: c.get('model') }));
+  a.use('*', async (c, next) => {
+    c.set('userAuth', { principalId: 'app1', principalKind: 'sp', projectId: 'p', orgId: 'internal', scopes: [] });
+    c.set('tenantContext', {
+      principalId: 'app1',
+      principalKind: 'sp',
+      projectId: 'p',
+      orgId: 'internal',
+      modelAllowlist: ['gpt-5.4'],
+      budgetPolicy: null,
+    });
+    await next();
+  });
+  a.post('/x', protocolGuard('openai-chat'), scopeMiddleware(), (c) => c.json({ model: c.get('model') }));
   return a;
 }
 

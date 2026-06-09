@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { generateKeyPair, exportJWK, SignJWT, createLocalJWKSet, type JWTVerifyGetKey, type KeyLike } from 'jose';
 import { createApp, type AppDeps } from './app';
+import { createMemoryConfigStore } from './kernel/config-store/memory-store';
 
 const ISS = 'https://issuer/v2.0', AUD = 'api://llm-gateway-internal', APP = 'yarp';
 let deps: AppDeps;
@@ -14,7 +15,7 @@ beforeAll(async () => {
   const jwks = createLocalJWKSet({ keys: [jwk] }) as JWTVerifyGetKey;
   deps = {
     auth: { orgId: 'internal', m2m: { jwks, issuer: ISS, audience: AUD, appId: APP } },
-    allowlist: { app1: ['gpt-5.4', 'claude-opus-4-6'] },
+    configStore: createMemoryConfigStore(),
   };
 });
 

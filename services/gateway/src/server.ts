@@ -1,7 +1,10 @@
 import { serve } from '@hono/node-server';
 import { createRemoteJWKSet } from 'jose';
 import { createApp } from './app';
-import { loadSeedAllowlist } from './config/seed';
+import { createMemoryConfigStore } from './kernel/config-store/memory-store';
+import { createCachedConfigStore } from './kernel/config-store/cache';
+
+const configStore = createCachedConfigStore(createMemoryConfigStore());
 
 const tenant = process.env.AZURE_ENTRA_TENANT_ID ?? '';
 const app = createApp({
@@ -14,7 +17,7 @@ const app = createApp({
       appId: process.env.M2M_EXPECTED_APPID ?? '',
     },
   },
-  allowlist: loadSeedAllowlist(),
+  configStore,
 });
 
 const port = Number(process.env.PORT ?? 3000);
