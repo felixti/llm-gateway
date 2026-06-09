@@ -8,5 +8,8 @@ declare module 'hono' {
     model: string;
     parsedBody: unknown;
     family: 'openai-chat' | 'anthropic-messages';
+    reservationId: string;
+    budgetScope: string;
+    reservedMicro: bigint;
   }
 }
