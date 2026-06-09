@@ -1,10 +1,9 @@
 import { serve } from '@hono/node-server';
 import { createRemoteJWKSet } from 'jose';
 import { createApp } from './app';
-import { createMemoryConfigStore } from './kernel/config-store/memory-store';
-import { createCachedConfigStore } from './kernel/config-store/cache';
+import { createConfigStore } from './kernel/config-store';
 
-const configStore = createCachedConfigStore(createMemoryConfigStore());
+const configStore = createConfigStore();
 
 const tenant = process.env.AZURE_ENTRA_TENANT_ID ?? '';
 const app = createApp({
