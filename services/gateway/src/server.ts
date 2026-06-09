@@ -1,9 +1,15 @@
 import { serve } from '@hono/node-server';
 import { createRemoteJWKSet } from 'jose';
 import { createApp } from './app';
+import { createBudgetStore } from './kernel/budget-store/store';
 import { createConfigStore } from './kernel/config-store';
+import { createRedis } from './kernel/redis';
+import { createRateStore } from './kernel/rate-store/store';
 
 const configStore = createConfigStore();
+const redis = createRedis();
+const budgetStore = createBudgetStore(redis);
+const rateStore = createRateStore(redis);
 
 const tenant = process.env.AZURE_ENTRA_TENANT_ID ?? '';
 const app = createApp({
@@ -17,12 +23,21 @@ const app = createApp({
     },
   },
   configStore,
+  budgetStore,
+  rateStore,
+  redis,
+  rateLimitRpm: Number(process.env.RATE_LIMIT_RPM ?? 100),
+  rateLimitTpm: Number(process.env.RATE_LIMIT_TPM ?? 100_000),
+  reservationTtlSec: Number(process.env.BUDGET_RESERVATION_TTL_SEC ?? 300),
+  reserveMultiplier: Number(process.env.BUDGET_RESERVE_MULTIPLIER ?? 1.2),
+  commitIdempotencyTtlSec: Number(process.env.BUDGET_COMMIT_IDEMPOTENCY_TTL_SEC ?? 604_800),
 });
 
 const port = Number(process.env.PORT ?? 3000);
 const server = serve({ fetch: app.fetch, port }, (info) => console.log(`gateway on :${info.port}`));
 
 function shutdown() {
+  redis.disconnect();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 10_000).unref();
 }

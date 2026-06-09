@@ -6,6 +6,18 @@
 name: ai-gateway-mvp
 
 services:
+  redis:
+    image: redis:7-alpine
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
   dev-idp:
     build:
       context: ../..
@@ -34,9 +46,13 @@ services:
       M2M_EXPECTED_ISSUER: http://dev-idp:4000
       M2M_EXPECTED_AUDIENCE: api://llm-gateway-internal
       M2M_EXPECTED_APPID: yarp-compose-dev
+      REDIS_URL: redis://redis:6379
+      RATE_LIMIT_RPM: "1000"
     expose:
       - "3000"
     depends_on:
+      redis:
+        condition: service_healthy
       dev-idp:
         condition: service_healthy
     healthcheck:
