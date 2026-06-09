@@ -43,3 +43,23 @@ jobs:
       - if: steps.changes.outputs.edge == 'true'
         working-directory: services/edge
         run: dotnet test
+
+  collector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            collector:
+              - 'services/collector/**'
+              - 'packages/shared/**'
+              - 'contracts/**'
+      - if: steps.changes.outputs.collector == 'true'
+        uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - if: steps.changes.outputs.collector == 'true'
+        working-directory: services/collector
+        run: yarn install --frozen-lockfile && yarn typecheck && yarn test
