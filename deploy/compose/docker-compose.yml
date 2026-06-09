@@ -1,0 +1,89 @@
+# MVP M0 stack — edge → gateway with local dev-idp (no Entra required).
+# Usage:
+#   docker compose -f deploy/compose/docker-compose.yml up --build
+#   docker compose -f deploy/compose/docker-compose.yml --profile e2e run --rm e2e
+
+name: ai-gateway-mvp
+
+services:
+  dev-idp:
+    build:
+      context: ../..
+      dockerfile: services/dev-idp/Dockerfile
+    environment:
+      PORT: "4000"
+      DEV_IDP_ISSUER: http://dev-idp:4000
+    expose:
+      - "4000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: services/gateway/Dockerfile
+    environment:
+      PORT: "3000"
+      TENANCY_DEFAULT_ORG: internal
+      M2M_JWKS_URL: http://dev-idp:4000/keys
+      M2M_EXPECTED_ISSUER: http://dev-idp:4000
+      M2M_EXPECTED_AUDIENCE: api://llm-gateway-internal
+      M2M_EXPECTED_APPID: yarp-compose-dev
+    expose:
+      - "3000"
+    depends_on:
+      dev-idp:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  edge:
+    build:
+      context: ../..
+      dockerfile: services/edge/Dockerfile
+    ports:
+      - "${EDGE_PORT:-8080}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Compose
+      Auth__Mode: compose-dev
+      Auth__Authority: http://dev-idp:4000
+      Auth__Audience: api://ai-gateway-edge
+      Downstream__DevIdpUrl: http://dev-idp:4000
+      Downstream__M2mAudience: api://llm-gateway-internal
+      Downstream__YarpAppId: yarp-compose-dev
+    depends_on:
+      dev-idp:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  e2e:
+    image: alpine:3.21
+    profiles: [e2e]
+    depends_on:
+      edge:
+        condition: service_healthy
+    environment:
+      EDGE_URL: http://edge:8080
+      DEV_IDP_URL: http://dev-idp:4000
+      EDGE_AUDIENCE: api://ai-gateway-edge
+    volumes:
+      - ./e2e.sh:/e2e.sh:ro
+    entrypoint: ["/bin/sh", "/e2e.sh"]

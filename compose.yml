@@ -1,0 +1,3 @@
+# MVP M0 stack (edge + gateway + dev-idp). See deploy/compose/README.md.
+include:
+  - path: deploy/compose/docker-compose.yml
