@@ -1,15 +1,24 @@
 import { serve } from '@hono/node-server';
 import { createRemoteJWKSet } from 'jose';
+import { createUsageQueue } from '@shared/queue/index';
 import { createApp } from './app';
 import { createBudgetStore } from './kernel/budget-store/store';
 import { createConfigStore } from './kernel/config-store';
 import { createRedis } from './kernel/redis';
 import { createRateStore } from './kernel/rate-store/store';
+import { startWalReplayer } from './kernel/wal/wal-replayer';
 
 const configStore = createConfigStore();
 const redis = createRedis();
 const budgetStore = createBudgetStore(redis);
 const rateStore = createRateStore(redis);
+const usageQueue = createUsageQueue();
+
+const walReplayer = startWalReplayer({
+  queue: usageQueue,
+  walDir: process.env.WAL_DIR,
+  intervalMs: Number(process.env.WAL_REPLAY_INTERVAL_MS ?? 60_000),
+});
 
 const tenant = process.env.AZURE_ENTRA_TENANT_ID ?? '';
 const app = createApp({
@@ -26,6 +35,8 @@ const app = createApp({
   budgetStore,
   rateStore,
   redis,
+  usageQueue,
+  walDir: process.env.WAL_DIR,
   rateLimitRpm: Number(process.env.RATE_LIMIT_RPM ?? 100),
   rateLimitTpm: Number(process.env.RATE_LIMIT_TPM ?? 100_000),
   reservationTtlSec: Number(process.env.BUDGET_RESERVATION_TTL_SEC ?? 300),
@@ -37,6 +48,7 @@ const port = Number(process.env.PORT ?? 3000);
 const server = serve({ fetch: app.fetch, port }, (info) => console.log(`gateway on :${info.port}`));
 
 function shutdown() {
+  walReplayer.stop();
   redis.disconnect();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 10_000).unref();
