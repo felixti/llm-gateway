@@ -5,3 +5,4 @@ export * from './contracts/usage-event';
 export * from './budget/keys';
 export * from './budget/money';
 export * from './queue/types';
+export * from './queue/index';
