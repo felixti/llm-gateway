@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "ignore": ["node_modules/", "dist/", "*.test.ts", "*.spec.ts", ".opencode/", ".git/"]
+    "ignore": ["node_modules/", "dist/", "*.test.ts", "*.spec.ts", ".opencode/", ".git/", "legacy/", "graphify-out/", "raw/"]
   },
   "formatter": {
     "enabled": true,
