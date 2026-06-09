@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { generateKeyPair, exportJWK, SignJWT, createLocalJWKSet, type JWTVerifyGetKey } from 'jose';
+import { generateKeyPair, exportJWK, SignJWT, createLocalJWKSet, type JWTVerifyGetKey, type KeyLike } from 'jose';
 import { verifyM2mToken, type M2mVerifyOptions } from './m2m';
 
 let opts: M2mVerifyOptions;
-let privateKey: CryptoKey;
+let privateKey: KeyLike;
 
 const ISS = 'https://login.microsoftonline.com/tenant/v2.0';
 const AUD = 'api://llm-gateway-internal';

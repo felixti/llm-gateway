@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { Hono } from 'hono';
-import { generateKeyPair, exportJWK, SignJWT, createLocalJWKSet, type JWTVerifyGetKey } from 'jose';
+import { generateKeyPair, exportJWK, SignJWT, createLocalJWKSet, type JWTVerifyGetKey, type KeyLike } from 'jose';
 import '../types';
 import { authMiddleware, type AuthDeps } from './auth';
 
 const ISS = 'https://issuer/v2.0', AUD = 'api://llm-gateway-internal', APP = 'yarp';
 let deps: AuthDeps;
-let privateKey: CryptoKey;
+let privateKey: KeyLike;
 
 const mint = (extra: Record<string, unknown> = {}) =>
   new SignJWT({ appid: APP, ...extra }).setProtectedHeader({ alg: 'RS256', kid: 't' })
