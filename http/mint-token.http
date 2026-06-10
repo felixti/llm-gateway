@@ -1,0 +1,33 @@
+# Mint a local dev JWT (compose dev-idp)
+# Environment: local (http-client.env.json)
+#
+# Use the access_token in Authorization: Bearer ... for gateway requests.
+# In VS Code / Cursor REST Client, run this first; chained requests reference
+# {{mintDevToken.response.body.access_token}}
+
+### Mint SP token — seed-sp-appid (all models in allowlist)
+# @name mintDevToken
+POST {{devIdpHost}}/token
+Content-Type: application/json
+
+{
+  "audience": "{{edgeAudience}}",
+  "claims": {
+    "appid": "seed-sp-appid",
+    "idtyp": "app",
+    "roles": "proj1"
+  }
+}
+
+### Mint user token — seed-user-oid
+# @name mintUserToken
+POST {{devIdpHost}}/token
+Content-Type: application/json
+
+{
+  "audience": "{{edgeAudience}}",
+  "claims": {
+    "oid": "seed-user-oid",
+    "idtyp": "user"
+  }
+}

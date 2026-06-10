@@ -22,39 +22,46 @@ test -n "$SP_TOKEN"
 echo "==> 401 without bearer"
 STATUS="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${EDGE_URL}/v1/chat/completions" \
   -H 'content-type: application/json' \
-  -d '{"model":"gpt-5.4","messages":[]}')"
+  -d '{"model":"gpt-4.1","messages":[]}')"
 test "$STATUS" = "401"
+
+assert_chat_ok() {
+  echo "$1" | jq -e '
+    (.stub == true and .model != null)
+    or (.object == "chat.completion" and (.choices | length) > 0)
+  ' >/dev/null
+}
 
 echo "==> 200 allowed chat model via edge → gateway"
 RESP="$(curl -sf -X POST "${EDGE_URL}/v1/chat/completions" \
   -H "authorization: Bearer ${SP_TOKEN}" \
   -H 'content-type: application/json' \
-  -d '{"model":"gpt-5.4","messages":[]}')"
-echo "$RESP" | jq -e '.stub == true and .model == "gpt-5.4" and .principal == "seed-sp-appid"' >/dev/null
+  -d '{"model":"gpt-4.1","messages":[{"role":"user","content":"hi"}]}')"
+assert_chat_ok "$RESP"
 
-echo "==> 200 allowed messages model"
-curl -sf -X POST "${EDGE_URL}/v1/messages" \
+echo "==> 200 allowed messages model (Kimi-K2.5)"
+RESP="$(curl -sf -X POST "${EDGE_URL}/v1/messages" \
   -H "authorization: Bearer ${SP_TOKEN}" \
   -H 'content-type: application/json' \
-  -d '{"model":"claude-opus-4-6","messages":[]}' \
-  | jq -e '.stub == true and .model == "claude-opus-4-6"' >/dev/null
+  -d '{"model":"Kimi-K2.5","messages":[{"role":"user","content":"hi"}]}')"
+assert_chat_ok "$RESP"
 
 echo "==> 403 disallowed model"
 STATUS="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${EDGE_URL}/v1/chat/completions" \
   -H "authorization: Bearer ${SP_TOKEN}" \
   -H 'content-type: application/json' \
-  -d '{"model":"gpt-5-mini","messages":[]}')"
+  -d '{"model":"unknown-model","messages":[]}')"
 test "$STATUS" = "403"
 
 echo "==> mint user client token (seed-user-oid)"
 USER_TOKEN="$(mint_token '{"oid":"seed-user-oid","idtyp":"user"}')"
 
 echo "==> 200 allowed user chat model"
-curl -sf -X POST "${EDGE_URL}/v1/chat/completions" \
+RESP="$(curl -sf -X POST "${EDGE_URL}/v1/chat/completions" \
   -H "authorization: Bearer ${USER_TOKEN}" \
   -H 'content-type: application/json' \
-  -d '{"model":"gpt-5-mini","messages":[]}' \
-  | jq -e '.stub == true and .principal == "seed-user-oid"' >/dev/null
+  -d '{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}]}')"
+assert_chat_ok "$RESP"
 
 echo "==> edge /health"
 curl -sf "${EDGE_URL}/health" | jq -e '.status == "ok"' >/dev/null

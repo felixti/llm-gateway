@@ -1,0 +1,129 @@
+# Smoke tests — LLM Gateway (edge → gateway → Azure provider)
+# Environment: local
+#
+# Prerequisites:
+#   make up
+#   Run mint-token.http first (or the mint block below)
+#
+# Expected for every request below:
+#   HTTP 200
+#   choices[0].message.content == "OK"   (chat completion contract)
+#
+# Responses-only models (gpt-5-mini, gpt-5.1-codex-mini) use the gateway bridge:
+#   chat/completions → Azure Responses API → chat/completions response
+
+@smokeInput = {{smokeInput}}
+
+### 0) Mint token (skip if mint-token.http already run)
+# @name mintDevToken
+POST {{devIdpHost}}/token
+Content-Type: application/json
+
+{
+  "audience": "{{edgeAudience}}",
+  "claims": {
+    "appid": "seed-sp-appid",
+    "idtyp": "app",
+    "roles": "proj1"
+  }
+}
+
+### Health — edge
+GET {{edgeHost}}/health
+
+### Ready — gateway via edge
+GET {{edgeHost}}/ready
+
+### 1) gpt-4.1 — azure-openai chat-completions
+# @name smokeGpt41
+POST {{edgeHost}}/v1/chat/completions
+Authorization: Bearer {{mintDevToken.response.body.access_token}}
+Content-Type: application/json
+
+{
+  "model": "gpt-4.1",
+  "messages": [
+    { "role": "user", "content": "{{smokeInput}}" }
+  ],
+  "stream": false
+}
+
+### 2) gpt-5-mini — azure-openai responses (via chat bridge)
+# @name smokeGpt5Mini
+POST {{edgeHost}}/v1/chat/completions
+Authorization: Bearer {{mintDevToken.response.body.access_token}}
+Content-Type: application/json
+
+{
+  "model": "gpt-5-mini",
+  "messages": [
+    { "role": "user", "content": "{{smokeInput}}" }
+  ],
+  "stream": false
+}
+
+### 3) gpt-5.1-codex-mini — azure-openai responses (via chat bridge)
+# @name smokeCodexMini
+POST {{edgeHost}}/v1/chat/completions
+Authorization: Bearer {{mintDevToken.response.body.access_token}}
+Content-Type: application/json
+
+{
+  "model": "gpt-5.1-codex-mini",
+  "messages": [
+    { "role": "user", "content": "{{smokeInput}}" }
+  ],
+  "stream": false
+}
+
+### 4) DeepSeek-V4-Flash — azure-foundry chat-completions
+# @name smokeDeepSeek
+POST {{edgeHost}}/v1/chat/completions
+Authorization: Bearer {{mintDevToken.response.body.access_token}}
+Content-Type: application/json
+
+{
+  "model": "DeepSeek-V4-Flash",
+  "messages": [
+    { "role": "user", "content": "{{smokeInput}}" }
+  ],
+  "stream": false
+}
+
+### 5) Kimi-K2.5 — azure-foundry chat-completions
+# @name smokeKimi
+POST {{edgeHost}}/v1/chat/completions
+Authorization: Bearer {{mintDevToken.response.body.access_token}}
+Content-Type: application/json
+
+{
+  "model": "Kimi-K2.5",
+  "messages": [
+    { "role": "user", "content": "{{smokeInput}}" }
+  ],
+  "stream": false
+}
+
+### 6) Native Responses route — gpt-5-mini (no chat bridge on response shape)
+# @name smokeResponsesNative
+POST {{edgeHost}}/v1/responses
+Authorization: Bearer {{mintDevToken.response.body.access_token}}
+Content-Type: application/json
+
+{
+  "model": "gpt-5-mini",
+  "input": "{{smokeInput}}",
+  "stream": false
+}
+
+### 7) Negative — unknown model (expect 403)
+POST {{edgeHost}}/v1/chat/completions
+Authorization: Bearer {{mintDevToken.response.body.access_token}}
+Content-Type: application/json
+
+{
+  "model": "unknown-model",
+  "messages": [
+    { "role": "user", "content": "hi" }
+  ]
+}

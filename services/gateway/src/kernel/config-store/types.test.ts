@@ -7,6 +7,7 @@ describe('tenant types', () => {
       alias: 'gpt-5.4',
       provider: 'azure-openai',
       family: 'openai-chat',
+      upstreamApi: 'chat-completions',
       deploymentName: 'gpt-5.4-global',
       enabled: true,
       priceInPerMillion: '0.150000',

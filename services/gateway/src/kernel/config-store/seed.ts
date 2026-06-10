@@ -1,46 +1,62 @@
 import type { BudgetPolicy, ModelConfig, PrincipalRecord } from '@shared/contracts/tenant';
 
+/**
+ * Local / compose code seed — deployment names match Azure resource `my-ms-aif`.
+ */
 const MODELS: ModelConfig[] = [
   {
-    alias: 'gpt-5.4',
+    alias: 'gpt-4.1',
     provider: 'azure-openai',
     family: 'openai-chat',
-    deploymentName: 'gpt-5.4-global',
+    upstreamApi: 'chat-completions',
+    deploymentName: 'gpt-4.1',
     enabled: true,
-    priceInPerMillion: '5.000000',
-    priceOutPerMillion: '15.000000',
-    fallbackAlias: 'gpt-5.3-codex',
+    priceInPerMillion: '2.000000',
+    priceOutPerMillion: '8.000000',
   },
   {
     alias: 'gpt-5-mini',
     provider: 'azure-openai',
-    family: 'openai-chat',
+    family: 'openai-responses',
+    upstreamApi: 'responses',
     deploymentName: 'gpt-5-mini',
     enabled: true,
     priceInPerMillion: '0.250000',
     priceOutPerMillion: '2.000000',
-    fallbackAlias: 'gpt-5.3-codex',
   },
   {
-    alias: 'claude-opus-4-6',
-    provider: 'azure-foundry',
-    family: 'anthropic-messages',
-    deploymentName: 'claude-opus-4-6',
+    alias: 'gpt-5.1-codex-mini',
+    provider: 'azure-openai',
+    family: 'openai-responses',
+    upstreamApi: 'responses',
+    deploymentName: 'gpt-5.1-codex-mini',
     enabled: true,
-    priceInPerMillion: '15.000000',
-    priceOutPerMillion: '75.000000',
-    fallbackAlias: 'claude-sonnet-4-6',
+    priceInPerMillion: '0.500000',
+    priceOutPerMillion: '2.000000',
   },
   {
-    alias: 'claude-haiku-4-5',
+    alias: 'DeepSeek-V4-Flash',
     provider: 'azure-foundry',
-    family: 'anthropic-messages',
-    deploymentName: 'claude-haiku-4-5',
+    family: 'openai-chat',
+    upstreamApi: 'chat-completions',
+    deploymentName: 'DeepSeek-V4-Flash',
     enabled: true,
-    priceInPerMillion: '0.250000',
-    priceOutPerMillion: '1.250000',
+    priceInPerMillion: '0.140000',
+    priceOutPerMillion: '0.280000',
+  },
+  {
+    alias: 'Kimi-K2.5',
+    provider: 'azure-foundry',
+    family: 'openai-chat',
+    upstreamApi: 'chat-completions',
+    deploymentName: 'Kimi-K2.5',
+    enabled: true,
+    priceInPerMillion: '0.500000',
+    priceOutPerMillion: '2.000000',
   },
 ];
+
+const ALL_ALIASES = MODELS.filter((m) => m.enabled).map((m) => m.alias);
 
 const PRINCIPALS: PrincipalRecord[] = [
   {
@@ -48,21 +64,21 @@ const PRINCIPALS: PrincipalRecord[] = [
     kind: 'sp',
     projectId: 'seed-project',
     orgId: 'internal',
-    modelAllowlist: ['gpt-5.4', 'claude-opus-4-6'],
+    modelAllowlist: ALL_ALIASES,
   },
   {
     principalId: 'seed-user-oid',
     kind: 'user',
     projectId: null,
     orgId: 'internal',
-    modelAllowlist: ['gpt-5-mini', 'claude-haiku-4-5'],
+    modelAllowlist: ['gpt-4.1', 'gpt-5-mini', 'Kimi-K2.5'],
   },
   {
     principalId: 'app1',
     kind: 'sp',
     projectId: 'proj1',
     orgId: 'internal',
-    modelAllowlist: ['gpt-5.4', 'claude-opus-4-6'],
+    modelAllowlist: ['gpt-4.1', 'DeepSeek-V4-Flash', 'Kimi-K2.5', 'gpt-5.1-codex-mini'],
   },
 ];
 
@@ -95,5 +111,9 @@ export function createSeedData(): {
   principals: PrincipalRecord[];
   budgets: BudgetPolicy[];
 } {
-  return { models: MODELS, principals: PRINCIPALS, budgets: BUDGETS };
+  return {
+    models: MODELS.map((m) => ({ ...m })),
+    principals: PRINCIPALS.map((p) => ({ ...p, modelAllowlist: [...p.modelAllowlist] })),
+    budgets: BUDGETS.map((b) => ({ ...b })),
+  };
 }

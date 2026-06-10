@@ -4,12 +4,23 @@ node_modules/
 # Build output
 dist/
 
-# Environment
+# Environment / secrets (never commit)
 .env
 .env.local
 .env.*.local
 .env.bak*
 .env.backup*
+deploy/compose/.env
+deploy/local/.env
+http/http-client.private.env.json
+http/evidence/*.json
+!http/evidence/.gitkeep
+
+# Local IDE / generated graphs
+.cursor/
+graphify-out/
+services/gateway/graphify-out/
+raw/
 
 # Logs
 *.log

@@ -10,7 +10,7 @@ function estimateWithFallback(body: unknown): number {
 
 export function estimateRequestTokens(
   body: unknown,
-  family: 'openai-chat' | 'anthropic-messages',
+  family: 'openai-chat' | 'openai-responses' | 'anthropic-messages',
 ): number {
   const base = estimateWithFallback(body);
   if (family === 'anthropic-messages') {

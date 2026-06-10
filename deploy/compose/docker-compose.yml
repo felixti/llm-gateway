@@ -1,7 +1,10 @@
-# MVP M0 stack — edge → gateway with local dev-idp (no Entra required).
-# Usage:
-#   docker compose -f deploy/compose/docker-compose.yml up --build
-#   docker compose -f deploy/compose/docker-compose.yml --profile e2e run --rm e2e
+# AI Gateway — full local stack (no Azure account required).
+#
+# Quick start:
+#   ./deploy/compose/local-up.sh
+#   ./deploy/compose/local-up.sh --profile e2e run --rm e2e   # smoke tests
+#
+# See deploy/compose/README.md and deploy/compose/.env.example
 
 name: ai-gateway-mvp
 
@@ -18,15 +21,30 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.34.0
+    command: azurite --skipApiVersionCheck --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
+    expose:
+      - "10000"
+      - "10001"
+      - "10002"
+    ports:
+      - "${AZURITE_BLOB_PORT:-10000}:10000"
+      - "${AZURITE_QUEUE_PORT:-10001}:10001"
+      - "${AZURITE_TABLE_PORT:-10002}:10002"
+    restart: unless-stopped
+
   dev-idp:
     build:
       context: ../..
       dockerfile: tools/dev-idp/Dockerfile
     environment:
       PORT: "4000"
-      DEV_IDP_ISSUER: http://dev-idp:4000
+      DEV_IDP_ISSUER: ${DEV_IDP_ISSUER:-http://dev-idp:4000}
     expose:
       - "4000"
+    ports:
+      - "${DEV_IDP_PORT:-4000}:4000"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
       interval: 10s
@@ -41,24 +59,74 @@ services:
       dockerfile: services/gateway/Dockerfile
     environment:
       PORT: "3000"
-      TENANCY_DEFAULT_ORG: internal
-      M2M_JWKS_URL: http://dev-idp:4000/keys
-      M2M_EXPECTED_ISSUER: http://dev-idp:4000
-      M2M_EXPECTED_AUDIENCE: api://llm-gateway-internal
-      M2M_EXPECTED_APPID: yarp-compose-dev
-      REDIS_URL: redis://redis:6379
-      RATE_LIMIT_RPM: "1000"
-      USAGE_QUEUE: memory
-      WAL_DIR: /tmp/wal
+      TENANCY_DEFAULT_ORG: ${TENANCY_DEFAULT_ORG:-internal}
+      M2M_JWKS_URL: ${M2M_JWKS_URL:-http://dev-idp:4000/keys}
+      M2M_EXPECTED_ISSUER: ${M2M_EXPECTED_ISSUER:-http://dev-idp:4000}
+      M2M_EXPECTED_AUDIENCE: ${M2M_EXPECTED_AUDIENCE:-api://llm-gateway-internal}
+      M2M_EXPECTED_APPID: ${M2M_EXPECTED_APPID:-yarp-compose-dev}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      RATE_LIMIT_RPM: ${RATE_LIMIT_RPM:-1000}
+      RATE_LIMIT_TPM: ${RATE_LIMIT_TPM:-1000000}
+      BUDGET_RESERVATION_TTL_SEC: ${BUDGET_RESERVATION_TTL_SEC:-300}
+      BUDGET_RESERVE_MULTIPLIER: ${BUDGET_RESERVE_MULTIPLIER:-1.2}
+      BUDGET_COMMIT_IDEMPOTENCY_TTL_SEC: ${BUDGET_COMMIT_IDEMPOTENCY_TTL_SEC:-604800}
+      CONFIG_STORE: ${CONFIG_STORE:-memory}
+      AZURE_TABLE_CONNECTION_STRING: ${AZURE_TABLE_CONNECTION_STRING:-}
+      CONFIG_TABLE_NAME: ${CONFIG_TABLE_NAME:-aigatewayconfig}
+      USAGE_QUEUE: ${USAGE_QUEUE:-azure}
+      AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING}
+      USAGE_QUEUE_NAME: ${USAGE_QUEUE_NAME:-usage-events}
+      WAL_DIR: ${WAL_DIR:-/tmp/wal}
+      WAL_REPLAY_INTERVAL_MS: ${WAL_REPLAY_INTERVAL_MS:-60000}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_KEY: ${AZURE_OPENAI_KEY:-}
+      AZURE_OPENAI_CHAT_API_VERSION: ${AZURE_OPENAI_CHAT_API_VERSION:-2025-01-01-preview}
+      AZURE_OPENAI_RESPONSES_API_VERSION: ${AZURE_OPENAI_RESPONSES_API_VERSION:-2025-04-01-preview}
+      AZURE_AI_FOUNDRY_ENDPOINT: ${AZURE_AI_FOUNDRY_ENDPOINT:-}
+      AZURE_AI_FOUNDRY_KEY: ${AZURE_AI_FOUNDRY_KEY:-}
+      AZURE_FOUNDRY_CHAT_API_VERSION: ${AZURE_FOUNDRY_CHAT_API_VERSION:-2024-05-01-preview}
+      UPSTREAM_MODE: ${UPSTREAM_MODE:-azure}
     expose:
       - "3000"
     depends_on:
       redis:
         condition: service_healthy
+      azurite:
+        condition: service_started
       dev-idp:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  collector:
+    build:
+      context: ../..
+      dockerfile: services/collector/Dockerfile
+    environment:
+      PORT: "4100"
+      USAGE_QUEUE: ${USAGE_QUEUE:-azure}
+      AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING}
+      USAGE_QUEUE_NAME: ${USAGE_QUEUE_NAME:-usage-events}
+      COLLECTOR_OUT_DIR: ${COLLECTOR_OUT_DIR:-/data/out}
+      COLLECTOR_POLL_INTERVAL_MS: ${COLLECTOR_POLL_INTERVAL_MS:-5000}
+      COLLECTOR_BATCH_SIZE: ${COLLECTOR_BATCH_SIZE:-32}
+      COLLECTOR_WORKER_ENABLED: ${COLLECTOR_WORKER_ENABLED:-true}
+    expose:
+      - "4100"
+    ports:
+      - "${COLLECTOR_PORT:-4100}:4100"
+    volumes:
+      - collector-out:/data/out
+    depends_on:
+      azurite:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4100/health"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -73,12 +141,12 @@ services:
       - "${EDGE_PORT:-8080}:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Compose
-      Auth__Mode: compose-dev
-      Auth__Authority: http://dev-idp:4000
-      Auth__Audience: api://ai-gateway-edge
-      Downstream__DevIdpUrl: http://dev-idp:4000
-      Downstream__M2mAudience: api://llm-gateway-internal
-      Downstream__YarpAppId: yarp-compose-dev
+      Auth__Mode: ${EDGE_AUTH_MODE:-compose-dev}
+      Auth__Authority: ${EDGE_AUTH_AUTHORITY:-http://dev-idp:4000}
+      Auth__Audience: ${EDGE_AUTH_AUDIENCE:-api://ai-gateway-edge}
+      Downstream__DevIdpUrl: ${EDGE_AUTH_AUTHORITY:-http://dev-idp:4000}
+      Downstream__M2mAudience: ${M2M_EXPECTED_AUDIENCE:-api://llm-gateway-internal}
+      Downstream__YarpAppId: ${EDGE_DOWNSTREAM_YARP_APP_ID:-yarp-compose-dev}
     depends_on:
       dev-idp:
         condition: service_healthy
@@ -101,7 +169,10 @@ services:
     environment:
       EDGE_URL: http://edge:8080
       DEV_IDP_URL: http://dev-idp:4000
-      EDGE_AUDIENCE: api://ai-gateway-edge
+      EDGE_AUDIENCE: ${EDGE_AUTH_AUDIENCE:-api://ai-gateway-edge}
     volumes:
       - ./e2e.sh:/e2e.sh:ro
     entrypoint: ["/bin/sh", "/e2e.sh"]
+
+volumes:
+  collector-out:

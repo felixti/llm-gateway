@@ -7,13 +7,23 @@ export function createAzureUsageQueue(
   queueName: string,
 ): UsageQueue {
   const client = new QueueClient(connectionString, queueName);
+  let ensureReady: Promise<void> | null = null;
+
+  const ready = (): Promise<void> => {
+    if (!ensureReady) {
+      ensureReady = client.createIfNotExists().then(() => undefined);
+    }
+    return ensureReady;
+  };
 
   return {
     async enqueue(body: string): Promise<void> {
+      await ready();
       await client.sendMessage(body);
     },
 
     async receive(maxMessages: number, visibilityTimeoutSec: number): Promise<QueueMessage[]> {
+      await ready();
       const response = await client.receiveMessages({
         numberOfMessages: Math.min(Math.max(1, maxMessages), 32),
         visibilityTimeout: visibilityTimeoutSec,

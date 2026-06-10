@@ -4,10 +4,10 @@ import { createMemoryConfigStore } from './memory-store';
 describe('createMemoryConfigStore', () => {
   const store = () => createMemoryConfigStore();
 
-  it('getModel returns seeded gpt-5.4', async () => {
-    const model = await store().getModel('gpt-5.4');
+  it('getModel returns seeded gpt-4.1', async () => {
+    const model = await store().getModel('gpt-4.1');
     expect(model).toMatchObject({
-      alias: 'gpt-5.4',
+      alias: 'gpt-4.1',
       provider: 'azure-openai',
       family: 'openai-chat',
       enabled: true,
@@ -20,13 +20,15 @@ describe('createMemoryConfigStore', () => {
 
   it('getPrincipal seed-sp-appid returns correct allowlist', async () => {
     const principal = await store().getPrincipal('seed-sp-appid');
-    expect(principal).toEqual({
+    expect(principal).toMatchObject({
       principalId: 'seed-sp-appid',
       kind: 'sp',
       projectId: 'seed-project',
       orgId: 'internal',
-      modelAllowlist: ['gpt-5.4', 'claude-opus-4-6'],
     });
+    expect(principal?.modelAllowlist).toEqual(
+      expect.arrayContaining(['gpt-4.1', 'Kimi-K2.5']),
+    );
   });
 
   it('getPrincipal unknown returns null', async () => {

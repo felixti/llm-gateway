@@ -22,7 +22,7 @@ function app(deps: { budgetStore: BudgetStore; redis: Redis }) {
       principalKind: 'sp',
       projectId: 'proj1',
       orgId: 'internal',
-      modelAllowlist: ['gpt-5.4'],
+      modelAllowlist: ['gpt-4.1'],
       budgetPolicy: {
         principalId: 'proj1',
         scopeKind: 'project',
@@ -31,8 +31,8 @@ function app(deps: { budgetStore: BudgetStore; redis: Redis }) {
         hard: true,
       },
     });
-    c.set('model', 'gpt-5.4');
-    c.set('parsedBody', { model: 'gpt-5.4', messages: [] });
+    c.set('model', 'gpt-4.1');
+    c.set('parsedBody', { model: 'gpt-4.1', messages: [] });
     c.set('family', 'openai-chat');
     await next();
   });
@@ -98,11 +98,11 @@ describe('budgetMiddleware', () => {
         principalKind: 'sp',
         projectId: 'proj1',
         orgId: 'internal',
-        modelAllowlist: ['gpt-5.4'],
+        modelAllowlist: ['gpt-4.1'],
         budgetPolicy: null,
       });
-      c.set('model', 'gpt-5.4');
-      c.set('parsedBody', { model: 'gpt-5.4', messages: [] });
+      c.set('model', 'gpt-4.1');
+      c.set('parsedBody', { model: 'gpt-4.1', messages: [] });
       c.set('family', 'openai-chat');
       await next();
     });

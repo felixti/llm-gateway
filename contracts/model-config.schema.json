@@ -9,6 +9,7 @@
     "alias",
     "provider",
     "family",
+    "upstreamApi",
     "deploymentName",
     "enabled",
     "priceInPerMillion",
@@ -26,7 +27,12 @@
     },
     "family": {
       "type": "string",
-      "enum": ["openai-chat", "anthropic-messages"]
+      "enum": ["openai-chat", "openai-responses", "anthropic-messages"]
+    },
+    "upstreamApi": {
+      "type": "string",
+      "enum": ["chat-completions", "responses"],
+      "description": "Azure upstream API surface (chat/completions vs /openai/responses)."
     },
     "deploymentName": {
       "type": "string",

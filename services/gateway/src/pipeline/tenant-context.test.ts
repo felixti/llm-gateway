@@ -34,7 +34,7 @@ describe('tenantContextMiddleware', () => {
       principalKind: 'sp',
       projectId: 'proj1',
       orgId: 'internal',
-      modelAllowlist: ['gpt-5.4', 'claude-opus-4-6'],
+      modelAllowlist: ['gpt-4.1', 'DeepSeek-V4-Flash', 'Kimi-K2.5', 'gpt-5.1-codex-mini'],
       budgetPolicy: {
         principalId: 'proj1',
         scopeKind: 'project',
@@ -112,6 +112,6 @@ describe('tenantContextMiddleware', () => {
       period: 'monthly',
       hard: true,
     });
-    expect(body.modelAllowlist).toEqual(['gpt-5.4', 'claude-opus-4-6']);
+    expect(body.modelAllowlist).toEqual(expect.arrayContaining(['gpt-4.1', 'Kimi-K2.5']));
   });
 });

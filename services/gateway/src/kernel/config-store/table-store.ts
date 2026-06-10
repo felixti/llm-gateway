@@ -5,6 +5,7 @@ import type {
   ModelProvider,
   PrincipalRecord,
   ProtocolFamily,
+  UpstreamApi,
 } from '@shared/contracts/tenant';
 import type { PrincipalKind } from '@shared/contracts/claims';
 import type { ConfigStore } from './types';
@@ -42,10 +43,20 @@ function parseModelAllowlist(raw: unknown): string[] {
 }
 
 function entityToModel(entity: TableEntity): ModelConfig {
+  const family = entity.family as ProtocolFamily;
+  const upstreamRaw = entity.upstreamApi ?? entity.upstream_api;
+  const upstreamApi: UpstreamApi =
+    upstreamRaw === 'responses' || upstreamRaw === 'chat-completions'
+      ? upstreamRaw
+      : family === 'openai-responses'
+        ? 'responses'
+        : 'chat-completions';
+
   const model: ModelConfig = {
     alias: entity.rowKey,
     provider: entity.provider as ModelProvider,
-    family: entity.family as ProtocolFamily,
+    family,
+    upstreamApi,
     deploymentName: String(entity.deploymentName ?? entity.rowKey),
     enabled: Boolean(entity.enabled),
     priceInPerMillion: String(entity.priceIn ?? entity.priceInPerMillion ?? '0'),

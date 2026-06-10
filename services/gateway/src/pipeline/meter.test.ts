@@ -29,6 +29,7 @@ const baseParams = {
     alias: 'gpt-5.4',
     provider: 'azure-openai' as const,
     family: 'openai-chat' as const,
+    upstreamApi: 'chat-completions' as const,
     deploymentName: 'gpt-5.4-global',
     enabled: true,
     priceInPerMillion: '5.000000',

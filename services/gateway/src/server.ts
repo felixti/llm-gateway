@@ -42,6 +42,7 @@ const app = createApp({
   reservationTtlSec: Number(process.env.BUDGET_RESERVATION_TTL_SEC ?? 300),
   reserveMultiplier: Number(process.env.BUDGET_RESERVE_MULTIPLIER ?? 1.2),
   commitIdempotencyTtlSec: Number(process.env.BUDGET_COMMIT_IDEMPOTENCY_TTL_SEC ?? 604_800),
+  upstreamMode: (process.env.UPSTREAM_MODE as 'stub' | 'azure' | undefined) ?? undefined,
 });
 
 const port = Number(process.env.PORT ?? 3000);

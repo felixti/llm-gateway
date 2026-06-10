@@ -7,7 +7,7 @@ declare module 'hono' {
     tenantContext: TenantContext;
     model: string;
     parsedBody: unknown;
-    family: 'openai-chat' | 'anthropic-messages';
+    family: 'openai-chat' | 'openai-responses' | 'anthropic-messages';
     reservationId: string;
     budgetScope: string;
     reservedMicro: bigint;

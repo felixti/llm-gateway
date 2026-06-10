@@ -1,21 +1,21 @@
-import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import type Redis from 'ioredis';
-import { fromMicrodollars } from '@shared/budget/money';
 import type { UsageQueue } from '@shared/queue/types';
 import './types';
+import { loadAzureEnv } from './config/azure-env';
+import { createLlmHandler, resolveUpstreamClient, type UpstreamMode } from './features/llm/handler';
 import { healthRoutes } from './features/health/route';
 import type { BudgetStore } from './kernel/budget-store/store';
 import type { ConfigStore } from './kernel/config-store/types';
 import type { RateStore } from './kernel/rate-store/store';
+import type { UpstreamClient } from './providers/upstream-client';
 import { authMiddleware, type AuthDeps } from './pipeline/auth';
 import { budgetMiddleware } from './pipeline/budget';
-import { buildUsageEvent, emitUsageEvent } from './pipeline/meter';
-import { protocolGuard, type Family } from './pipeline/protocol-guard';
+import { openAiRouteGuard, responsesRouteGuard } from './pipeline/protocol-guard';
 import { rateLimitMiddleware } from './pipeline/rate-limit';
 import { scopeMiddleware } from './pipeline/scope';
 import { tenantContextMiddleware } from './pipeline/tenant-context';
-import { estimateRequestTokens } from './utils/tokens';
+import type { RouteProtocol } from './protocol/responses-chat-bridge';
 
 export interface AppDeps {
   auth: AuthDeps;
@@ -30,12 +30,23 @@ export interface AppDeps {
   reservationTtlSec: number;
   reserveMultiplier: number;
   commitIdempotencyTtlSec: number;
+  upstreamClient?: UpstreamClient;
+  upstreamMode?: UpstreamMode;
 }
 
-function registerLlmRoute(api: Hono, deps: AppDeps, path: string, family: Family) {
+function registerLlmRoute(
+  api: Hono,
+  deps: AppDeps,
+  path: string,
+  route: RouteProtocol,
+  upstreamClient: UpstreamClient,
+  upstreamMode: UpstreamMode,
+) {
+  const guard = route === 'openai-responses' ? responsesRouteGuard() : openAiRouteGuard();
+
   api.post(
     path,
-    protocolGuard(family),
+    guard,
     scopeMiddleware(),
     rateLimitMiddleware({
       rateStore: deps.rateStore,
@@ -49,63 +60,29 @@ function registerLlmRoute(api: Hono, deps: AppDeps, path: string, family: Family
       reservationTtlSec: deps.reservationTtlSec,
       reserveMultiplier: deps.reserveMultiplier,
     }),
-    async (c) => {
-      const startedAt = Date.now();
-      const requestId = c.req.header('x-request-id') ?? randomUUID();
-
-      let redisCommitResult: 'ok' | 'failed' = 'ok';
-      try {
-        await deps.budgetStore.commit(
-          c.get('budgetScope'),
-          c.get('reservationId'),
-          requestId,
-          c.get('reservedMicro'),
-          deps.commitIdempotencyTtlSec,
-        );
-      } catch {
-        redisCommitResult = 'failed';
-      }
-
-      const modelConfig = await deps.configStore.getModel(c.get('model'));
-      if (!modelConfig) {
-        return c.json({ error: 'model not found' }, 400);
-      }
-
-      const tokensPrompt = estimateRequestTokens(c.get('parsedBody'), c.get('family'));
-      const tokensCompletion = Math.ceil(tokensPrompt / 2);
-      const costUsd = fromMicrodollars(c.get('reservedMicro'));
-
-      const event = buildUsageEvent({
-        requestId,
-        userAuth: c.get('userAuth'),
-        tenantContext: c.get('tenantContext'),
-        modelConfig,
-        tokensPrompt,
-        tokensCompletion,
-        costUsd,
-        status: 'completed',
-        latencyMs: Date.now() - startedAt,
-        redisCommitResult,
-        reservationId: c.get('reservationId'),
-        scope: c.get('budgetScope'),
-      });
-
-      await emitUsageEvent(
-        { usageQueue: deps.usageQueue, walDir: deps.walDir },
-        event,
-      );
-
-      return c.json({
-        stub: true,
-        model: c.get('model'),
-        principal: c.get('userAuth').principalId,
-        request_id: requestId,
-      });
-    },
+    createLlmHandler(
+      {
+        configStore: deps.configStore,
+        budgetStore: deps.budgetStore,
+        usageQueue: deps.usageQueue,
+        walDir: deps.walDir,
+        commitIdempotencyTtlSec: deps.commitIdempotencyTtlSec,
+      },
+      route,
+      upstreamClient,
+      upstreamMode,
+    ),
   );
 }
 
 export function createApp(deps: AppDeps) {
+  const azureEnv = loadAzureEnv();
+  const { client: upstreamClient, mode: upstreamMode } = resolveUpstreamClient(
+    azureEnv,
+    deps.upstreamMode,
+    deps.upstreamClient,
+  );
+
   const app = new Hono();
   app.route('/', healthRoutes);
 
@@ -113,8 +90,9 @@ export function createApp(deps: AppDeps) {
   api.use('*', authMiddleware(deps.auth));
   api.use('*', tenantContextMiddleware(deps.configStore));
 
-  registerLlmRoute(api, deps, '/v1/chat/completions', 'openai-chat');
-  registerLlmRoute(api, deps, '/v1/messages', 'anthropic-messages');
+  registerLlmRoute(api, deps, '/v1/chat/completions', 'openai-chat', upstreamClient, upstreamMode);
+  registerLlmRoute(api, deps, '/v1/responses', 'openai-responses', upstreamClient, upstreamMode);
+  registerLlmRoute(api, deps, '/v1/messages', 'openai-chat', upstreamClient, upstreamMode);
 
   app.route('/', api);
   return app;

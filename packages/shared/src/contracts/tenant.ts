@@ -1,12 +1,16 @@
 import type { PrincipalKind } from './claims';
 
-export type ProtocolFamily = 'openai-chat' | 'anthropic-messages';
+export type ProtocolFamily = 'openai-chat' | 'openai-responses' | 'anthropic-messages';
 export type ModelProvider = 'azure-openai' | 'azure-foundry';
+/** Native Azure upstream surface for this deployment. */
+export type UpstreamApi = 'chat-completions' | 'responses';
 
 export interface ModelConfig {
   alias: string;
   provider: ModelProvider;
+  /** Client-native protocol; cross-protocol adapters bridge at the gateway. */
   family: ProtocolFamily;
+  upstreamApi: UpstreamApi;
   deploymentName: string;
   enabled: boolean;
   priceInPerMillion: string;   // USD decimal string, 6dp

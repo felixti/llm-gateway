@@ -1,0 +1,78 @@
+# Smoke tests — direct Azure providers (bypass gateway)
+# Environment: azure-direct
+#
+# Setup:
+#   1. Copy http-client.private.env.json.example → http-client.private.env.json
+#   2. Fill azureOpenAiKey / azureFoundryKey from deploy/compose/.env
+#   3. Select "azure-direct" environment in REST Client
+#
+# Expected for every request below:
+#   HTTP 200
+#   Assistant text == "OK"
+
+@smokeInput = {{smokeInput}}
+
+### 1) gpt-4.1 — Azure OpenAI chat completions
+# @name directGpt41
+POST {{azureOpenAiHost}}/openai/deployments/gpt-4.1/chat/completions?api-version={{azureOpenAiChatApiVersion}}
+api-key: {{azureOpenAiKey}}
+Content-Type: application/json
+
+{
+  "messages": [
+    { "role": "user", "content": "{{smokeInput}}" }
+  ],
+  "stream": false
+}
+
+### 2) gpt-5-mini — Azure OpenAI Responses API
+# @name directGpt5Mini
+POST {{azureOpenAiHost}}/openai/responses?api-version={{azureOpenAiResponsesApiVersion}}
+api-key: {{azureOpenAiKey}}
+Content-Type: application/json
+
+{
+  "model": "gpt-5-mini",
+  "input": "{{smokeInput}}",
+  "stream": false
+}
+
+### 3) gpt-5.1-codex-mini — Azure OpenAI Responses API
+# @name directCodexMini
+POST {{azureOpenAiHost}}/openai/responses?api-version={{azureOpenAiResponsesApiVersion}}
+api-key: {{azureOpenAiKey}}
+Content-Type: application/json
+
+{
+  "model": "gpt-5.1-codex-mini",
+  "input": "{{smokeInput}}",
+  "stream": false
+}
+
+### 4) DeepSeek-V4-Flash — Azure AI Foundry chat completions
+# @name directDeepSeek
+POST {{azureFoundryHost}}/models/chat/completions?api-version={{azureFoundryChatApiVersion}}
+api-key: {{azureFoundryKey}}
+Content-Type: application/json
+
+{
+  "model": "DeepSeek-V4-Flash",
+  "messages": [
+    { "role": "user", "content": "{{smokeInput}}" }
+  ],
+  "stream": false
+}
+
+### 5) Kimi-K2.5 — Azure AI Foundry chat completions
+# @name directKimi
+POST {{azureFoundryHost}}/models/chat/completions?api-version={{azureFoundryChatApiVersion}}
+api-key: {{azureFoundryKey}}
+Content-Type: application/json
+
+{
+  "model": "Kimi-K2.5",
+  "messages": [
+    { "role": "user", "content": "{{smokeInput}}" }
+  ],
+  "stream": false
+}

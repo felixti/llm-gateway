@@ -54,6 +54,7 @@ beforeAll(async () => {
     reservationTtlSec: 300,
     reserveMultiplier: 1.2,
     commitIdempotencyTtlSec: 604_800,
+    upstreamMode: 'stub',
   };
 });
 
@@ -73,20 +74,79 @@ describe('end-to-end pipeline', () => {
   });
   it('200 stub for allowed chat model', async () => {
     const res = await createApp(deps).request('/v1/chat/completions', {
-      method: 'POST', headers: await authd(), body: JSON.stringify({ model: 'gpt-5.4', messages: [] }),
+      method: 'POST', headers: await authd(),       body: JSON.stringify({ model: 'gpt-4.1', messages: [] }),
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ stub: true, model: 'gpt-5.4', principal: 'app1' });
+    expect(await res.json()).toMatchObject({ stub: true, model: 'gpt-4.1', principal: 'app1' });
+  });
+  it('bridges chat completions to Responses API for codex models', async () => {
+    process.env.AZURE_OPENAI_ENDPOINT = 'https://example.cognitiveservices.azure.com';
+    process.env.AZURE_OPENAI_KEY = 'test-key';
+
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(payload.input).toBe('ping');
+      expect(payload.model).toBe('gpt-5.1-codex-mini');
+      return new Response(
+        JSON.stringify({
+          id: 'resp_test',
+          model: 'gpt-5.1-codex-mini',
+          output: [
+            {
+              type: 'message',
+              content: [{ type: 'output_text', text: 'pong' }],
+            },
+          ],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const app = createApp({
+        ...deps,
+        upstreamMode: 'azure',
+      });
+      const res = await app.request('/v1/chat/completions', {
+        method: 'POST',
+        headers: await authd(),
+        body: JSON.stringify({
+          model: 'gpt-5.1-codex-mini',
+          messages: [{ role: 'user', content: 'ping' }],
+        }),
+      });
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.object).toBe('chat.completion');
+      expect(json.choices?.[0]?.message?.content).toBe('pong');
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/openai/responses');
+    } finally {
+      vi.unstubAllGlobals();
+      delete process.env.AZURE_OPENAI_ENDPOINT;
+      delete process.env.AZURE_OPENAI_KEY;
+    }
+  });
+  it('200 stub for /v1/responses', async () => {
+    const res = await createApp(deps).request('/v1/responses', {
+      method: 'POST',
+      headers: await authd(),
+      body: JSON.stringify({ model: 'gpt-5.1-codex-mini', input: 'hello' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ stub: true, model: 'gpt-5.1-codex-mini' });
   });
   it('200 stub for allowed messages model', async () => {
     const res = await createApp(deps).request('/v1/messages', {
-      method: 'POST', headers: await authd(), body: JSON.stringify({ model: 'claude-opus-4-6', messages: [] }),
+      method: 'POST', headers: await authd(), body: JSON.stringify({ model: 'Kimi-K2.5', messages: [] }),
     });
     expect(res.status).toBe(200);
   });
   it('403 for disallowed model', async () => {
     const res = await createApp(deps).request('/v1/chat/completions', {
-      method: 'POST', headers: await authd(), body: JSON.stringify({ model: 'gpt-5-mini' }),
+      method: 'POST', headers: await authd(), body: JSON.stringify({ model: 'unknown-model' }),
     });
     expect(res.status).toBe(403);
   });
@@ -96,7 +156,7 @@ describe('end-to-end pipeline', () => {
     const res = await app.request('/v1/chat/completions', {
       method: 'POST',
       headers: await authd({ 'x-request-id': 'req-usage-emit' }),
-      body: JSON.stringify({ model: 'gpt-5.4', messages: [{ role: 'user', content: 'hello' }] }),
+      body: JSON.stringify({ model: 'gpt-4.1', messages: [{ role: 'user', content: 'hello' }] }),
     });
     expect(res.status).toBe(200);
 
@@ -105,7 +165,7 @@ describe('end-to-end pipeline', () => {
     const event = JSON.parse(message!.body) as UsageEvent;
     expect(event.request_id).toBe('req-usage-emit');
     expect(event.redis_commit_result).toBe('ok');
-    expect(event.model).toBe('gpt-5.4');
+    expect(event.model).toBe('gpt-4.1');
     expect(event.cost_usd).toMatch(/^\d+\.\d{6}$/);
   });
   it('writes WAL when queue enqueue fails', async () => {
@@ -118,7 +178,7 @@ describe('end-to-end pipeline', () => {
     const res = await app.request('/v1/chat/completions', {
       method: 'POST',
       headers: await authd({ 'x-request-id': 'req-wal-fallback' }),
-      body: JSON.stringify({ model: 'gpt-5.4', messages: [] }),
+      body: JSON.stringify({ model: 'gpt-4.1', messages: [] }),
     });
     expect(res.status).toBe(200);
 

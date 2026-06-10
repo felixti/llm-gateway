@@ -29,7 +29,8 @@ See **[CONTEXT.md](CONTEXT.md)** for the live system glossary and topology.
 |-------|-----|
 | Monorepo layout (`services/`, `packages/`, `contracts/`, `legacy/`) | [ADR-0014](docs/adr/0014-polyglot-monorepo-vertical-slice-structure.md) |
 | Legacy Bun app retirement (`legacy/` read-only) | [ADR-0015](docs/adr/0015-legacy-bun-app-retirement-reference-and-rewrite.md) |
-| Local compose stack (edge → gateway) | [deploy/compose/README.md](deploy/compose/README.md) |
+| Local compose stack (edge → gateway → collector) | [deploy/compose/README.md](deploy/compose/README.md) — **`make up` / `make e2e`** |
+| Host-native dev (IDE + Docker infra) | [deploy/local/README.md](deploy/local/README.md) |
 
 The sections below describe the **legacy** Bun/Postgres gateway in `legacy/`; they are not the live MVP path.
 
@@ -41,7 +42,17 @@ The sections below describe the **legacy** Bun/Postgres gateway in `legacy/`; th
 - .NET 9 SDK (edge)
 - Docker + Docker Compose (recommended for local E2E)
 
-### Per-service build
+### Local stack (Docker — recommended)
+
+```bash
+cp deploy/compose/.env.example deploy/compose/.env
+chmod +x deploy/compose/local-up.sh
+./deploy/compose/local-up.sh
+```
+
+Edge: **http://localhost:8080**. Full env reference: [`deploy/compose/.env.example`](deploy/compose/.env.example).
+
+### Per-service build (host-native)
 
 ```bash
 git clone https://github.com/your-org/llm-gateway.git
