@@ -1,12 +1,18 @@
-# Graph Report - .  (2026-06-10)
+# Graph Report - llm-gateway  (2026-06-15)
 
 ## Corpus Check
-- Large corpus: 309 files · ~184,240 words. Semantic extraction will be expensive (many Claude tokens). Consider running on a subfolder, or use --no-semantic to run AST-only.
+- 245 files · ~300,857 words
+- Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1589 nodes · 2516 edges · 223 communities (128 shown, 95 thin omitted)
+- 1593 nodes · 2516 edges · 228 communities (133 shown, 95 thin omitted)
 - Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 218 edges (avg confidence: 0.8)
-- Token cost: 15,840 input · 2,150 output
+- Token cost: 0 input · 0 output
+
+## Graph Freshness
+- Built from commit: `94fad67a`
+- Run `git rev-parse HEAD` and compare to check if the graph is stale.
+- Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
 - [[_COMMUNITY_performance  quota  metrics|performance | quota | metrics]]
@@ -93,7 +99,7 @@
 - [[_COMMUNITY_ensureOutDir  parseUsageEvents  pollUsageQueue|ensureOutDir | parseUsageEvents | pollUsageQueue]]
 - [[_COMMUNITY_RECONCILE_USAGE_SCRIPT  calculateCost  calculateEstimatedCost|RECONCILE_USAGE_SCRIPT | calculateCost | calculateEstimatedCost]]
 - [[_COMMUNITY_IDownstreamTokenProvider  .GetM2mTokenAsync()  IDownstreamTokenProvider.cs|IDownstreamTokenProvider | .GetM2mTokenAsync() | IDownstreamTokenProvider.cs]]
-- [[_COMMUNITY_AzureEnv  isAzureConfigured  loadAzureEnv|AzureEnv | isAzureConfigured | loadAzureEnv]]
+- [[_COMMUNITY_startTestContainers()  stopTestContainers()  testcontainers|startTestContainers() | stopTestContainers() | testcontainers]]
 - [[_COMMUNITY_err  ok  ResultT,E|err | ok | Result<T,E>]]
 - [[_COMMUNITY_MICRODOLLAR_SCALE  fromMicrodollars  toMicrodollars|MICRODOLLAR_SCALE | fromMicrodollars | toMicrodollars]]
 - [[_COMMUNITY_initiateGracefulShutdown  shutdownMiddleware  waitForDrain|initiateGracefulShutdown | shutdownMiddleware | waitForDrain]]
@@ -101,7 +107,7 @@
 - [[_COMMUNITY_Exponential Backoff with Jitter  retry  retry|Exponential Backoff with Jitter | retry | retry]]
 - [[_COMMUNITY_Concurrency Control  mutex  mutex|Concurrency Control | mutex | mutex]]
 - [[_COMMUNITY_Server-Sent Events Streaming  streaming  streaming|Server-Sent Events Streaming | streaming | streaming]]
-- [[_COMMUNITY_docsfp-refactoring-report  docssuperpowersplans2026-03-21-fp-refactoring|docs/fp-refactoring-report | docs/superpowers/plans/2026-03-21-fp-refactoring]]
+- [[_COMMUNITY_esbuildOptions()  tsup.config|esbuildOptions() | tsup.config]]
 - [[_COMMUNITY_docsllm-gateway-playbook  docsllm-gateway-prd|docs/llm-gateway-playbook | docs/llm-gateway-prd]]
 - [[_COMMUNITY_docsapiresponses-api  OpenAI Responses API surface|docs/api/responses-api | OpenAI Responses API surface]]
 - [[_COMMUNITY_M2mClaims  UserAuth|M2mClaims | UserAuth]]
@@ -114,11 +120,7 @@
 - [[_COMMUNITY_Quota Pressure Testing  quota-pressure.js|Quota Pressure Testing | quota-pressure.js]]
 - [[_COMMUNITY_openai-responses.proxy  openai-responses.proxy|openai-responses.proxy | openai-responses.proxy]]
 - [[_COMMUNITY_Azure Model Map  HTTP Smoke Tests|Azure Model Map | HTTP Smoke Tests]]
-- [[_COMMUNITY_docsdeployment|docs/deployment]]
-- [[_COMMUNITY_Community 145|Community 145]]
-- [[_COMMUNITY_Community 146|Community 146]]
-- [[_COMMUNITY_Production 1010 Hardening Plan|Production 10/10 Hardening Plan]]
-- [[_COMMUNITY_Codex 9.5 Hardening Blocker Fixes Plan|Codex 9.5 Hardening Blocker Fixes Plan]]
+- [[_COMMUNITY_vitest.config|vitest.config]]
 - [[_COMMUNITY_otel-collector-config|otel-collector-config]]
 - [[_COMMUNITY_AppDeps|AppDeps]]
 - [[_COMMUNITY_healthRoutes|healthRoutes]]
@@ -193,6 +195,11 @@
 - [[_COMMUNITY_OTel Collector|OTel Collector]]
 - [[_COMMUNITY_Load Tests|Load Tests]]
 - [[_COMMUNITY_Chaos Tests|Chaos Tests]]
+- [[_COMMUNITY_Community 223|Community 223]]
+- [[_COMMUNITY_Community 224|Community 224]]
+- [[_COMMUNITY_Community 225|Community 225]]
+- [[_COMMUNITY_Community 226|Community 226]]
+- [[_COMMUNITY_Community 227|Community 227]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `MockRedis` - 40 edges
@@ -267,7 +274,7 @@
 - **Two-Plane Architecture** — adr-0009, yarp-edge, adr-0010 [INFERRED 0.98]
 - **Security Posture** — pat-contract, adr-0006, network-policy, claims-contract [INFERRED 0.90]
 
-## Communities (223 total, 95 thin omitted)
+## Communities (228 total, 95 thin omitted)
 
 ### Community 0 - "performance | quota | metrics"
 Cohesion: 0.06
@@ -322,20 +329,20 @@ Cohesion: 0.08
 Nodes (6): resetEnvForTests(), bindMockRedis(), createTestApp(), setupMockFetch(), base64UrlNoPadding(), createTestPat()
 
 ### Community 13 - "budgetKey() | createCachedConfigStore() | modelKey()"
+Cohesion: 0.09
+Nodes (30): ADR-0005: PAT Deprecation, HighLLMCostRate, PostgresHydrationFailures, QuotaExhausted, QuotaNearExhaustion, Admin Operator Secret, Background Scheduler, Decimal.js Cost Math (+22 more)
+
+### Community 14 - "adaptRequestBody() | adaptResponseBody() | chatMessageToResponsesItems()"
 Cohesion: 0.11
 Nodes (12): createCachedConfigStore(), createConfigStore(), createMemoryConfigStore(), indexBudgets(), indexModels(), indexPrincipals(), store(), createSeedData() (+4 more)
 
-### Community 14 - "adaptRequestBody() | adaptResponseBody() | chatMessageToResponsesItems()"
+### Community 15 - "HighLLMCostRate | PostgresHydrationFailures | QuotaExhausted"
 Cohesion: 0.15
 Nodes (19): adaptRequestBody(), adaptResponseBody(), chatMessageToResponsesItems(), mapResponsesRole(), needsProtocolBridge(), routeProtocolToUpstream(), stringifyContent(), transformChatCompletionsToResponse() (+11 more)
 
-### Community 15 - "HighLLMCostRate | PostgresHydrationFailures | QuotaExhausted"
-Cohesion: 0.09
-Nodes (24): HighLLMCostRate, PostgresHydrationFailures, QuotaExhausted, QuotaNearExhaustion, Background Scheduler, Decimal.js Cost Math, Fail-Closed Policy, Fallback Reservation Top-Up (+16 more)
-
 ### Community 16 - "Hono | rate-limit | scope"
 Cohesion: 0.11
-Nodes (6): Hono, createContext(), createContextForPath(), rateLimitMiddleware(), tenantContextMiddleware(), appWith()
+Nodes (22): Middleware Chain, Request Handler Factory, Result Type (Either Monad), FP Refactoring Plan, admin-scope.ts, cache.ts, errors.ts, protocol-guard.ts (+14 more)
 
 ### Community 17 - "functional | functional | compose2()"
 Cohesion: 0.14
@@ -354,56 +361,56 @@ Cohesion: 0.24
 Nodes (14): createAnthropicStreamTransformer(), createOpenAIStreamTransformer(), createOpenAIUsageObserver(), extractAnthropicUsage(), extractOpenAIUsage(), hasValidAnthropicUsage(), hasValidOpenAIUsage(), isAnthropicStreamEvent() (+6 more)
 
 ### Community 21 - "Middleware Chain | Request Handler Factory | Result Type (Either Monad)"
-Cohesion: 0.12
-Nodes (19): Middleware Chain, Request Handler Factory, Result Type (Either Monad), FP Refactoring Plan, admin-scope.ts, cache.ts, errors.ts, protocol-guard.ts (+11 more)
-
-### Community 22 - "result | authMiddleware() | appWith()"
 Cohesion: 0.15
 Nodes (6): authMiddleware(), checkDuplicatePrincipalHeaders(), parsePrincipalHeaders(), verifyM2mToken(), err(), ok()
 
-### Community 23 - "request-id | tracing | messages.routes"
+### Community 22 - "result | authMiddleware() | appWith()"
 Cohesion: 0.23
 Nodes (12): requestIdMiddleware(), addLLMSpanAttributes(), createLoggingTraceExporter(), createLoggingTraceExporterForTests(), createTraceExporter(), getCurrentTraceId(), getTracer(), initTracing() (+4 more)
+
+### Community 23 - "request-id | tracing | messages.routes"
+Cohesion: 0.14
+Nodes (6): Hono, createContext(), createContextForPath(), rateLimitMiddleware(), tenantContextMiddleware(), appWith()
 
 ### Community 24 - "ContextVariableMap (Hono augmentation) | Family type | UpstreamMode"
 Cohesion: 0.19
 Nodes (17): ContextVariableMap (Hono augmentation), Family type, UpstreamMode, authMiddleware, budgetMiddleware, checkDuplicatePrincipalHeaders, createLlmHandler, Request middleware pipeline (+9 more)
 
 ### Community 25 - "Atomic Redis Operations | Idempotency | Orphan Cleanup"
-Cohesion: 0.22
-Nodes (17): Atomic Redis Operations, Idempotency, Orphan Cleanup, MockRedis, bindMockRedis, pricing.service.ts, quota.ts, quota.service.ts (+9 more)
-
-### Community 26 - "UsageQueue | WAL Replay Pattern | collector server"
 Cohesion: 0.14
 Nodes (16): UsageQueue, WAL Replay Pattern, collector server, createApp, createMemoryUsageQueue, createUsageQueue, drainUsageWalOnce, listUsageWalEntries (+8 more)
 
-### Community 27 - "PAT Authentication | PII Sanitization | pino"
+### Community 26 - "UsageQueue | WAL Replay Pattern | collector server"
 Cohesion: 0.16
 Nodes (16): PAT Authentication, PII Sanitization, pino, auth.ts, auth.ts, fetch.ts, logger.ts, pino-pii-transport.ts (+8 more)
 
-### Community 28 - "azure-auth | azure-auth | AzureAuthManager"
+### Community 27 - "PAT Authentication | PII Sanitization | pino"
 Cohesion: 0.21
 Nodes (5): AzureAuthManager, createAzureAuthManager(), decodeJwtExp(), getAzureAuthManager(), needsProactiveRefresh()
 
-### Community 29 - "createLlmHandler() | budgetMiddleware() | app()"
+### Community 28 - "azure-auth | azure-auth | AzureAuthManager"
 Cohesion: 0.23
 Nodes (9): createLlmHandler(), budgetMiddleware(), app(), openAiRouteGuard(), protocolGuard(), responsesRouteGuard(), scopeMiddleware(), app() (+1 more)
 
-### Community 30 - "usage-wal | usage-wal | wal-replayer"
+### Community 29 - "createLlmHandler() | budgetMiddleware() | app()"
 Cohesion: 0.32
 Nodes (8): ensureDir(), entryPath(), listUsageWalEntries(), removeUsageWalEntry(), resolveUsageWalDir(), writeUsageWalEntry(), drainUsageWalOnce(), startWalReplayer()
 
-### Community 31 - "buildAzureOpenAIAuth() | buildFoundryAnthropicAuth() | buildFoundryOpenAIAuth()"
+### Community 30 - "usage-wal | usage-wal | wal-replayer"
 Cohesion: 0.19
 Nodes (8): getAllModelAliases(), getDeploymentByAlias(), getDeploymentsByFamily(), getProtocolFamily(), getDeployment(), factories/types.ts, utils/model-scope.ts, buildRequestBody()
 
-### Community 32 - "scope | timeout | quota.routes"
-Cohesion: 0.26
-Nodes (9): scopeMiddleware(), deferAbortDetachUntilStreamEnds(), forwardAbort(), isEventStreamResponse(), timeoutMiddleware(), wrapBodyWithCleanup(), createAnthropicError(), createOpenAIError() (+1 more)
-
-### Community 33 - "openai-responses.proxy | responses-tools | createResponsesStreamTransformer()"
+### Community 31 - "buildAzureOpenAIAuth() | buildFoundryAnthropicAuth() | buildFoundryOpenAIAuth()"
 Cohesion: 0.21
 Nodes (10): createResponsesStreamTransformer(), getCurrentUnixTime(), mapResponsesRole(), proxyNonStreamingResponses(), proxyStreamingResponses(), stringifyResponseContent(), transformChatCompletionsToResponse(), transformResponsesInputItem() (+2 more)
+
+### Community 32 - "scope | timeout | quota.routes"
+Cohesion: 0.23
+Nodes (14): Bun Runtime, Hono Framework, LLM Gateway, PAT Authentication, Pino Logging with PII Sanitization, Protected Proxy Middleware Chain, Protocol Guard Middleware, Quota Flow (Estimate → Reserve → Reconcile) (+6 more)
+
+### Community 33 - "openai-responses.proxy | responses-tools | createResponsesStreamTransformer()"
+Cohesion: 0.27
+Nodes (14): Atomic Redis Operations, Idempotency, Orphan Cleanup, MockRedis, bindMockRedis, pricing.service.ts, quota.service.ts, Decimal.js (+6 more)
 
 ### Community 34 - "AGENTS | CircuitBreakerOpen | compose.yml"
 Cohesion: 0.15
@@ -418,12 +425,12 @@ Cohesion: 0.22
 Nodes (7): createRequestHandlerDeps(), checkRequestLimit(), checkTokenLimit(), extractTokenCount(), rateLimitMiddleware(), setRateLimitHeaders(), Zod
 
 ### Community 37 - "isAzureConfigured() | loadAzureEnv() | createStubUpstreamClient()"
-Cohesion: 0.26
-Nodes (9): isAzureConfigured(), loadAzureEnv(), createStubUpstreamClient(), finalizeRequest(), resolveUpstreamClient(), buildUsageEvent(), emitUsageEvent(), createAzureUpstreamClient() (+1 more)
-
-### Community 38 - "getModelFamily() | protocol-guard | model-scope"
 Cohesion: 0.31
 Nodes (10): getModelFamily(), getModelFromBody(), protocolGuardMiddleware(), createProtocolContext(), createScopedProtocolContext(), canAccessDeployment(), canAccessModel(), filterDeploymentsForScope() (+2 more)
+
+### Community 38 - "getModelFamily() | protocol-guard | model-scope"
+Cohesion: 0.26
+Nodes (9): isAzureConfigured(), loadAzureEnv(), createStubUpstreamClient(), finalizeRequest(), resolveUpstreamClient(), buildUsageEvent(), emitUsageEvent(), createAzureUpstreamClient() (+1 more)
 
 ### Community 39 - "Audit Flow (PG insert or WAL fallback) | Audit Log WAL | Background Workers"
 Cohesion: 0.18
@@ -438,32 +445,32 @@ Cohesion: 0.24
 Nodes (10): closeDatabase(), closeRedis(), flushLogger(), shutdownMetrics(), shutdownTracing(), startPricingWatcher(), startBackgroundJobs(), stopBackgroundJobs() (+2 more)
 
 ### Community 42 - "DEPLOYMENTS | env | buildAzureOpenAIAuth"
+Cohesion: 0.24
+Nodes (12): Anthropic Messages Proxy, Azure Auth (API Key / Entra ID), Circuit Breaker, Circuit Breaker State Machine, OpenAI Chat Proxy, OpenAI Responses Proxy, Proxy Shared Module, Request Handler Factory (+4 more)
+
+### Community 43 - "Protocol Bridge Pattern | adaptRequestBody | adaptResponseBody"
 Cohesion: 0.21
 Nodes (12): DEPLOYMENTS, env, buildAzureOpenAIAuth, buildEnvInput, buildFoundryAnthropicAuth, buildFoundryOpenAIAuth, getDeploymentByAlias, getFallbackChain (+4 more)
 
-### Community 43 - "Protocol Bridge Pattern | adaptRequestBody | adaptResponseBody"
+### Community 44 - "patchRedis() | restoreRedis() | isPostgresHealthy()"
 Cohesion: 0.17
 Nodes (12): Protocol Bridge Pattern, adaptRequestBody, adaptResponseBody, choiceToResponsesOutput, denormalizeChatToolToResponses, normalizeResponsesTool, responses-chat-bridge, responses-tools (+4 more)
 
-### Community 44 - "patchRedis() | restoreRedis() | isPostgresHealthy()"
+### Community 45 - "getAllDeployments() | health.service | buildHealthCheckUrl()"
 Cohesion: 0.18
 Nodes (3): isPostgresHealthy(), isRedisHealthy(), isOtelHealthy()
 
-### Community 45 - "getAllDeployments() | health.service | buildHealthCheckUrl()"
+### Community 46 - "getFallbackChain() | createRequestErrorResponse() | errorToStatusCode()"
 Cohesion: 0.27
 Nodes (8): getAllDeployments(), buildHealthCheckUrl(), checkDeploymentConnectivity(), checkDeploymentHealth(), getAllDeploymentHealth(), getDeploymentHealth(), startHealthChecks(), stopHealthChecks()
 
-### Community 46 - "getFallbackChain() | createRequestErrorResponse() | errorToStatusCode()"
+### Community 47 - "Azure Auth (API Key / Entra ID) | PAT Authentication | Protected Proxy Middlewar"
 Cohesion: 0.27
 Nodes (8): getFallbackChain(), createRequestErrorResponse(), errorToStatusCode(), validateBody(), checkCircuitBreaker(), createRequestHandler(), extractRequestContext(), tryFallbacks()
 
-### Community 47 - "Azure Auth (API Key / Entra ID) | PAT Authentication | Protected Proxy Middlewar"
-Cohesion: 0.22
-Nodes (11): Azure Auth (API Key / Entra ID), PAT Authentication, Protected Proxy Middleware Chain, Protocol Guard Middleware, Quota Flow (Estimate → Reserve → Reconcile), Quota Reservation, Quota Service, Rate Limiting (+3 more)
-
 ### Community 48 - "Anthropic Messages Proxy | Circuit Breaker | Circuit Breaker State Machine"
-Cohesion: 0.25
-Nodes (11): Anthropic Messages Proxy, Circuit Breaker, Circuit Breaker State Machine, OpenAI Chat Proxy, OpenAI Responses Proxy, Proxy Shared Module, Request Handler Factory, Responses Tools (+3 more)
+Cohesion: 0.29
+Nodes (4): scopeMiddleware(), createAnthropicError(), createOpenAIError(), errorForProtocol()
 
 ### Community 49 - "loadSeedAllowlist | config-store/cache | createCachedConfigStore"
 Cohesion: 0.18
@@ -486,56 +493,56 @@ Cohesion: 0.2
 Nodes (10): CHECK_AND_RESERVE_SCRIPT, TOP_UP_RESERVATION_SCRIPT, checkAndReserve, estimateCost, fromMicrodollars, getQuotaStatus, syncQuotaPolicyFromPostgres, toMicrodollars (+2 more)
 
 ### Community 54 - "ADR-0005: PAT Deprecation | Admin Operator Secret | Model-Scoped PAT"
-Cohesion: 0.27
-Nodes (10): ADR-0005: PAT Deprecation, Admin Operator Secret, Model-Scoped PAT, PAT Authentication, Response Caching, Streaming Interception, 9+ Hardening Plan, NEWS.md (+2 more)
-
-### Community 55 - "getApiKeyByJti() | admin-scope | admin.routes"
 Cohesion: 0.28
 Nodes (4): getApiKeyByJti(), getOperatorSecret(), isOperatorSecretValid(), requireAdminScopeMiddleware()
 
-### Community 56 - "Response Compression | CORS Middleware | Global Middleware Chain"
+### Community 55 - "getApiKeyByJti() | admin-scope | admin.routes"
 Cohesion: 0.22
 Nodes (9): Response Compression, CORS Middleware, Global Middleware Chain, Graceful Shutdown, Performance Metrics Middleware, Request ID Middleware, Secure Headers Middleware, Shutdown Service (+1 more)
 
-### Community 57 - "CircuitState | createRequestErrorResponse | createRequestHandler"
+### Community 56 - "Response Compression | CORS Middleware | Global Middleware Chain"
 Cohesion: 0.22
 Nodes (9): CircuitState, createRequestErrorResponse, createRequestHandler, errorForProtocol, getAzureAuthManager, isRequestAllowed, recordFailure, recordSuccess (+1 more)
 
-### Community 58 - "LLMLatencyHigh | Lua Prefix Alignment | Prometheus Metrics"
+### Community 57 - "CircuitState | createRequestErrorResponse | createRequestHandler"
 Cohesion: 0.28
 Nodes (9): LLMLatencyHigh, Lua Prefix Alignment, Prometheus Metrics, Production 10/10 Plan, Prometheus Alerts, metrics.ts, Grafana, Prometheus (+1 more)
 
-### Community 59 - "app | app | applyErrorHandler()"
+### Community 58 - "LLMLatencyHigh | Lua Prefix Alignment | Prometheus Metrics"
 Cohesion: 0.43
 Nodes (6): applyErrorHandler(), applyGlobalMiddleware(), applyRoutes(), createApp(), getAllowedCorsOrigins(), shouldCompressResponse()
 
-### Community 60 - "Bun Runtime | Hono Framework | Jaeger UI"
-Cohesion: 0.32
-Nodes (8): Bun Runtime, Hono Framework, Jaeger UI, LLM Gateway, OTEL Collector, OpenTelemetry Tracing, Pino Logging with PII Sanitization, Prometheus-style Metrics
-
-### Community 61 - "Azure AI Foundry | Azure OpenAI | Chat Completions Route (/v1/chat/completions)"
+### Community 59 - "app | app | applyErrorHandler()"
 Cohesion: 0.25
 Nodes (8): Azure AI Foundry, Azure OpenAI, Chat Completions Route (/v1/chat/completions), Claude Model Family (Claude-3.5/3.7 Sonnet), GPT Model Family (GPT-4o, GPT-4o-Mini), Messages Route (/v1/messages), Responses Route (/v1/responses), Third-Party Models (Kimi, GLM, MiniMax)
 
-### Community 62 - "COMMIT_SCRIPT | RELEASE_SCRIPT | RESERVE_SCRIPT"
+### Community 60 - "Bun Runtime | Hono Framework | Jaeger UI"
 Cohesion: 0.25
 Nodes (8): COMMIT_SCRIPT, RELEASE_SCRIPT, RESERVE_SCRIPT, createBudgetStore, syncBudgetPolicy, createRateStore, budget keys, budget money
 
-### Community 63 - "BuildForwardHeaders | ClientCredentialsTokenProvider | DevIdpTokenProvider"
+### Community 61 - "Azure AI Foundry | Azure OpenAI | Chat Completions Route (/v1/chat/completions)"
 Cohesion: 0.39
 Nodes (8): BuildForwardHeaders, ClientCredentialsTokenProvider, DevIdpTokenProvider, IDownstreamTokenProvider, PrincipalForwarder.Apply, Principal Forwarding, YARP Reverse Proxy, Edge Program
 
-### Community 64 - "azure | calculateBackoff | extractTokenUsage"
+### Community 62 - "COMMIT_SCRIPT | RELEASE_SCRIPT | RESERVE_SCRIPT"
 Cohesion: 0.25
 Nodes (8): azure, calculateBackoff, extractTokenUsage, fetch, finalizeRequest, upstream-client, upstreamHttpsFetch, withRetry
 
-### Community 65 - "Admin Route (/admin) | Admin Scope Middleware | Health Route (/health)"
+### Community 63 - "BuildForwardHeaders | ClientCredentialsTokenProvider | DevIdpTokenProvider"
 Cohesion: 0.29
 Nodes (7): Admin Route (/admin), Admin Scope Middleware, Health Route (/health), Models Route (/v1/models), Operator Surface, Quota Route (/quota), Response Cache
 
-### Community 66 - "budget-store | BudgetStore | policy-sync"
+### Community 64 - "azure | calculateBackoff | extractTokenUsage"
+Cohesion: 0.6
+Nodes (5): deferAbortDetachUntilStreamEnds(), forwardAbort(), isEventStreamResponse(), timeoutMiddleware(), wrapBodyWithCleanup()
+
+### Community 65 - "Admin Route (/admin) | Admin Scope Middleware | Health Route (/health)"
 Cohesion: 0.33
 Nodes (6): budget-store, BudgetStore, policy-sync, rate-store, RateStore, createRedis
+
+### Community 66 - "budget-store | BudgetStore | policy-sync"
+Cohesion: 0.33
+Nodes (6): OpenTelemetry Tracing, OTLP HTTP Export, otlp-http-url.ts, tracing.ts, otlp-http-url.test.ts, tracing.test.ts
 
 ### Community 67 - "Result/Either Monad | functional | result"
 Cohesion: 0.47
@@ -545,41 +552,41 @@ Nodes (6): Result/Either Monad, functional.ts, result.ts, functional.test.ts, re
 Cohesion: 0.33
 Nodes (6): Graceful Shutdown, architecture.md, docs/NEWS.md, docs/security/audit-report-2026-05-03.md, docs/operations/prometheus-alerts.yml, OpenTelemetry
 
-### Community 69 - "OpenTelemetry Tracing | OTLP HTTP Export | otlp-http-url"
-Cohesion: 0.33
-Nodes (6): OpenTelemetry Tracing, OTLP HTTP Export, otlp-http-url.ts, tracing.ts, otlp-http-url.test.ts, tracing.test.ts
-
-### Community 71 - "config-store/seed | table-store | meter"
+### Community 70 - "PrincipalForwardingTests | .CtxWith() | PrincipalForwardingTests.cs"
 Cohesion: 0.4
 Nodes (5): config-store/seed, table-store, meter, tenant contract, queue types
 
-### Community 72 - "usage-wal | writeUsageWalEntry | buildUsageEvent"
+### Community 71 - "config-store/seed | table-store | meter"
 Cohesion: 0.4
 Nodes (5): usage-wal, writeUsageWalEntry, buildUsageEvent, emitUsageEvent, usage-event contract
 
-### Community 73 - "budgetKeys | budgetScopeTag | BudgetPolicy"
+### Community 72 - "usage-wal | writeUsageWalEntry | buildUsageEvent"
 Cohesion: 0.4
 Nodes (5): budgetKeys, budgetScopeTag, BudgetPolicy, PrincipalRecord, TenantContext
 
-### Community 74 - "createAzureUsageQueue | createMemoryUsageQueue | createUsageQueue"
+### Community 73 - "budgetKeys | budgetScopeTag | BudgetPolicy"
 Cohesion: 0.5
 Nodes (5): createAzureUsageQueue, createMemoryUsageQueue, createUsageQueue, CollectorWorkerDeps, UsageQueue
 
-### Community 75 - "Token Pricing | decimal.js | pricing.service"
+### Community 74 - "createAzureUsageQueue | createMemoryUsageQueue | createUsageQueue"
 Cohesion: 0.5
 Nodes (5): Token Pricing, decimal.js, pricing.service.ts, pricing.service.extended.test.ts, pricing.service.test.ts
 
-### Community 76 - "Write-Ahead Log / Dead Letter Queue | wal-replayer.service | wal.service"
+### Community 75 - "Token Pricing | decimal.js | pricing.service"
 Cohesion: 0.7
 Nodes (5): Write-Ahead Log / Dead Letter Queue, wal-replayer.service.ts, wal.service.ts, wal-replayer.service.test.ts, wal.service.test.ts
 
-### Community 77 - "openai-chat.proxy | deployments config | openai-chat.proxy"
+### Community 76 - "Write-Ahead Log / Dead Letter Queue | wal-replayer.service | wal.service"
 Cohesion: 0.4
 Nodes (5): openai-chat.proxy.test.ts, deployments config, openai-chat.proxy, circuit-breaker, retry
 
-### Community 78 - "Sensitive Content Redaction | shared | tracing"
+### Community 77 - "openai-chat.proxy | deployments config | openai-chat.proxy"
 Cohesion: 0.4
 Nodes (5): Sensitive Content Redaction, shared.test.ts, tracing, proxy/shared, result (Either)
+
+### Community 79 - "TraceHashRatioSampler | .constructor() | .hashTraceId()"
+Cohesion: 0.5
+Nodes (4): Jaeger UI, OTEL Collector, OpenTelemetry Tracing, Prometheus-style Metrics
 
 ### Community 80 - "PAT authentication | docs/operations | docs/security/pat-contract"
 Cohesion: 0.5
@@ -593,35 +600,39 @@ Nodes (4): ensureOutDir, parseUsageEvents, pollUsageQueue, startCollectorWorker
 Cohesion: 0.5
 Nodes (4): RECONCILE_USAGE_SCRIPT, calculateCost, calculateEstimatedCost, reconcileUsage
 
-### Community 85 - "AzureEnv | isAzureConfigured | loadAzureEnv"
-Cohesion: 0.67
-Nodes (3): AzureEnv, isAzureConfigured, loadAzureEnv
+### Community 83 - "IDownstreamTokenProvider | .GetM2mTokenAsync() | IDownstreamTokenProvider.cs"
+Cohesion: 0.5
+Nodes (4): Redis Lua Scripts, quota/constants.ts, quota/scripts.ts, quota-lua-prefix-alignment.test.ts
 
 ### Community 86 - "err | ok | Result<T,E>"
 Cohesion: 0.67
-Nodes (3): err, ok, Result<T,E>
+Nodes (3): AzureEnv, isAzureConfigured, loadAzureEnv
 
 ### Community 87 - "MICRODOLLAR_SCALE | fromMicrodollars | toMicrodollars"
 Cohesion: 0.67
-Nodes (3): MICRODOLLAR_SCALE, fromMicrodollars, toMicrodollars
+Nodes (3): err, ok, Result<T,E>
 
 ### Community 88 - "initiateGracefulShutdown | shutdownMiddleware | waitForDrain"
 Cohesion: 0.67
-Nodes (3): initiateGracefulShutdown, shutdownMiddleware, waitForDrain
+Nodes (3): MICRODOLLAR_SCALE, fromMicrodollars, toMicrodollars
 
 ### Community 89 - "Database Migrations | 000_migration_tracking.sql | schema_migrations"
 Cohesion: 0.67
-Nodes (3): Database Migrations, 000_migration_tracking.sql, schema_migrations
+Nodes (3): initiateGracefulShutdown, shutdownMiddleware, waitForDrain
 
 ### Community 90 - "Exponential Backoff with Jitter | retry | retry"
 Cohesion: 0.67
-Nodes (3): Exponential Backoff with Jitter, retry.ts, retry.test.ts
+Nodes (3): Database Migrations, 000_migration_tracking.sql, schema_migrations
 
 ### Community 91 - "Concurrency Control | mutex | mutex"
+Cohesion: 0.67
+Nodes (3): Exponential Backoff with Jitter, retry.ts, retry.test.ts
+
+### Community 92 - "Server-Sent Events Streaming | streaming | streaming"
 Cohesion: 1.0
 Nodes (3): Concurrency Control, mutex.ts, mutex.test.ts
 
-### Community 92 - "Server-Sent Events Streaming | streaming | streaming"
+### Community 93 - "esbuildOptions() | tsup.config"
 Cohesion: 1.0
 Nodes (3): Server-Sent Events Streaming, streaming.ts, streaming.test.ts
 
@@ -633,12 +644,12 @@ Nodes (3): Server-Sent Events Streaming, streaming.ts, streaming.test.ts
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `getDeploymentByAlias()` connect `buildAzureOpenAIAuth() | buildFoundryAnthropicAuth() | buildFoundryOpenAIAuth()` to `performance | quota | metrics`, `getModelFamily() | protocol-guard | model-scope`, `getAllDeployments() | health.service | buildHealthCheckUrl()`, `getFallbackChain() | createRequestErrorResponse() | errorToStatusCode()`, `request-id | tracing | messages.routes`, `azure-auth | azure-auth | AzureAuthManager`?**
-  _High betweenness centrality (0.018) - this node is a cross-community bridge._
-- **Why does `upstreamHttpsFetch()` connect `performance | quota | metrics` to `getAllDeployments() | health.service | buildHealthCheckUrl()`, `adaptRequestBody() | adaptResponseBody() | chatMessageToResponsesItems()`?**
+- **Why does `createMemoryConfigStore()` connect `adaptRequestBody() | adaptResponseBody() | chatMessageToResponsesItems()` to `budgetKeys() | budgetScopeTag() | fromMicrodollars()`, `azure-auth | azure-auth | AzureAuthManager`, `request-id | tracing | messages.routes`?**
   _High betweenness centrality (0.017) - this node is a cross-community bridge._
 - **Why does `MockRedis` connect `decimal.js | MockRedis | .del()` to `performance | quota | metrics`, `cache | models.routes | cache`, `asyncConnectionRefused() | patch() | restoreAll()`, `auth | auth | result`?**
-  _High betweenness centrality (0.017) - this node is a cross-community bridge._
+  _High betweenness centrality (0.015) - this node is a cross-community bridge._
+- **Why does `finalizeProxyUsage()` connect `performance | quota | metrics` to `failingExecute() | patchExecute() | restoreExecute()`, `getUserQuotaPolicyByPatSubject() | pricing.service | constants`, `result | authMiddleware() | appWith()`, `auth | auth | result`?**
+  _High betweenness centrality (0.015) - this node is a cross-community bridge._
 - **Are the 9 inferred relationships involving `errorForProtocol()` (e.g. with `timeoutMiddleware()` and `authMiddleware()`) actually correct?**
   _`errorForProtocol()` has 9 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `HttpClient`, `docs/fp-refactoring-report.md`, `docs/llm-gateway-playbook.md` to the rest of the system?**
