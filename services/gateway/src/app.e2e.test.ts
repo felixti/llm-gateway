@@ -4,7 +4,7 @@ import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { generateKeyPair, exportJWK, SignJWT, createLocalJWKSet, type JWTVerifyGetKey, type KeyLike } from 'jose';
+import { generateKeyPair, exportJWK, SignJWT, createLocalJWKSet, type JWTVerifyGetKey } from 'jose';
 import { budgetScopeTag } from '@shared/budget/keys';
 import type { UsageEvent } from '@shared/contracts/usage-event';
 import { createMemoryUsageQueue } from '@shared/queue/memory-queue';
@@ -16,7 +16,7 @@ import { createRateStore } from './kernel/rate-store/store';
 
 const ISS = 'https://issuer/v2.0', AUD = 'api://llm-gateway-internal', APP = 'yarp';
 let deps: AppDeps;
-let privateKey: KeyLike;
+let privateKey: CryptoKey;
 let walDir: string;
 const mint = () => new SignJWT({ appid: APP }).setProtectedHeader({ alg: 'RS256', kid: 't' })
   .setIssuer(ISS).setAudience(AUD).setIssuedAt().setExpirationTime('5m').sign(privateKey);

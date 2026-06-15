@@ -105,7 +105,7 @@
     events "^3.3.0"
     tslib "^2.8.1"
 
-"@azure/storage-queue@^12.26.0":
+"@azure/storage-queue@^12.30.0":
   version "12.30.0"
   resolved "https://registry.yarnpkg.com/@azure/storage-queue/-/storage-queue-12.30.0.tgz#e960cffaa5c1cfd72ba31ddd3a294bd3ffdca0e4"
   integrity sha512-204lc/W0nnZy0/JXGXAVsQG9LmRWGVrh28uxkWd6lV5/G/vHlFZOLxiTS5DUdLcnZ+OHhsClRJnMWgHX2X0vdA==

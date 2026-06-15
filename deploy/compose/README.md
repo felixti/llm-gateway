@@ -34,7 +34,7 @@ From the repo root, `make help` lists all automation targets (`make chat`, `make
 | Service | Role |
 |---------|------|
 | `dev-idp` | Local OIDC-ish issuer + JWKS (replaces Entra in dev) |
-| `edge` | .NET 9 YARP — validates client JWT, forwards M2M + claims |
+| `edge` | .NET 10 YARP — validates client JWT, forwards M2M + claims |
 | `gateway` | Node 24 — auth, tenant, budget, rate-limit, stub LLM routes |
 | `collector` | Drains usage queue → JSON batches (stub ADX) |
 | `redis` | Live budget + RPM/TPM counters |

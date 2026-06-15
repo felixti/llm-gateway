@@ -5,6 +5,6 @@
   "main": "src/index.ts",
   "exports": { ".": "./src/index.ts", "./*": "./src/*.ts" },
   "dependencies": {
-    "@azure/storage-queue": "^12.26.0"
+    "@azure/storage-queue": "^12.30.0"
   }
 }

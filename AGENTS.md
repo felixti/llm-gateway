@@ -9,7 +9,7 @@
 
 AI Gateway monorepo: an edge-terminated LLM proxy that forwards requests to Azure OpenAI and Azure AI Foundry. The live **LLM-domain plane** (`services/gateway`) handles USD quota, rate limiting, circuit-breaker resilience, streaming, and OpenTelemetry observability. Usage metering flows through `services/collector` into ADX.
 
-**Runtime**: Node.js 24 (`services/gateway`, `services/collector`) + .NET 9 YARP (`services/edge`); see [ADR-0010](docs/adr/0010-nodejs-24-runtime-for-mvp.md)
+**Runtime**: Node.js 24 (`services/gateway`, `services/collector`) + .NET 10 YARP (`services/edge`); see [ADR-0010](docs/adr/0010-nodejs-24-runtime-for-mvp.md)
 
 **Stores**: Azure Managed Redis + Table Storage + Storage Queue → Collector → ADX; no PostgreSQL ([ADR-0011](docs/adr/0011-azure-table-storage-config-policy-store-mvp.md), [ADR-0012](docs/adr/0012-usage-metering-storage-queue-collector-adx-mvp.md), [ADR-0013](docs/adr/0013-single-scope-usd-budget-redis-cluster-mvp.md))
 

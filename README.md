@@ -39,7 +39,7 @@ The sections below describe the **legacy** Bun/Postgres gateway in `legacy/`; th
 ### Prerequisites
 
 - Node.js >= 24 (gateway, collector)
-- .NET 9 SDK (edge)
+- .NET 10 SDK (edge)
 - Docker + Docker Compose (recommended for local E2E)
 
 ### Local stack (Docker — recommended)
@@ -65,7 +65,7 @@ cd services/gateway && yarn install && yarn build
 cd ../collector && yarn install && yarn build
 ```
 
-Edge (.NET 9 YARP): build from `services/edge/` — see that directory's README.
+Edge (.NET 10 YARP): build from `services/edge/` — see that directory's README.
 
 ### Docker Compose (full local stack)
 
