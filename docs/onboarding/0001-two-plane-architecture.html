@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>L01 · The Two-Plane Architecture</title>
+<style>
+  :root{ --ink:#1a1a1a; --muted:#6b6b6b; --rule:#e3e0d8; --bg:#fdfcf9; --accent:#7a1f1f;
+         --code:#f3f1ea; --good:#1e6b3a; --bad:#9a2b2b; --edge:#1f4e79; --llm:#7a1f1f; }
+  *{box-sizing:border-box}
+  body{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+       color:var(--ink);background:var(--bg);max-width:46rem;margin:0 auto;padding:3rem 1.5rem 5rem;
+       line-height:1.55;font-size:18px}
+  h1{font-size:2rem;font-weight:600;letter-spacing:-.01em;margin:0 0 .15rem}
+  .kicker{text-transform:uppercase;letter-spacing:.12em;font-size:.72rem;color:var(--accent);
+          font-weight:700;margin-bottom:.6rem}
+  .sub{color:var(--muted);font-style:italic;margin:0 0 1.6rem;font-size:1rem}
+  h2{font-size:1.25rem;font-weight:600;margin:2.4rem 0 .6rem}
+  h3{font-size:.95rem;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin:1.8rem 0 .5rem}
+  p{margin:.7rem 0}
+  code{background:var(--code);padding:.08em .35em;border-radius:3px;font-size:.8em;
+       font-family:"SF Mono",Menlo,Consolas,monospace}
+  a{color:var(--accent)}
+  .win{background:#f0ede3;border-left:3px solid var(--accent);padding:.8rem 1rem;margin:1.2rem 0;
+       font-size:.95rem}
+  .diagram{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.72rem;line-height:1.35;
+           background:#fbfaf6;border:1px solid var(--rule);border-radius:6px;padding:1rem;overflow-x:auto;
+           white-space:pre;color:#2a2a2a}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.2rem 0}
+  .card{border:1px solid var(--rule);border-radius:6px;padding:.9rem 1rem;font-size:.92rem}
+  .card.edge{border-top:3px solid var(--edge)} .card.llm{border-top:3px solid var(--llm)}
+  .card h4{margin:.1rem 0 .5rem;font-size:1rem}
+  .card.edge h4{color:var(--edge)} .card.llm h4{color:var(--llm)}
+  .card ul{margin:.3rem 0;padding-left:1.1rem} .card li{margin:.2rem 0}
+  blockquote{border-left:3px solid var(--rule);margin:1rem 0;padding:.2rem 1rem;color:#444;font-style:italic}
+
+  /* drills */
+  .drill{border:1px solid var(--rule);border-radius:8px;padding:1.1rem 1.2rem;margin:1.4rem 0;background:#fff}
+  .drill .q{font-weight:600;margin:0 0 .7rem}
+  .opt{display:block;width:100%;text-align:left;border:1px solid var(--rule);background:#fcfbf7;
+       border-radius:5px;padding:.55rem .8rem;margin:.4rem 0;cursor:pointer;font:inherit;font-size:.9rem;
+       transition:.12s}
+  .opt:hover{background:#f3f1ea}
+  .opt.correct{background:#e7f2ea;border-color:var(--good);color:var(--good)}
+  .opt.wrong{background:#f6e9e9;border-color:var(--bad);color:var(--bad)}
+  .fb{font-size:.85rem;margin-top:.6rem;min-height:1.2em}
+  .fb.ok{color:var(--good)} .fb.no{color:var(--bad)}
+  .reveal{cursor:pointer;border:1px dashed var(--rule);border-radius:6px;padding:.7rem .9rem;
+          color:var(--muted);font-size:.9rem;background:#fbfaf6}
+  .reveal[open]{border-style:solid;color:var(--ink)}
+  .reveal summary{cursor:pointer;font-weight:600;color:var(--accent)}
+  .sortbtn{display:inline-block;border:1px solid var(--rule);background:#fcfbf7;border-radius:99px;
+           padding:.25rem .7rem;margin:.2rem;cursor:pointer;font:inherit;font-size:.8rem}
+  .chip{display:inline-block;padding:.5rem .7rem;margin:.25rem;border:1px solid var(--rule);border-radius:6px;
+        background:#fff;font-size:.85rem}
+  .score{font-size:.85rem;color:var(--muted);margin-top:.5rem}
+  footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--rule);color:var(--muted);font-size:.85rem}
+  .ask{background:#eef3f0;border-left:3px solid var(--good);padding:.7rem 1rem;font-size:.9rem;margin:1.4rem 0}
+  @media(max-width:560px){.two{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="kicker">Lesson 01 · Architecture / the WHY</div>
+<h1>The Two-Plane Architecture</h1>
+<p class="sub">Why your gateway is split into a .NET edge and a Node brain — and what that split bought and cost. ~8 min.</p>
+
+<div class="win">
+  <strong>Win for this lesson:</strong> after this you can sketch the two planes on a blank page,
+  say what each one owns, and defend <em>why</em> they're separate against the obvious "just use one
+  service" objection. That defence is the heart of owning this system.
+</div>
+
+<h2>1 · The one decision everything hangs off</h2>
+<p>
+Your system makes <strong>one</strong> structural choice before any other: governance is split across
+<em>two</em> planes, connected by one trusted hop. Almost every other design decision is downstream of it.
+</p>
+
+<div class="diagram">client ──(Entra JWT, aud = edge)──►  ┌───────────────────────────┐
+                                     │  EDGE PLANE   .NET 10 YARP │  identity / transport
+                                     │  • validate user token    │
+                                     │  • OBO · per-principal RPM │
+                                     │  • strip + set X-Principal │
+                                     └────────────┬──────────────┘
+                  per-hop M2M token  +  forwarded │ X-Principal-*
+                  (aud = internal)                ▼
+                                     ┌───────────────────────────┐
+                                     │  LLM-DOMAIN   Node 24 Hono │  LLM-specific
+                                     │  • USD budget · token TPM  │
+                                     │  • guardrails · resilience │
+                                     │  • provider routing/meter  │
+                                     └────────────┬──────────────┘
+                                                  ▼  Azure OpenAI / Foundry</div>
+
+<p>The dividing line is a single question: <strong>is this governance LLM-specific, or generic?</strong></p>
+
+<div class="two">
+  <div class="card edge">
+    <h4>Edge plane — generic</h4>
+    <p style="margin:.2rem 0;font-size:.82rem;color:var(--muted)"><code>services/edge</code> · .NET 10 · YARP</p>
+    <ul>
+      <li>Entra user-token validation (delegated + app-only)</li>
+      <li>OBO minting (for KB)</li>
+      <li>Per-principal RPM (coarse)</li>
+      <li>Governance routing</li>
+      <li>Sets <code>X-Principal-*</code> claims</li>
+    </ul>
+  </div>
+  <div class="card llm">
+    <h4>LLM-domain plane — specific</h4>
+    <p style="margin:.2rem 0;font-size:.82rem;color:var(--muted)"><code>services/gateway</code> · Node 24 · Hono</p>
+    <ul>
+      <li>USD quota / budget</li>
+      <li>Token-aware TPM (needs tiktoken)</li>
+      <li>Guardrails + reversible PII</li>
+      <li>Provider resilience / fallback</li>
+      <li>FinOps cost + WAL</li>
+    </ul>
+  </div>
+</div>
+
+<h2>2 · Why split it (the defence)</h2>
+<p>Three reasons, straight from <a href="../adr/0009-yarp-dotnet-edge-two-plane-architecture.md">ADR-0009</a>:</p>
+<ul>
+  <li><strong>Some governance is irreducibly LLM-domain.</strong> USD quota, token-aware limits,
+  guardrails, and cost need to parse LLM tokens/cost/content. They <em>cannot</em> live in .NET
+  without re-implementing tiktoken, pricing, and a protocol-aware PII walker in C#.</li>
+  <li><strong>Moving auth to YARP deletes risk, not just relocates it.</strong> A hand-rolled
+  Entra verifier was flagged High-risk. <code>Microsoft.Identity.Web</code> gives validation,
+  JWKS, OBO, and token caching as first-party code. The Node side is left with a <em>trivial</em>
+  check: one issuer + one appid + one audience.</li>
+  <li><strong>Org standard.</strong> YARP/.NET is the platform's reverse-proxy + identity stack —
+  reuse ops and app-registration tooling.</li>
+</ul>
+
+<blockquote>
+The rejected alternative <strong>SP-C</strong> — "put <em>all</em> governance in YARP" — was killed
+precisely because it would re-implement tiktoken/pricing/PII in .NET and create two sources of truth.
+The mirror alternative <strong>SP-B</strong> — "keep auth in Node, YARP is transport-only" — was killed
+because it keeps the fragile hand-rolled verifier. The split threads between both.
+</blockquote>
+
+<h2>3 · Recall drill — which plane owns it?</h2>
+<p style="font-size:.92rem;color:var(--muted)">Don't peek above. Click the plane you think owns each responsibility. Immediate feedback.</p>
+
+<div class="drill" id="sortDrill">
+  <div id="sortPrompt" class="q">Loading…</div>
+  <button class="sortbtn" onclick="answerSort('edge')">EDGE (.NET)</button>
+  <button class="sortbtn" onclick="answerSort('llm')">LLM-DOMAIN (Node)</button>
+  <div class="fb" id="sortFb">&nbsp;</div>
+  <div class="score" id="sortScore"></div>
+</div>
+
+<h2>4 · Recall drill — the rejected alternative</h2>
+<div class="drill">
+  <p class="q">Why was <strong>SP-C (all governance in YARP)</strong> rejected?</p>
+  <button class="opt" onclick="mcq(this,false)">It added one extra internal network hop of latency</button>
+  <button class="opt" onclick="mcq(this,true)">It re-implements tiktoken and pricing inside dotnet</button>
+  <button class="opt" onclick="mcq(this,false)">It required mutual TLS between every internal service</button>
+  <div class="fb" id="mcqFb">&nbsp;</div>
+</div>
+
+<h2>5 · Blank-page self-test</h2>
+<p>Cover the screen. On paper, draw the two boxes and the arrow between them. Label: the runtime of
+each, two responsibilities each, and <em>what travels on the arrow</em>. Then check:</p>
+<details class="reveal">
+  <summary>Reveal the model answer</summary>
+  <p style="margin-top:.7rem"><strong>Edge</strong> (.NET 10 / YARP): validate Entra user token · OBO ·
+  per-principal RPM · routing · sets <code>X-Principal-*</code>.<br>
+  <strong>LLM-domain</strong> (Node 24 / Hono): USD budget · token-aware TPM · guardrails/PII ·
+  resilience/fallback · FinOps/WAL.<br>
+  <strong>On the arrow:</strong> a per-hop Entra <em>M2M token</em> (aud = <code>api://llm-gateway-internal</code>,
+  YARP's appid) <em>plus</em> the forwarded <code>X-Principal-*</code> claim headers. The Node side never
+  re-validates the user token (wrong audience) — it trusts the claims because the hop is gated by YARP's M2M token.</p>
+</details>
+
+<h2>6 · Strength &amp; weakness (your mission lens)</h2>
+<div class="two">
+  <div class="card edge">
+    <h4>Strength</h4>
+    <p>Each plane has a small, testable responsibility in the runtime that's best for it. Auth risk is
+    deleted by using first-party Entra code, not relocated. One choke point per concern → one source of truth.</p>
+  </div>
+  <div class="card llm">
+    <h4>Weakness / cost</h4>
+    <p>Two runtimes, two skill-sets, +1 hop. And the split <em>creates</em> a new top risk:
+    <strong>header spoofing</strong> — the Node side trusts <code>X-Principal-*</code> blindly, so the
+    whole security model leans on network isolation + the M2M appid pin (no mTLS). That's L03.</p>
+  </div>
+</div>
+
+<div class="ask">
+  <strong>I'm your teacher — ask me follow-ups.</strong> e.g. "show me where in <code>services/edge</code>
+  the headers get stripped/set", or "what exactly breaks if header hygiene is wrong?", or
+  "walk me through ADR-0009's trust model". Just ask in the chat.
+</div>
+
+<h3>Primary source — read this next</h3>
+<p>📄 <a href="../adr/0009-yarp-dotnet-edge-two-plane-architecture.md"><strong>ADR-0009</strong></a>
+— the canonical statement of this design, including the full "Considered alternatives" section. Then
+its parent principle, <a href="../adr/0008-gateway-is-edge-not-execution-plane.md">ADR-0008</a>
+(edge, never execution). Terms: <a href="glossary.html">glossary</a>.</p>
+
+<footer>
+  <strong>Next — <a href="0002-request-pipeline.html">L02</a>:</strong> the request pipeline hop by hop
+  (auth → scope → guard → rate → budget → meter) inside the Node plane.<br><br>
+  Spaced recall: in a day or two I'll re-ask "what travels on the arrow?" cold — that's the point.
+</footer>
+
+<script>
+/* Drill 3 — which plane (interleaved retrieval). Balanced item set. */
+const items = [
+  {t:"USD budget / quota enforcement", a:"llm"},
+  {t:"Validating the Entra user token", a:"edge"},
+  {t:"Token-aware TPM (needs tiktoken)", a:"llm"},
+  {t:"OBO minting for the KB service", a:"edge"},
+  {t:"Provider circuit-breaker & fallback", a:"llm"},
+  {t:"Per-principal coarse RPM limit", a:"edge"},
+  {t:"Guardrails + reversible PII redaction", a:"llm"},
+  {t:"Setting the X-Principal-* headers", a:"edge"},
+  {t:"FinOps cost calc + WAL durability", a:"llm"},
+];
+let order = items.map((_,i)=>i).sort(()=>Math.random()-0.5), idx=0, hit=0, seen=0;
+function renderSort(){
+  if(idx>=order.length){
+    document.getElementById('sortPrompt').innerHTML = "✓ Deck complete.";
+    document.getElementById('sortFb').textContent="";
+    document.getElementById('sortScore').textContent = `Final: ${hit}/${seen} correct. Reload to reshuffle.`;
+    return;
+  }
+  document.getElementById('sortPrompt').textContent = items[order[idx]].t;
+}
+function answerSort(pick){
+  if(idx>=order.length) return;
+  const correct = items[order[idx]].a;
+  const fb = document.getElementById('sortFb');
+  seen++;
+  if(pick===correct){ hit++; fb.className="fb ok"; fb.textContent = "✓ Right — "+(correct==='edge'?'generic identity/transport.':'LLM-specific governance.'); }
+  else { fb.className="fb no"; fb.textContent = "✗ Actually "+(correct==='edge'?'EDGE — generic identity/transport.':'LLM-DOMAIN — needs token/cost/content parsing.'); }
+  document.getElementById('sortScore').textContent = `${hit}/${seen} · ${order.length-idx-1} left`;
+  idx++;
+  setTimeout(renderSort, 850);
+}
+renderSort();
+
+/* Drill 4 — MCQ */
+function mcq(btn, ok){
+  document.querySelectorAll('#mcqFb').forEach(()=>{});
+  const fb = document.getElementById('mcqFb');
+  btn.classList.add(ok?'correct':'wrong');
+  if(ok){ fb.className="fb ok"; fb.textContent="✓ Correct — two sources of truth + re-implementing tiktoken/pricing/PII in .NET."; }
+  else { fb.className="fb no"; fb.textContent="✗ No — that describes other tradeoffs. SP-C's killer was re-implementing LLM logic in .NET."; }
+}
+</script>
+</body>
+</html>

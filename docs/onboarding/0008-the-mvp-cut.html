@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>L08 · The MVP Cut — Vision Minus Everything Deferred</title>
+<style>
+  :root{ --ink:#1a1a1a; --muted:#6b6b6b; --rule:#e3e0d8; --bg:#fdfcf9; --accent:#7a1f1f;
+         --code:#f3f1ea; --good:#1e6b3a; --bad:#9a2b2b; --edge:#1f4e79; --llm:#7a1f1f; --vision:#5a4a8a; }
+  *{box-sizing:border-box}
+  body{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;color:var(--ink);
+       background:var(--bg);max-width:46rem;margin:0 auto;padding:3rem 1.5rem 5rem;line-height:1.55;font-size:18px}
+  h1{font-size:1.95rem;font-weight:600;letter-spacing:-.01em;margin:0 0 .15rem}
+  .kicker{text-transform:uppercase;letter-spacing:.12em;font-size:.72rem;color:var(--accent);font-weight:700;margin-bottom:.6rem}
+  .sub{color:var(--muted);font-style:italic;margin:0 0 1.6rem;font-size:1rem}
+  h2{font-size:1.25rem;font-weight:600;margin:2.4rem 0 .6rem}
+  h3{font-size:.95rem;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin:1.8rem 0 .5rem}
+  p{margin:.7rem 0}
+  code{background:var(--code);padding:.08em .35em;border-radius:3px;font-size:.78em;font-family:"SF Mono",Menlo,Consolas,monospace}
+  a{color:var(--accent)}
+  .win{background:#f0ede3;border-left:3px solid var(--accent);padding:.8rem 1rem;margin:1.2rem 0;font-size:.95rem}
+  .warm{background:#eef3f0;border-left:3px solid var(--good);padding:.8rem 1rem;margin:1.2rem 0;font-size:.93rem}
+  table{border-collapse:collapse;width:100%;font-size:.82rem;margin:1rem 0}
+  th,td{border:1px solid var(--rule);padding:.4rem .55rem;text-align:left;vertical-align:top} th{background:#f3f1ea}
+  .adr{font-family:"SF Mono",Menlo,monospace;font-size:.72rem;color:var(--vision);white-space:nowrap}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.2rem 0}
+  .card{border:1px solid var(--rule);border-radius:6px;padding:.9rem 1rem;font-size:.92rem}
+  .card.llm{border-top:3px solid var(--llm)} .card.vision{border-top:3px solid var(--vision)}
+  .card h4{margin:.1rem 0 .5rem;font-size:1rem} .card.llm h4{color:var(--llm)} .card.vision h4{color:var(--vision)}
+  .card ul{margin:.3rem 0;padding-left:1.1rem} .card li{margin:.2rem 0}
+  blockquote{border-left:3px solid var(--rule);margin:1rem 0;padding:.2rem 1rem;color:#444;font-style:italic}
+  .drill{border:1px solid var(--rule);border-radius:8px;padding:1.1rem 1.2rem;margin:1.4rem 0;background:#fff}
+  .drill .q{font-weight:600;margin:0 0 .7rem}
+  .sortwrap{text-align:center}
+  .sortcard{font-weight:600;font-size:1rem;padding:.7rem;border:1px solid var(--rule);border-radius:6px;background:#fbfaf6;margin:.5rem 0}
+  .sortbtn{border:1px solid var(--rule);background:#fcfbf7;border-radius:6px;padding:.5rem .9rem;margin:.3rem;cursor:pointer;font:inherit;font-size:.85rem}
+  .sortbtn.llm{border-color:var(--llm);color:var(--llm)} .sortbtn.vision{border-color:var(--vision);color:var(--vision)}
+  .opt{display:block;width:100%;text-align:left;border:1px solid var(--rule);background:#fcfbf7;border-radius:5px;
+       padding:.55rem .8rem;margin:.4rem 0;cursor:pointer;font:inherit;font-size:.9rem;transition:.12s}
+  .opt:hover{background:#f3f1ea} .opt.correct{background:#e7f2ea;border-color:var(--good);color:var(--good)}
+  .opt.wrong{background:#f6e9e9;border-color:var(--bad);color:var(--bad)}
+  .fb{font-size:.85rem;margin-top:.6rem;min-height:1.2em} .fb.ok{color:var(--good)} .fb.no{color:var(--bad)}
+  .score{font-size:.85rem;color:var(--muted);margin-top:.5rem}
+  .reveal{cursor:pointer;border:1px dashed var(--rule);border-radius:6px;padding:.7rem .9rem;color:var(--muted);font-size:.9rem;background:#fbfaf6}
+  .reveal[open]{border-style:solid;color:var(--ink)} .reveal summary{cursor:pointer;font-weight:600;color:var(--accent)}
+  .ask{background:#eef3f0;border-left:3px solid var(--good);padding:.7rem 1rem;font-size:.9rem;margin:1.4rem 0}
+  footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--rule);color:var(--muted);font-size:.85rem}
+  @media(max-width:560px){.two{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="kicker">Lesson 08 · Architecture / the deliberate subtraction</div>
+<h1>The MVP Cut — Vision Minus Everything Deferred</h1>
+<p class="sub">ADR-0010 to 0015 are mostly one move: each reverses or narrows a grand-vision decision so the MVP can ship. Knowing the cut is knowing your system's real boundary. ~12 min.</p>
+
+<div class="warm">
+  <strong>Warm-up (cold recall from L07 — no peeking):</strong> when does <code>needsProtocolBridge</code>
+  return true, and what does the bridge refuse to do?
+  <details class="reveal" style="margin-top:.5rem"><summary>check yourself</summary>
+  <p style="margin:.5rem 0 0">True when <code>routeProtocolToUpstream(route) !== upstream</code> (client protocol
+  ≠ model's upstreamApi). It refuses <strong>streaming across the bridge</strong> → 400
+  <code>streaming_protocol_bridge_unsupported</code>.</p></details>
+</div>
+
+<div class="win">
+  <strong>Win:</strong> you can name, for each of the six MVP ADRs, the full-vision thing it reversed or
+  narrowed — and list what was deferred entirely. This is the map of where your system stops.
+</div>
+
+<h2>1 · Six ADRs, mostly one move: subtract</h2>
+<table>
+  <tr><th>Full vision (CLAUDE.md / plan)</th><th>MVP decision</th><th>ADR</th></tr>
+  <tr><td>Runtime: <strong>Bun</strong> (Bun.serve, Bun test)</td><td>→ <strong>Node 24</strong> + <code>@hono/node-server</code></td><td class="adr">0010</td></tr>
+  <tr><td><strong>PostgreSQL authoritative</strong> (relational model)</td><td>→ Postgres <strong>removed</strong>; Azure Table Storage owns config/policy/checkpoints</td><td class="adr">0011</td></tr>
+  <tr><td>Inline PG <code>request_audit</code> spend + WAL-to-PG</td><td>→ async <strong>Queue → Collector → ADX</strong>; ADX analytics-only</td><td class="adr">0012</td></tr>
+  <tr><td>Multi-budget tree, <strong>most-restrictive / org rollup</strong></td><td>→ <strong>single scope per principal</strong> (<code>{user}</code> or <code>{proj}</code>), no org ceiling; Redis-authoritative + Table checkpoint</td><td class="adr">0013</td></tr>
+  <tr><td>YARP edge in its <strong>own repo/CI</strong></td><td>→ single <strong>polyglot monorepo</strong>, vertical-slice, yarn, no nx</td><td class="adr">0014</td></tr>
+  <tr><td>Evolve the Bun app in place</td><td>→ <strong>freeze legacy</strong>, archive→reference→gated-delete</td><td class="adr">0015</td></tr>
+</table>
+<blockquote>
+The throughline: <strong>single internal org, single budget scope, Azure-native stores, edge-governance only,
+defer everything stateful or advanced.</strong> Each ADR explicitly says which CLAUDE.md / plan claim it
+reverses — that header line is why L06's "docs describe legacy" gap exists.
+</blockquote>
+
+<h2>2 · Deferred entirely (exists in vision, not in MVP)</h2>
+<table>
+  <tr><th>Deferred capability</th><th>Where it was promised</th></tr>
+  <tr><td>Semantic cache / pgvector</td><td class="adr">ADR-0004</td></tr>
+  <tr><td>Reversible PII redaction vault</td><td class="adr">ADR-0006</td></tr>
+  <tr><td>KB gateway + Entra OBO path</td><td class="adr">ADR-0007 / 0009</td></tr>
+  <tr><td>MCP gateway / tool gateway (no server-side exec)</td><td class="adr">ADR-0008</td></tr>
+  <tr><td><code>/v1/embeddings</code> route</td><td class="adr">ADR-0009 MVP note</td></tr>
+  <tr><td>Circuit breaker · retry · real SSE streaming</td><td>L06 (legacy port targets)</td></tr>
+  <tr><td>Real ADX ingest (collector writes local files)</td><td>L05 (stub, ADR-0012)</td></tr>
+  <tr><td>Billing on actuals (charges 1.2× estimate)</td><td>L04</td></tr>
+</table>
+<p style="font-size:.9rem;color:var(--muted)">Note one drift: ADR-0009's MVP note said only <code>/v1/chat</code> + <code>/v1/messages</code> ship, but the live <code>app.ts</code> also wires <code>/v1/responses</code>. Code &gt; doc — <code>/v1/responses</code> is live; <code>/v1/embeddings</code> is not.</p>
+
+<h2>3 · What's actually live, end to end</h2>
+<div class="diagram" style="font-family:'SF Mono',Menlo,monospace;font-size:.7rem;background:#fbfaf6;border:1px solid var(--rule);border-radius:6px;padding:1rem;white-space:pre;overflow-x:auto">Entra M2M ─► Edge(.NET YARP) ─► Gateway(Node): auth·tenant·guard·scope·rate·budget·bridge·meter
+                                         │                    │
+                              Table Storage (policy)    Redis Cluster (budget/rate)
+                                                              │
+                                                  Queue ─► Collector ─► (local files; ADX stubbed)
+routes live: /v1/chat/completions · /v1/messages · /v1/responses</div>
+
+<h2>4 · Drill — full vision, or shipped in MVP?</h2>
+<div class="drill sortwrap">
+  <div class="sortcard" id="sortPrompt">Loading…</div>
+  <button class="sortbtn llm" onclick="answerSort('mvp')">LIVE in MVP</button>
+  <button class="sortbtn vision" onclick="answerSort('vision')">VISION / deferred</button>
+  <div class="fb" id="sortFb">&nbsp;</div>
+  <div class="score" id="sortScore"></div>
+</div>
+
+<h2>5 · Drill — the cut decisions</h2>
+<div class="drill">
+  <p class="q">In the MVP, what is authoritative for live spend?</p>
+  <button class="opt" onclick="q1(this,false)">PostgreSQL request_audit table is the source</button>
+  <button class="opt" onclick="q1(this,true)">Redis cluster, with a Table Storage checkpoint</button>
+  <button class="opt" onclick="q1(this,false)">ADX, queried back on every budget check</button>
+  <div class="fb" id="q1fb">&nbsp;</div>
+</div>
+<div class="drill">
+  <p class="q">How many budget scopes does the MVP enforce per request?</p>
+  <button class="opt" onclick="q2(this,true)">One — the user's, or the SP's project budget</button>
+  <button class="opt" onclick="q2(this,false)">Two — user and org, most-restrictive wins</button>
+  <button class="opt" onclick="q2(this,false)">Three — user, project, and org rollup chain</button>
+  <div class="fb" id="q2fb">&nbsp;</div>
+</div>
+<div class="drill">
+  <p class="q">What is ADX's role in the MVP?</p>
+  <button class="opt" onclick="q3(this,true)">Analytics only — not spend authority or recovery</button>
+  <button class="opt" onclick="q3(this,false)">The authoritative live budget enforcement store</button>
+  <button class="opt" onclick="q3(this,false)">The recovery checkpoint the gateway rebuilds from</button>
+  <div class="fb" id="q3fb">&nbsp;</div>
+</div>
+
+<h2>6 · Strength &amp; weakness (mission lens)</h2>
+<div class="two">
+  <div class="card llm"><h4>Strength</h4>
+    <p>The cut is <strong>disciplined and documented</strong> — every subtraction is an ADR with a stated
+    reversal and a "revisit later" hook, not silent scope-creep-in-reverse. Removing Postgres, the org
+    rollup, and the stateful features makes the MVP genuinely shippable and small. The architecture stays
+    <em>additive</em>: deferred pieces slot back in without a rewrite.</p></div>
+  <div class="card vision"><h4>Weakness / risk</h4>
+    <p>The gap between <strong>documented system and shipped system is wide</strong> (L06) — and the ADR
+    headers are the only place the reversals are recorded; the prose docs (CLAUDE.md) still describe the
+    pre-cut world. Anyone onboarding from CLAUDE.md inherits a false model. The single-scope budget also
+    means <strong>no org-level ceiling</strong> — total spend is visible in ADX but not <em>enforced</em>.</p></div>
+</div>
+
+<h2>7 · Blank-page self-test</h2>
+<details class="reveal"><summary>For ADR 0010–0015, name the reversal in one phrase each. Then list 4 fully-deferred features. Reveal.</summary>
+<p style="margin-top:.6rem"><strong>0010</strong> Bun→Node 24. <strong>0011</strong> Postgres→Table Storage.
+<strong>0012</strong> inline PG audit→async Queue/Collector/ADX. <strong>0013</strong> multi-budget rollup→single
+scope, Redis-authoritative. <strong>0014</strong> multi-repo→one polyglot monorepo (vertical slice).
+<strong>0015</strong> evolve-in-place→freeze legacy, gated delete.
+<strong>Deferred:</strong> semantic cache (0004), PII vault (0006), KB/OBO (0007), MCP/tool gateway (0008),
+embeddings, breaker/retry/streaming, real ADX ingest, billing-on-actuals.</p></details>
+
+<div class="ask">
+  <strong>Ask me:</strong> "what's the smallest thing to un-defer next for real value?",
+  or "do a docs-truth pass marking CLAUDE.md sections live/legacy/aspirational?", or
+  "what breaks first if a second org shows up?"
+</div>
+
+<h3>Primary source — read next</h3>
+<p>📄 ADR headers <code>docs/adr/0010</code>–<code>0015</code> (each "Status" line names its reversal) +
+<code>docs/ai-gateway-mvp-plan.md</code>. Terms: <a href="glossary.html">glossary</a>.
+Prev: <a href="0007-protocol-bridge.html">L07</a>.</p>
+
+<footer>
+  <strong>Next — <a href="0009-strengths-and-weaknesses.html">L09</a>:</strong> the capstone — synthesise the
+  whole course into 3 defensible strengths and 3 real weaknesses, interleaved recall across L01–L08.<br><br>
+  Spaced recall queued: next session, cold — "name the ADR-0013 budget narrowing and what's no longer enforced."
+</footer>
+
+<script>
+const items=[
+  {t:"Node 24 + @hono/node-server runtime", a:"mvp"},
+  {t:"Semantic cache over pgvector", a:"vision"},
+  {t:"Single USD budget scope per principal", a:"mvp"},
+  {t:"Reversible PII redaction vault", a:"vision"},
+  {t:"Azure Table Storage policy store", a:"mvp"},
+  {t:"KB gateway with Entra OBO", a:"vision"},
+  {t:"Queue → Collector → ADX metering", a:"mvp"},
+  {t:"MCP / tool gateway (def injection)", a:"vision"},
+  {t:"Chat ⇄ Responses protocol bridge", a:"mvp"},
+  {t:"Org-level most-restrictive budget rollup", a:"vision"},
+  {t:"Entra M2M + forwarded-claims auth", a:"mvp"},
+  {t:"/v1/embeddings route", a:"vision"},
+];
+let order=items.map((_,i)=>i).sort(()=>Math.random()-0.5),idx=0,hit=0,seen=0;
+function renderSort(){
+  if(idx>=order.length){document.getElementById('sortPrompt').textContent="✓ Deck complete.";
+    document.getElementById('sortFb').textContent="";
+    document.getElementById('sortScore').textContent=`Final: ${hit}/${seen}. Reload to reshuffle.`;return;}
+  document.getElementById('sortPrompt').textContent=items[order[idx]].t;}
+function answerSort(pick){
+  if(idx>=order.length)return;const correct=items[order[idx]].a;const fb=document.getElementById('sortFb');seen++;
+  if(pick===correct){hit++;fb.className='fb ok';fb.textContent='✓ '+(correct==='mvp'?'shipped in the MVP.':'vision/deferred — not in MVP.');}
+  else{fb.className='fb no';fb.textContent='✗ Actually '+(correct==='mvp'?'LIVE in the MVP.':'VISION / deferred.');}
+  document.getElementById('sortScore').textContent=`${hit}/${seen} · ${order.length-idx-1} left`;idx++;setTimeout(renderSort,800);}
+renderSort();
+function fb(id,ok,t){const f=document.getElementById(id);f.className='fb '+(ok?'ok':'no');f.textContent=t;}
+function q1(b,ok){b.classList.add(ok?'correct':'wrong');fb('q1fb',ok,ok?'✓ Redis cluster is authoritative for live spend; Table Storage holds the checkpoint backstop. No Postgres.':'✗ No — MVP is Redis-authoritative + Table checkpoint. Postgres is gone; ADX is analytics-only.');}
+function q2(b,ok){b.classList.add(ok?'correct':'wrong');fb('q2fb',ok,ok?'✓ Exactly one: user → {user:oid}, SP → {proj:id}. No org rollup / most-restrictive chain in MVP.':'✗ No — the MVP narrowed it to a single enforced scope per principal (ADR-0013).');}
+function q3(b,ok){b.classList.add(ok?'correct':'wrong');fb('q3fb',ok,ok?'✓ ADX is analytics only — not the live spend authority (Redis) nor the recovery source (Table checkpoint).':'✗ No — ADX is analytics-only; Redis enforces, Table Storage checkpoints.');}
+</script>
+</body>
+</html>

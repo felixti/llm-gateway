@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>L04 · The Budget Engine — Atomic Money in Redis</title>
+<style>
+  :root{ --ink:#1a1a1a; --muted:#6b6b6b; --rule:#e3e0d8; --bg:#fdfcf9; --accent:#7a1f1f;
+         --code:#f3f1ea; --good:#1e6b3a; --bad:#9a2b2b; --edge:#1f4e79; --llm:#7a1f1f; }
+  *{box-sizing:border-box}
+  body{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;color:var(--ink);
+       background:var(--bg);max-width:46rem;margin:0 auto;padding:3rem 1.5rem 5rem;line-height:1.55;font-size:18px}
+  h1{font-size:2rem;font-weight:600;letter-spacing:-.01em;margin:0 0 .15rem}
+  .kicker{text-transform:uppercase;letter-spacing:.12em;font-size:.72rem;color:var(--accent);font-weight:700;margin-bottom:.6rem}
+  .sub{color:var(--muted);font-style:italic;margin:0 0 1.6rem;font-size:1rem}
+  h2{font-size:1.25rem;font-weight:600;margin:2.4rem 0 .6rem}
+  h3{font-size:.95rem;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin:1.8rem 0 .5rem}
+  p{margin:.7rem 0}
+  code{background:var(--code);padding:.08em .35em;border-radius:3px;font-size:.8em;font-family:"SF Mono",Menlo,Consolas,monospace}
+  a{color:var(--accent)}
+  .win{background:#f0ede3;border-left:3px solid var(--accent);padding:.8rem 1rem;margin:1.2rem 0;font-size:.95rem}
+  .warm{background:#eef3f0;border-left:3px solid var(--good);padding:.8rem 1rem;margin:1.2rem 0;font-size:.93rem}
+  .diagram{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.71rem;line-height:1.4;background:#fbfaf6;
+           border:1px solid var(--rule);border-radius:6px;padding:1rem;overflow-x:auto;white-space:pre;color:#2a2a2a}
+  table{border-collapse:collapse;width:100%;font-size:.83rem;margin:1rem 0}
+  th,td{border:1px solid var(--rule);padding:.4rem .55rem;text-align:left;vertical-align:top}
+  th{background:#f3f1ea}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.2rem 0}
+  .card{border:1px solid var(--rule);border-radius:6px;padding:.9rem 1rem;font-size:.92rem}
+  .card.edge{border-top:3px solid var(--edge)} .card.llm{border-top:3px solid var(--llm)}
+  .card h4{margin:.1rem 0 .5rem;font-size:1rem} .card.edge h4{color:var(--edge)} .card.llm h4{color:var(--llm)}
+  blockquote{border-left:3px solid var(--rule);margin:1rem 0;padding:.2rem 1rem;color:#444;font-style:italic}
+  .gotcha{background:#fbf3f3;border-left:3px solid var(--bad);padding:.7rem 1rem;font-size:.92rem;margin:1.1rem 0}
+  .drill{border:1px solid var(--rule);border-radius:8px;padding:1.1rem 1.2rem;margin:1.4rem 0;background:#fff}
+  .drill .q{font-weight:600;margin:0 0 .7rem}
+  .opt{display:block;width:100%;text-align:left;border:1px solid var(--rule);background:#fcfbf7;border-radius:5px;
+       padding:.55rem .8rem;margin:.4rem 0;cursor:pointer;font:inherit;font-size:.9rem;transition:.12s}
+  .opt:hover{background:#f3f1ea} .opt.correct{background:#e7f2ea;border-color:var(--good);color:var(--good)}
+  .opt.wrong{background:#f6e9e9;border-color:var(--bad);color:var(--bad)}
+  .fb{font-size:.85rem;margin-top:.6rem;min-height:1.2em} .fb.ok{color:var(--good)} .fb.no{color:var(--bad)}
+  .chip{display:inline-block;padding:.45rem .7rem;margin:.25rem;border:1px solid var(--rule);border-radius:6px;
+        background:#fff;font-size:.82rem;cursor:pointer;font:inherit} .chip:hover{background:#f3f1ea}
+  .chip.done{background:#e7f2ea;border-color:var(--good);color:var(--good);cursor:default}
+  .chip.bad{background:#f6e9e9;border-color:var(--bad);color:var(--bad)}
+  .slot{min-height:2rem;border:1px dashed var(--rule);border-radius:6px;padding:.4rem;margin:.6rem 0;font-size:.82rem;color:var(--muted)}
+  .score{font-size:.85rem;color:var(--muted);margin-top:.5rem}
+  .reveal{cursor:pointer;border:1px dashed var(--rule);border-radius:6px;padding:.7rem .9rem;color:var(--muted);font-size:.9rem;background:#fbfaf6}
+  .reveal[open]{border-style:solid;color:var(--ink)} .reveal summary{cursor:pointer;font-weight:600;color:var(--accent)}
+  .ask{background:#eef3f0;border-left:3px solid var(--good);padding:.7rem 1rem;font-size:.9rem;margin:1.4rem 0}
+  footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--rule);color:var(--muted);font-size:.85rem}
+  @media(max-width:560px){.two{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="kicker">Lesson 04 · Implementation / the money path</div>
+<h1>The Budget Engine — Atomic Money in Redis</h1>
+<p class="sub">How a dollar cap turns into three Lua scripts, integer microdollars, and a reserve→commit→release lifecycle that survives a cluster. ~12 min.</p>
+
+<div class="warm">
+  <strong>Warm-up (cold recall from L03 — no peeking):</strong> name the four defense layers of the trust
+  model, and which one isn't built yet.
+  <details class="reveal" style="margin-top:.5rem"><summary>check yourself</summary>
+  <p style="margin:.5rem 0 0">① NetworkPolicy (edge-only ingress) · ② M2M token pin · ③ header hygiene ·
+  ④ JWS-signed claims — <strong>④ is not implemented</strong> (the accepted residual).</p></details>
+</div>
+
+<div class="win">
+  <strong>Win:</strong> you can trace one dollar from a Table-Storage cap to a committed charge — naming
+  the three Lua scripts, why money is a <code>bigint</code>, and the one brace character that makes the
+  whole thing work on a Redis <em>cluster</em> — and you can name the MVP shortcut that means you're not
+  billing what you think you're billing.
+</div>
+
+<h2>1 · Money is an integer (microdollars)</h2>
+<p>
+No floats. <code>shared/budget/money.ts</code> stores USD as <strong>microdollars</strong> — USD × 1,000,000
+as a <code>bigint</code>. <code>$0.000001</code> precision, exact integer arithmetic, no rounding drift.
+The 1.2× reserve multiplier is done in integer space too (<code>multiplyMicro</code> scales by 1000 and
+rounds up). Redis only ever stores and <code>INCRBY</code>s these integers.
+</p>
+<div class="diagram">"0.001500" ──toMicrodollars──► 1500n      (bigint microdollars)
+   reserve = multiplyMicro(1500n, 1.2) = 1800n   ← the 1.2× hold, integer, rounded up
+   fromMicrodollars(1800n) ──► "0.001800"</div>
+
+<h2>2 · The keys per scope</h2>
+<p>A <strong>scope</strong> is the budget owner: <code>{user:&lt;id&gt;}</code> or <code>{proj:&lt;id&gt;}</code>.
+Those braces are not decoration — read §4.</p>
+<table>
+  <tr><th>Key</th><th>Type</th><th>Holds</th></tr>
+  <tr><td><code>{scope}:policy</code></td><td>hash</td><td><code>cap_micro</code>, <code>hard</code>, <code>period</code> — synced from Table Storage</td></tr>
+  <tr><td><code>{scope}:spent</code></td><td>int</td><td>committed actuals (the real charge)</td></tr>
+  <tr><td><code>{scope}:reserved</code></td><td>int</td><td>outstanding pre-flight holds</td></tr>
+  <tr><td><code>{scope}:resv:&lt;id&gt;</code></td><td>int + TTL</td><td>one reservation's amount; auto-expires (orphan cleanup)</td></tr>
+  <tr><td><code>{scope}:commit:&lt;reqId&gt;</code></td><td>int + TTL</td><td>idempotency marker — a request commits once</td></tr>
+</table>
+
+<h2>3 · Three atomic scripts = the lifecycle</h2>
+<p>Each script is one Redis round-trip, executed atomically (no interleaving between calls):</p>
+<table>
+  <tr><th>Script</th><th>When</th><th>What it does</th></tr>
+  <tr><td><b>RESERVE</b></td><td>hop 6, before upstream</td>
+    <td>cap≤0 → <code>insufficient</code>. If <code>spent+reserved+cost &gt; cap</code> <em>and hard</em> → <code>insufficient</code>. Else <code>INCRBY reserved</code> + <code>SET resv EX ttl</code>.</td></tr>
+  <tr><td><b>COMMIT</b></td><td>handler, after upstream OK</td>
+    <td>idempotent (commitKey exists → <code>already</code>). Else <code>INCRBY spent</code>, <code>DECRBY reserved</code>, <code>DEL resv</code>, set commitKey.</td></tr>
+  <tr><td><b>RELEASE</b></td><td>abort / no-charge path</td>
+    <td><code>DECRBY reserved</code> + <code>DEL resv</code>. Idempotent (missing resv → ok).</td></tr>
+</table>
+<div class="diagram">RESERVE (1.2× hold) ──► upstream call ──► COMMIT (move hold: reserved→spent)
+        │                                    ▲
+        └── on failure/abort ── RELEASE ─────┘   (or just let resv TTL expire)</div>
+
+<h2>4 · The one brace that makes it cluster-safe</h2>
+<p>
+Every script touches 3–4 keys at once. On a <strong>Redis Cluster</strong> (ADR-0013, Azure Managed Redis),
+a multi-key command only works if all keys live in the same hash slot. The scope tag
+<code>{user:abc}</code> wraps the id in <code>{ }</code> — Redis's <strong>hash-tag</strong> syntax — so
+<code>{user:abc}:spent</code>, <code>:reserved</code>, <code>:policy</code>, <code>:resv:…</code> all hash
+to <em>one slot</em>. That's why the atomic Lua works in production, not just on a single node.
+</p>
+
+<div class="gotcha">
+  <strong>Gotcha you should know cold:</strong> in the MVP, COMMIT charges <code>spent</code> the
+  <em>reserved</em> amount (the 1.2× <em>estimate</em>), <strong>not</strong> the actual token cost. In
+  <code>finalizeRequest</code>, <code>actualMicro = reservedMicro</code> and the usage event's
+  <code>cost_usd = fromMicrodollars(reservedMicro)</code>. Real token counts are extracted for the
+  <em>event</em>, but the <em>charge</em> is the padded estimate. Billing-on-actuals is deferred.
+</div>
+
+<h2>5 · Drill — order the lifecycle</h2>
+<p style="font-size:.92rem;color:var(--muted)">Click the steps in order for a successful request.</p>
+<div class="drill">
+  <div class="slot" id="builtOrder">— start clicking —</div>
+  <div id="chipPool"></div>
+  <div class="fb" id="orderFb">&nbsp;</div>
+  <div class="score" id="orderScore"></div>
+</div>
+
+<h2>6 · Drill — the sharp edges</h2>
+<div class="drill">
+  <p class="q">What do the braces in <code>{proj:42}:spent</code> actually do?</p>
+  <button class="opt" onclick="q1(this,false)">Mark the key as a hash type rather than string</button>
+  <button class="opt" onclick="q1(this,true)">Pin every scope key to one Redis hash slot</button>
+  <button class="opt" onclick="q1(this,false)">Namespace the key so other tenants cant read</button>
+  <div class="fb" id="q1fb">&nbsp;</div>
+</div>
+<div class="drill">
+  <p class="q">In the MVP, what amount is added to <code>spent</code> on commit?</p>
+  <button class="opt" onclick="q2(this,false)">The exact actual token cost from the response</button>
+  <button class="opt" onclick="q2(this,true)">The reserved hold — the padded 1.2x estimate</button>
+  <button class="opt" onclick="q2(this,false)">Whichever value is lower of hold and actual</button>
+  <div class="fb" id="q2fb">&nbsp;</div>
+</div>
+<div class="drill">
+  <p class="q">A principal's policy has <code>hard = false</code> and is already over cap. RESERVE will…</p>
+  <button class="opt" onclick="q3(this,true)">Allow it — soft caps warn but never block here</button>
+  <button class="opt" onclick="q3(this,false)">Reject it — over cap is over cap regardless</button>
+  <button class="opt" onclick="q3(this,false)">Queue it until the monthly period rolls over</button>
+  <div class="fb" id="q3fb">&nbsp;</div>
+</div>
+
+<h2>7 · Strength &amp; weakness (mission lens)</h2>
+<div class="two">
+  <div class="card llm"><h4>Strength</h4>
+    <p>Concurrency-correct by construction: each decision is one atomic Lua round-trip, so two requests
+    can't both "fit" into the last dollar. Integer microdollars = no float drift. Commit is idempotent
+    (safe to retry). Hash-tag makes it cluster-native. Orphaned holds self-heal via the resv TTL.</p></div>
+  <div class="card edge"><h4>Weakness / debt</h4>
+    <p><strong>Charges the estimate, not actuals</strong> (1.2× over-bills every request until billing-on-
+    actuals ships). The handler <strong>doesn't call RELEASE on upstream error</strong> — it leans on the
+    resv TTL to free the hold (transient over-reservation). And COMMIT's <code>not_found</code> branch
+    (reservation expired before commit) surfaces in the store as a thrown error → logged as
+    <code>redis_commit_result: failed</code>.</p></div>
+</div>
+
+<h2>8 · Blank-page self-test</h2>
+<details class="reveal"><summary>Trace $0.0015 of estimated cost through reserve→commit. Name keys touched. Reveal.</summary>
+<p style="margin-top:.6rem"><code>1500n</code> est → <code>multiplyMicro(…,1.2)=1800n</code>.
+<strong>RESERVE</strong>: read <code>:policy</code> cap; check <code>:spent + :reserved + 1800 ≤ cap</code>;
+<code>INCRBY :reserved 1800</code>; <code>SET :resv:&lt;id&gt; 1800 EX ttl</code>.
+Upstream returns. <strong>COMMIT</strong>: commitKey absent → <code>INCRBY :spent 1800</code> (the hold, not actuals),
+<code>DECRBY :reserved 1800</code>, <code>DEL :resv:&lt;id&gt;</code>, <code>SET :commit:&lt;reqId&gt;</code>.
+All keys share slot via the <code>{ }</code> tag.</p></details>
+
+<div class="ask">
+  <strong>Ask me:</strong> "what would billing-on-actuals require changing in finalizeRequest?",
+  or "walk me through the COMMIT idempotency race", or "where does Table Storage actually get read,
+  given policy-sync writes Redis every request?"
+</div>
+
+<h3>Primary source — read next</h3>
+<p>📄 <code>services/gateway/src/kernel/budget-store/scripts.ts</code> (the three Lua scripts, ~50 lines —
+read them line by line) + <code>shared/budget/money.ts</code> + <code>features/llm/handler.ts</code>
+(<code>finalizeRequest</code>). ADR: <a href="../adr/0013-single-scope-usd-budget-redis-cluster-mvp.md">ADR-0013</a>.
+Terms: <a href="glossary.html">glossary</a>. Prev: <a href="0003-trust-model.html">L03</a>.</p>
+
+<footer>
+  <strong>Next — <a href="0005-metering-path.html">L05</a>:</strong> the metering path — proxy → usage
+  event → Storage Queue → Collector → ADX, and the WAL disk DLQ that catches a dual failure.<br><br>
+  Spaced recall queued: next session, cold — "name the three budget scripts and what COMMIT moves where."
+</footer>
+
+<script>
+const STEPS=["RESERVE (1.2× hold)","invoke upstream","extract token usage","COMMIT (reserved→spent)","emit usage event"];
+let pool=STEPS.map((h,i)=>({h,i})).sort(()=>Math.random()-0.5);
+let expect=0,mistakes=0;
+const poolEl=document.getElementById('chipPool'),builtEl=document.getElementById('builtOrder');
+function drawPool(){poolEl.innerHTML='';pool.forEach(p=>{if(p.i<expect)return;
+  const b=document.createElement('button');b.className='chip';b.textContent=p.h;b.onclick=()=>pick(p,b);poolEl.appendChild(b);});}
+function pick(p,b){const fb=document.getElementById('orderFb');
+  if(p.i===expect){expect++;b.className='chip done';b.onclick=null;
+    builtEl.textContent=STEPS.slice(0,expect).map((h,n)=>`${n+1}. ${h}`).join('   →   ');fb.className='fb ok';fb.textContent='✓';
+    if(expect===STEPS.length)fb.textContent=`✓ Complete. ${mistakes} mistake(s).`;setTimeout(drawPool,150);}
+  else{mistakes++;b.classList.add('bad');fb.className='fb no';fb.textContent=`✗ Not next — step ${expect+1} is "${STEPS[expect]}".`;
+    setTimeout(()=>b.classList.remove('bad'),500);}
+  document.getElementById('orderScore').textContent=`placed ${expect}/${STEPS.length} · ${mistakes} miss`;}
+drawPool();
+function fb(id,ok,t){const f=document.getElementById(id);f.className='fb '+(ok?'ok':'no');f.textContent=t;}
+function q1(b,ok){b.classList.add(ok?'correct':'wrong');fb('q1fb',ok,ok?'✓ Hash-tag: { } pins all scope keys to one cluster slot, so the multi-key Lua is atomic on a Redis Cluster.':'✗ No — { } is Redis hash-tag syntax: it forces all scope keys into the same hash slot for atomic multi-key ops.');}
+function q2(b,ok){b.classList.add(ok?'correct':'wrong');fb('q2fb',ok,ok?'✓ MVP charges the reserved 1.2× estimate (actualMicro = reservedMicro). Billing-on-actuals is deferred.':'✗ No — finalizeRequest commits reservedMicro (the padded estimate), not the real token cost. That is the MVP gotcha.');}
+function q3(b,ok){b.classList.add(ok?'correct':'wrong');fb('q3fb',ok,ok?'✓ Soft cap: RESERVE only blocks when isHard is true. hard=false → over-cap reservations pass (warn, don\'t block).':'✗ No — the cap check only rejects when hard is true; a soft cap lets it through.');}
+</script>
+</body>
+</html>

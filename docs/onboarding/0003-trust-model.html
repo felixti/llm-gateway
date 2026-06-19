@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>L03 · The Trust Model — No mTLS, No Problem?</title>
+<style>
+  :root{ --ink:#1a1a1a; --muted:#6b6b6b; --rule:#e3e0d8; --bg:#fdfcf9; --accent:#7a1f1f;
+         --code:#f3f1ea; --good:#1e6b3a; --bad:#9a2b2b; --edge:#1f4e79; --llm:#7a1f1f; }
+  *{box-sizing:border-box}
+  body{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;color:var(--ink);
+       background:var(--bg);max-width:46rem;margin:0 auto;padding:3rem 1.5rem 5rem;line-height:1.55;font-size:18px}
+  h1{font-size:2rem;font-weight:600;letter-spacing:-.01em;margin:0 0 .15rem}
+  .kicker{text-transform:uppercase;letter-spacing:.12em;font-size:.72rem;color:var(--accent);font-weight:700;margin-bottom:.6rem}
+  .sub{color:var(--muted);font-style:italic;margin:0 0 1.6rem;font-size:1rem}
+  h2{font-size:1.25rem;font-weight:600;margin:2.4rem 0 .6rem}
+  h3{font-size:.95rem;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin:1.8rem 0 .5rem}
+  p{margin:.7rem 0}
+  code{background:var(--code);padding:.08em .35em;border-radius:3px;font-size:.8em;font-family:"SF Mono",Menlo,Consolas,monospace}
+  a{color:var(--accent)}
+  .win{background:#f0ede3;border-left:3px solid var(--accent);padding:.8rem 1rem;margin:1.2rem 0;font-size:.95rem}
+  .warm{background:#eef3f0;border-left:3px solid var(--good);padding:.8rem 1rem;margin:1.2rem 0;font-size:.93rem}
+  .diagram{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.71rem;line-height:1.4;background:#fbfaf6;
+           border:1px solid var(--rule);border-radius:6px;padding:1rem;overflow-x:auto;white-space:pre;color:#2a2a2a}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.2rem 0}
+  .card{border:1px solid var(--rule);border-radius:6px;padding:.9rem 1rem;font-size:.92rem}
+  .card.edge{border-top:3px solid var(--edge)} .card.llm{border-top:3px solid var(--llm)}
+  .card h4{margin:.1rem 0 .5rem;font-size:1rem} .card.edge h4{color:var(--edge)} .card.llm h4{color:var(--llm)}
+  .card ol{margin:.3rem 0;padding-left:1.2rem} .card li{margin:.25rem 0}
+  blockquote{border-left:3px solid var(--rule);margin:1rem 0;padding:.2rem 1rem;color:#444;font-style:italic}
+  .layer{border:1px solid var(--rule);border-radius:6px;padding:.6rem .9rem;margin:.5rem 0;font-size:.9rem}
+  .layer b{color:var(--good)} .layer.gap{border-style:dashed;border-color:var(--bad);background:#fbf3f3}
+  .layer.gap b{color:var(--bad)}
+  .drill{border:1px solid var(--rule);border-radius:8px;padding:1.1rem 1.2rem;margin:1.4rem 0;background:#fff}
+  .drill .q{font-weight:600;margin:0 0 .7rem}
+  .opt{display:block;width:100%;text-align:left;border:1px solid var(--rule);background:#fcfbf7;border-radius:5px;
+       padding:.55rem .8rem;margin:.4rem 0;cursor:pointer;font:inherit;font-size:.9rem;transition:.12s}
+  .opt:hover{background:#f3f1ea} .opt.correct{background:#e7f2ea;border-color:var(--good);color:var(--good)}
+  .opt.wrong{background:#f6e9e9;border-color:var(--bad);color:var(--bad)}
+  .fb{font-size:.85rem;margin-top:.6rem;min-height:1.2em} .fb.ok{color:var(--good)} .fb.no{color:var(--bad)}
+  .chip{display:inline-block;padding:.45rem .7rem;margin:.25rem;border:1px solid var(--rule);border-radius:6px;
+        background:#fff;font-size:.82rem;cursor:pointer;font:inherit} .chip:hover{background:#f3f1ea}
+  .chip.done{background:#e7f2ea;border-color:var(--good);color:var(--good);cursor:default}
+  .chip.bad{background:#f6e9e9;border-color:var(--bad);color:var(--bad)}
+  .slot{min-height:2rem;border:1px dashed var(--rule);border-radius:6px;padding:.4rem;margin:.6rem 0;font-size:.82rem;color:var(--muted)}
+  .score{font-size:.85rem;color:var(--muted);margin-top:.5rem}
+  .reveal{cursor:pointer;border:1px dashed var(--rule);border-radius:6px;padding:.7rem .9rem;color:var(--muted);font-size:.9rem;background:#fbfaf6}
+  .reveal[open]{border-style:solid;color:var(--ink)} .reveal summary{cursor:pointer;font-weight:600;color:var(--accent)}
+  .ask{background:#eef3f0;border-left:3px solid var(--good);padding:.7rem 1rem;font-size:.9rem;margin:1.4rem 0}
+  footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--rule);color:var(--muted);font-size:.85rem}
+  @media(max-width:560px){.two{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="kicker">Lesson 03 · Architecture / security spine</div>
+<h1>The Trust Model — No mTLS, No Problem?</h1>
+<p class="sub">The Node plane <em>blindly trusts</em> identity headers. That sounds insane. This lesson is why it's actually safe — and exactly where it isn't. ~11 min.</p>
+
+<div class="warm">
+  <strong>Warm-up (cold recall from L02 — no peeking):</strong> name hops 5 and 6 of the pipeline and
+  what each one <em>consumes</em>.
+  <details class="reveal" style="margin-top:.5rem"><summary>check yourself</summary>
+  <p style="margin:.5rem 0 0">Hop 5 <strong>rateLimit</strong> consumes RPM + token-aware TPM (estimated
+  tokens). Hop 6 <strong>budget</strong> consumes USD — reserves estimated cost ×1.2 as a TTL'd hold.</p></details>
+</div>
+
+<div class="win">
+  <strong>Win:</strong> you can explain to a skeptical security reviewer why "the gateway trusts
+  <code>X-Principal-Id</code> without checking it" is <em>not</em> a vulnerability — by naming the
+  defense layers that make a forged header useless — <em>and</em> name the one layer that's only
+  on paper, so you're honest about the residual risk.
+</div>
+
+<h2>1 · The uncomfortable fact</h2>
+<p>
+The Node plane <strong>never validates the end user's Entra token</strong>. It can't — that token's
+audience is <code>api://ai-gateway-edge</code> (the edge), not the gateway. Instead the gateway reads
+<strong>who the caller is straight out of plain HTTP headers</strong> (<code>X-Principal-Id</code> etc.)
+and believes them. The operator also refused mTLS between internal services.
+</p>
+<p>So: forge an <code>X-Principal-Id</code> header → become anyone? <strong>That</strong> is the threat
+this whole model exists to close. The answer is <em>defense in depth</em>, not a single wall.</p>
+
+<h2>2 · Both sides of the boundary</h2>
+<div class="diagram">EDGE (YARP)  PrincipalForwardingTransform.cs            NODE  pipeline/auth.ts
+─────────────────────────────────────────            ──────────────────────────
+1. STRIP  every inbound X-Principal-* header   ─┐     1. VERIFY M2M token
+   (client can't smuggle identity through)      │        iss + aud=internal + RS256
+2. SET    trusted X-Principal-* from the         │        appid|azp == YARP's app id   ← m2m.ts
+   *validated* Entra claims (oid/appid/scp)      ├──►  2. HYGIENE  reject duplicate /
+3. ATTACH Authorization: Bearer <M2M token>      │        case-variant X-Principal-*    ← claims.ts
+   (YARP's OWN client-credentials token)        ─┘     3. PARSE  shape-check, malformed = 401
+                                                           (id no-comma, kind∈{user,sp}, sp⇒project)</div>
+
+<div class="two">
+  <div class="card edge"><h4>Edge does 3 things</h4>
+    <ol><li><b>Strip</b> inbound identity headers</li><li><b>Set</b> trusted ones from validated claims</li><li><b>Attach</b> its own M2M bearer token</li></ol>
+    <p style="font-size:.8rem;color:var(--muted)">A caller cannot get a header past YARP that YARP didn't set.</p>
+  </div>
+  <div class="card llm"><h4>Node does 3 checks</h4>
+    <ol><li><b>Verify</b> the M2M token (only YARP's appid)</li><li><b>Hygiene</b>: no dup/case-variant headers</li><li><b>Parse</b>: strict shape or 401</li></ol>
+    <p style="font-size:.8rem;color:var(--muted)">Never "best-effort parses" identity — malformed = reject.</p>
+  </div>
+</div>
+
+<h2>3 · The four defense layers (ADR-0009 M0 hardening)</h2>
+<p>For a forged-identity attack to land, an attacker must beat <em>all</em> of these:</p>
+<div class="layer"><b>① Network isolation</b> — k8s <code>NetworkPolicy</code>: the gateway accepts
+  ingress <em>only</em> from pods labelled <code>app: edge</code>, port 3000. Can't even reach Node from elsewhere. <span style="color:var(--muted);font-size:.82rem">(primary control — replaces mTLS)</span></div>
+<div class="layer"><b>② M2M token pin</b> — Node accepts only <code>iss</code>=tenant v2.0,
+  <code>aud=api://llm-gateway-internal</code>, <code>appid|azp</code>=YARP's exact app id. No YARP credential ⇒ no entry.</div>
+<div class="layer"><b>③ Header hygiene</b> — reject duplicate/case-variant <code>X-Principal-*</code>;
+  strict claim shape; malformed ⇒ 401. Closes header-injection smuggling.</div>
+<div class="layer gap"><b>④ JWS-signed claim set</b> — YARP signs the <code>X-Principal-*</code> set, Node
+  verifies the signature. <strong>Recommended, NOT yet implemented.</strong> This is the accepted residual gap.</div>
+
+<blockquote>
+The threat — a forged <code>X-Principal-Id</code> — dies at layer ① for an external attacker (can't
+reach the pod) and at ②+③ for anything coming through the front door (no M2M token / stripped headers).
+Layer ④ is what would close the <em>insider</em> path: a compromised in-cluster workload that already
+holds a valid M2M token could still spoof claims today. That's the real, documented weakness.
+</blockquote>
+
+<h2>4 · Drill — stack the defenses</h2>
+<p style="font-size:.92rem;color:var(--muted)">Click the four layers outermost → innermost (network first).</p>
+<div class="drill">
+  <div class="slot" id="builtOrder">— start clicking —</div>
+  <div id="chipPool"></div>
+  <div class="fb" id="orderFb">&nbsp;</div>
+  <div class="score" id="orderScore"></div>
+</div>
+
+<h2>5 · Drill — threat scenarios</h2>
+<div class="drill">
+  <p class="q">An external attacker sends <code>POST /v1/chat</code> straight at the gateway pod with a hand-set
+  <code>X-Principal-Id: victim</code>. What stops them <em>first</em>?</p>
+  <button class="opt" onclick="q1(this,true)">NetworkPolicy — the pod is unreachable from them</button>
+  <button class="opt" onclick="q1(this,false)">The budget reservation hold rejects the request</button>
+  <button class="opt" onclick="q1(this,false)">Node re-validates the users real Entra token here</button>
+  <div class="fb" id="q1fb">&nbsp;</div>
+</div>
+<div class="drill">
+  <p class="q">Why does the Node plane <em>not</em> re-validate the end user's Entra token?</p>
+  <button class="opt" onclick="q2(this,false)">Re-validation would add far too much request latency</button>
+  <button class="opt" onclick="q2(this,true)">Wrong audience — that token is scoped to the edge app</button>
+  <button class="opt" onclick="q2(this,false)">Node has no network route to reach the Entra issuer</button>
+  <div class="fb" id="q2fb">&nbsp;</div>
+</div>
+<div class="drill">
+  <p class="q">Which layer is only on paper today — the honest residual risk?</p>
+  <button class="opt" onclick="q3(this,false)">The k8s NetworkPolicy restricting ingress sources</button>
+  <button class="opt" onclick="q3(this,true)">The JWS signature over the forwarded claim headers</button>
+  <button class="opt" onclick="q3(this,false)">The M2M token audience and appid pinning checks</button>
+  <div class="fb" id="q3fb">&nbsp;</div>
+</div>
+
+<h2>6 · Strength &amp; weakness (mission lens)</h2>
+<div class="two">
+  <div class="card llm"><h4>Strength</h4>
+    <p>No mTLS ops burden, yet not naïve: four independent layers, any one of which defeats the obvious
+    attack. Identity validation uses <em>first-party Entra code</em> in YARP, not a hand-rolled verifier.
+    Node's check is trivial and hard to get wrong (one issuer, one appid, one audience). Fail-closed on
+    malformed claims.</p></div>
+  <div class="card edge"><h4>Weakness / debt</h4>
+    <p>Trust is <strong>soft</strong>: any holder of a valid M2M token can forge claims, because layer ④
+    (JWS) isn't built — the boundary leans on network isolation + "only YARP has the credential." Also an
+    <strong>M0 hack</strong>: a SP's project is carried in the Entra <code>roles</code> claim
+    (<code>// M0: project carried via app role</code>) — overloaded, needs a real project claim later.</p></div>
+</div>
+
+<h2>7 · Blank-page self-test</h2>
+<details class="reveal"><summary>Draw the boundary: 3 things YARP does, 3 checks Node does, 4 defense layers, 1 gap. Reveal.</summary>
+<p style="margin-top:.6rem"><strong>YARP:</strong> strip inbound <code>X-Principal-*</code> → set trusted from validated Entra claims
+→ attach its own M2M bearer.<br>
+<strong>Node:</strong> verify M2M (iss+aud=internal+appid=YARP) → header hygiene (no dup/case-variant) → strict shape-parse (else 401).<br>
+<strong>Layers:</strong> ① NetworkPolicy (edge-only ingress) · ② M2M pin · ③ header hygiene · ④ JWS-signed claims.<br>
+<strong>Gap:</strong> ④ not implemented → a valid-M2M insider can still spoof claims (accepted residual).</p></details>
+
+<div class="ask">
+  <strong>Ask me:</strong> "what would it take to actually implement layer ④ JWS signing here?",
+  or "show me the exact comma-rejection in parsePrincipalHeaders and why a comma matters",
+  or "is the NetworkPolicy enough if we're not on a service mesh?"
+</div>
+
+<h3>Primary source — read next</h3>
+<p>📄 <a href="../adr/0009-yarp-dotnet-edge-two-plane-architecture.md">ADR-0009 §"Trust model"</a>
++ <code>contracts/m2m.md</code> (3 lines, the whole contract). Then read both ends:
+<code>services/edge/Claims/PrincipalForwardingTransform.cs</code> and
+<code>services/gateway/src/pipeline/claims.ts</code>. Terms: <a href="glossary.html">glossary</a>.
+Prev: <a href="0002-request-pipeline.html">L02</a>.</p>
+
+<footer>
+  <strong>Next — <a href="0004-budget-engine.html">L04</a>:</strong> the budget engine — Table Storage
+  authoritative → Redis fast path → the atomic Lua reserve, and the reserve→commit→release lifecycle that
+  hop 6 only started.<br><br>
+  Spaced recall queued: next session, cold — "name the four defense layers and which one isn't built."
+</footer>
+
+<script>
+const LAYERS=["① NetworkPolicy","② M2M token pin","③ Header hygiene","④ JWS-signed claims"];
+let pool=LAYERS.map((h,i)=>({h,i})).sort(()=>Math.random()-0.5);
+let expect=0,mistakes=0;
+const poolEl=document.getElementById('chipPool'),builtEl=document.getElementById('builtOrder');
+function drawPool(){poolEl.innerHTML='';pool.forEach(p=>{if(p.i<expect)return;
+  const b=document.createElement('button');b.className='chip';b.textContent=p.h;b.onclick=()=>pick(p,b);poolEl.appendChild(b);});}
+function pick(p,b){const fb=document.getElementById('orderFb');
+  if(p.i===expect){expect++;b.className='chip done';b.onclick=null;
+    builtEl.textContent=LAYERS.slice(0,expect).join('   →   ');fb.className='fb ok';fb.textContent='✓';
+    if(expect===LAYERS.length)fb.textContent=`✓ Stacked. ${mistakes} mistake(s).`;setTimeout(drawPool,150);}
+  else{mistakes++;b.classList.add('bad');fb.className='fb no';fb.textContent=`✗ Not next — layer ${expect+1} is "${LAYERS[expect]}".`;
+    setTimeout(()=>b.classList.remove('bad'),500);}
+  document.getElementById('orderScore').textContent=`placed ${expect}/${LAYERS.length} · ${mistakes} miss`;}
+drawPool();
+function fb(id,ok,t){const f=document.getElementById(id);f.className='fb '+(ok?'ok':'no');f.textContent=t;}
+function q1(b,ok){b.classList.add(ok?'correct':'wrong');fb('q1fb',ok,ok?'✓ Layer ① — the pod only accepts ingress from app=edge pods; the attacker never gets a TCP connection.':'✗ No — they never reach the pod: NetworkPolicy blocks ingress that isn\'t from the edge.');}
+function q2(b,ok){b.classList.add(ok?'correct':'wrong');fb('q2fb',ok,ok?'✓ The user token\'s aud is api://ai-gateway-edge — wrong audience for Node, so it can\'t (and shouldn\'t) validate it. It trusts forwarded claims instead.':'✗ No — it\'s an audience mismatch: the user token is scoped to the edge, not the gateway.');}
+function q3(b,ok){b.classList.add(ok?'correct':'wrong');fb('q3fb',ok,ok?'✓ Layer ④ JWS-signed claims is recommended but not implemented — so a valid-M2M insider can still forge X-Principal-* today.':'✗ No — ① and ② are live. The unbuilt one is ④, the JWS signature over the claim headers.');}
+</script>
+</body>
+</html>

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>L07 · The Protocol Bridge — Chat ⇄ Responses</title>
+<style>
+  :root{ --ink:#1a1a1a; --muted:#6b6b6b; --rule:#e3e0d8; --bg:#fdfcf9; --accent:#7a1f1f;
+         --code:#f3f1ea; --good:#1e6b3a; --bad:#9a2b2b; --edge:#1f4e79; --llm:#7a1f1f; }
+  *{box-sizing:border-box}
+  body{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;color:var(--ink);
+       background:var(--bg);max-width:46rem;margin:0 auto;padding:3rem 1.5rem 5rem;line-height:1.55;font-size:18px}
+  h1{font-size:2rem;font-weight:600;letter-spacing:-.01em;margin:0 0 .15rem}
+  .kicker{text-transform:uppercase;letter-spacing:.12em;font-size:.72rem;color:var(--accent);font-weight:700;margin-bottom:.6rem}
+  .sub{color:var(--muted);font-style:italic;margin:0 0 1.6rem;font-size:1rem}
+  h2{font-size:1.25rem;font-weight:600;margin:2.4rem 0 .6rem}
+  h3{font-size:.95rem;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin:1.8rem 0 .5rem}
+  p{margin:.7rem 0}
+  code{background:var(--code);padding:.08em .35em;border-radius:3px;font-size:.8em;font-family:"SF Mono",Menlo,Consolas,monospace}
+  a{color:var(--accent)}
+  .win{background:#f0ede3;border-left:3px solid var(--accent);padding:.8rem 1rem;margin:1.2rem 0;font-size:.95rem}
+  .warm{background:#eef3f0;border-left:3px solid var(--good);padding:.8rem 1rem;margin:1.2rem 0;font-size:.93rem}
+  .diagram{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.71rem;line-height:1.4;background:#fbfaf6;
+           border:1px solid var(--rule);border-radius:6px;padding:1rem;overflow-x:auto;white-space:pre;color:#2a2a2a}
+  table{border-collapse:collapse;width:100%;font-size:.82rem;margin:1rem 0}
+  th,td{border:1px solid var(--rule);padding:.4rem .55rem;text-align:left;vertical-align:top} th{background:#f3f1ea}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.2rem 0}
+  .card{border:1px solid var(--rule);border-radius:6px;padding:.9rem 1rem;font-size:.92rem}
+  .card.edge{border-top:3px solid var(--edge)} .card.llm{border-top:3px solid var(--llm)}
+  .card h4{margin:.1rem 0 .5rem;font-size:1rem} .card.edge h4{color:var(--edge)} .card.llm h4{color:var(--llm)}
+  blockquote{border-left:3px solid var(--rule);margin:1rem 0;padding:.2rem 1rem;color:#444;font-style:italic}
+  .drill{border:1px solid var(--rule);border-radius:8px;padding:1.1rem 1.2rem;margin:1.4rem 0;background:#fff}
+  .drill .q{font-weight:600;margin:0 0 .7rem}
+  .opt{display:block;width:100%;text-align:left;border:1px solid var(--rule);background:#fcfbf7;border-radius:5px;
+       padding:.55rem .8rem;margin:.4rem 0;cursor:pointer;font:inherit;font-size:.9rem;transition:.12s}
+  .opt:hover{background:#f3f1ea} .opt.correct{background:#e7f2ea;border-color:var(--good);color:var(--good)}
+  .opt.wrong{background:#f6e9e9;border-color:var(--bad);color:var(--bad)}
+  .fb{font-size:.85rem;margin-top:.6rem;min-height:1.2em} .fb.ok{color:var(--good)} .fb.no{color:var(--bad)}
+  .reveal{cursor:pointer;border:1px dashed var(--rule);border-radius:6px;padding:.7rem .9rem;color:var(--muted);font-size:.9rem;background:#fbfaf6}
+  .reveal[open]{border-style:solid;color:var(--ink)} .reveal summary{cursor:pointer;font-weight:600;color:var(--accent)}
+  .ask{background:#eef3f0;border-left:3px solid var(--good);padding:.7rem 1rem;font-size:.9rem;margin:1.4rem 0}
+  footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--rule);color:var(--muted);font-size:.85rem}
+  @media(max-width:560px){.two{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="kicker">Lesson 07 · Implementation / the one real translation</div>
+<h1>The Protocol Bridge — Chat ⇄ Responses</h1>
+<p class="sub">The live gateway's one piece of genuine domain logic: letting a Chat Completions client talk to a Responses-API model (and vice versa), transparently. ~11 min.</p>
+
+<div class="warm">
+  <strong>Warm-up (cold recall from L06 — no peeking):</strong> name the three resilience features that live
+  only in <code>legacy/</code>, not the MVP.
+  <details class="reveal" style="margin-top:.5rem"><summary>check yourself</summary>
+  <p style="margin:.5rem 0 0">① Circuit breaker (5-fail/30s state machine) · ② retry + exponential backoff
+  (1/2/4/8s, ±1s jitter, non-retryable 400/401/403) · ③ streaming SSE usage interception.</p></details>
+</div>
+
+<div class="win">
+  <strong>Win:</strong> you can explain why a request for <code>gpt-5.1-codex-mini</code> sent as Chat
+  Completions still works, name the four transform functions and when each fires, and point at the one
+  thing the bridge deliberately refuses to do.
+</div>
+
+<h2>1 · The problem it solves</h2>
+<p>
+Clients speak one of two OpenAI protocols: <strong>Chat Completions</strong> (<code>messages[]</code>) or
+<strong>Responses API</strong> (<code>input</code>). But each Azure <em>deployment</em> only speaks one of
+them — codex models are Responses-API-native. The model registry records each model's
+<code>upstreamApi</code>. The bridge makes the <em>client's</em> protocol independent of the
+<em>deployment's</em> requirement.
+</p>
+<div class="diagram">client protocol (route)          model upstreamApi          bridge?
+─────────────────────            ────────────────          ──────
+openai-chat            ───────►  chat-completions          no  (pass through)
+openai-chat            ───────►  responses                 YES (chat → responses → back)
+openai-responses       ───────►  responses                 no
+openai-responses       ───────►  chat-completions          YES (responses → chat → back)
+
+needsProtocolBridge = routeProtocolToUpstream(route) !== upstream</div>
+
+<h2>2 · Four transforms, two dispatchers</h2>
+<p>A bridge is symmetric: translate the <strong>request</strong> on the way up, and the
+<strong>response</strong> on the way back. Two directions × two halves = four pure functions, picked by
+two dispatchers (<code>adaptRequestBody</code>, <code>adaptResponseBody</code>) keyed on (route, upstream):</p>
+<table>
+  <tr><th>Direction</th><th>Request transform (up)</th><th>Response transform (back)</th></tr>
+  <tr><td>chat client → responses model</td><td><code>transformChatCompletionsToResponses</code></td><td><code>transformResponsesToChatCompletionsResponse</code></td></tr>
+  <tr><td>responses client → chat model</td><td><code>transformResponsesToChatCompletions</code></td><td><code>transformChatCompletionsToResponse</code></td></tr>
+</table>
+
+<h2>3 · What actually gets remapped</h2>
+<p>The translation is structural — same intent, different field shapes:</p>
+<table>
+  <tr><th>Chat Completions</th><th>↔</th><th>Responses API</th></tr>
+  <tr><td><code>messages: [{role, content}]</code></td><td>↔</td><td><code>input: [{type:'message', role, content}]</code> (or a bare string)</td></tr>
+  <tr><td>role <code>system</code></td><td>↔</td><td>role <code>developer</code></td></tr>
+  <tr><td><code>tool_calls</code> on assistant</td><td>↔</td><td><code>{type:'function_call', call_id, name, arguments}</code></td></tr>
+  <tr><td>role <code>tool</code> + <code>tool_call_id</code></td><td>↔</td><td><code>{type:'function_call_output', call_id, output}</code></td></tr>
+  <tr><td><code>max_completion_tokens</code> / <code>max_tokens</code></td><td>↔</td><td><code>max_output_tokens</code></td></tr>
+  <tr><td><code>reasoning_effort</code></td><td>↔</td><td><code>reasoning: { effort }</code></td></tr>
+  <tr><td><code>finish_reason: tool_calls|stop</code></td><td>↔</td><td>derived from whether output has function calls</td></tr>
+</table>
+<blockquote>
+A nice touch: <code>transformChatCompletionsToResponses</code> collapses a single user-text message into a
+bare string <code>input</code> (the <code>simplifiedInput</code> path) — matching how the Responses API is
+normally called by hand. And <code>stringifyContent</code> flattens array/multimodal content down to text.
+</blockquote>
+
+<h2>4 · The one thing it refuses</h2>
+<p>
+From L06: when a bridge is needed <em>and</em> the client asked for <code>stream:true</code>, the upstream
+client returns <strong>400 <code>streaming_protocol_bridge_unsupported</code></strong>. Translating a live
+SSE stream between two different event schemas isn't built — so it fails fast and loud rather than
+silently mangling the stream. Honest fail-closed, again.
+</p>
+
+<h2>5 · Drill — pick the transform</h2>
+<div class="drill">
+  <p class="q">A client calls <code>/v1/chat/completions</code> for a Responses-API model. Which request transform runs?</p>
+  <button class="opt" onclick="q1(this,true)">transformChatCompletionsToResponses on the way up</button>
+  <button class="opt" onclick="q1(this,false)">transformResponsesToChatCompletions on the way up</button>
+  <button class="opt" onclick="q1(this,false)">No transform runs — chat is always passed through</button>
+  <div class="fb" id="q1fb">&nbsp;</div>
+</div>
+<div class="drill">
+  <p class="q">When exactly does <code>needsProtocolBridge</code> return true?</p>
+  <button class="opt" onclick="q2(this,false)">Whenever the requested model is a codex model</button>
+  <button class="opt" onclick="q2(this,true)">When the route protocol differs from model upstream</button>
+  <button class="opt" onclick="q2(this,false)">Whenever the client sets the stream flag to true</button>
+  <div class="fb" id="q2fb">&nbsp;</div>
+</div>
+<div class="drill">
+  <p class="q">A Chat Completions assistant message has <code>tool_calls</code>. In Responses form it becomes…</p>
+  <button class="opt" onclick="q3(this,true)">A function_call item with call_id, name, arguments</button>
+  <button class="opt" onclick="q3(this,false)">A developer message holding the tool JSON inline</button>
+  <button class="opt" onclick="q3(this,false)">A function_call_output item with the call result</button>
+  <div class="fb" id="q3fb">&nbsp;</div>
+</div>
+
+<h2>6 · Strength &amp; weakness (mission lens)</h2>
+<div class="two">
+  <div class="card llm"><h4>Strength</h4>
+    <p>Textbook <strong>adapter pattern</strong>: four small pure functions, dispatched by a 2×2 table,
+    fully unit-testable in isolation (<code>responses-chat-bridge.test.ts</code>). It decouples client
+    protocol from deployment capability — one client integration reaches heterogeneous Azure models.
+    Fails closed on the case it can't honour (bridge+stream).</p></div>
+  <div class="card edge"><h4>Weakness / limit</h4>
+    <p>The translation is <strong>lossy</strong>: <code>stringifyContent</code> flattens multimodal/array
+    content to plain text — non-text parts are dropped. Response transforms inject
+    <strong>hardcoded defaults</strong> (<code>temperature:1</code>, <code>top_p:1</code>,
+    <code>tool_choice:'auto'</code>) that may not reflect the real request. And no streaming across the
+    bridge at all (L06). Fine for text+tools today; watch it as multimodal grows.</p></div>
+</div>
+
+<h2>7 · Blank-page self-test</h2>
+<details class="reveal"><summary>Name the 4 transforms by direction+half, the dispatch rule, and the refused case. Reveal.</summary>
+<p style="margin-top:.6rem"><strong>Up (request):</strong> chat→responses = <code>transformChatCompletionsToResponses</code>;
+responses→chat = <code>transformResponsesToChatCompletions</code>.
+<strong>Back (response):</strong> responses→chat-client = <code>transformResponsesToChatCompletionsResponse</code>;
+chat→responses-client = <code>transformChatCompletionsToResponse</code>.
+<strong>Dispatch:</strong> <code>adaptRequestBody</code>/<code>adaptResponseBody</code> switch on (route, upstream);
+bridge only when <code>routeProtocolToUpstream(route) !== upstream</code>.
+<strong>Refused:</strong> bridge + <code>stream:true</code> → 400 <code>streaming_protocol_bridge_unsupported</code>.</p></details>
+
+<div class="ask">
+  <strong>Ask me:</strong> "show how the e2e test proves the codex bridge calls <code>/openai/responses</code>",
+  or "what would multimodal-safe stringifyContent look like?", or "where is upstreamApi set per model in the config store?"
+</div>
+
+<h3>Primary source — read next</h3>
+<p>📄 <code>services/gateway/src/protocol/responses-chat-bridge.ts</code> (the four transforms +
+<code>adaptRequestBody</code>/<code>adaptResponseBody</code>) + <code>responses-tools.ts</code> +
+the <code>app.e2e.test.ts</code> "bridges chat completions to Responses API" case.
+Terms: <a href="glossary.html">glossary</a>. Prev: <a href="0006-resilience-vision-vs-mvp.html">L06</a>.</p>
+
+<footer>
+  <strong>Next — <a href="0008-the-mvp-cut.html">L08</a>:</strong> the MVP cut — every place ADR-0010..0015
+  reverses or narrows the full vision (Bun→Node, Postgres→Azure-native, multi-budget→single scope).<br><br>
+  Spaced recall queued: next session, cold — "when does needsProtocolBridge return true, and what does the bridge refuse?"
+</footer>
+
+<script>
+function fb(id,ok,t){const f=document.getElementById(id);f.className='fb '+(ok?'ok':'no');f.textContent=t;}
+function q1(b,ok){b.classList.add(ok?'correct':'wrong');fb('q1fb',ok,ok?'✓ chat route + responses upstream → transformChatCompletionsToResponses up, and its mirror back.':'✗ No — chat client + responses model bridges via transformChatCompletionsToResponses on the way up.');}
+function q2(b,ok){b.classList.add(ok?'correct':'wrong');fb('q2fb',ok,ok?'✓ routeProtocolToUpstream(route) !== upstream — protocol mismatch, regardless of model name or streaming.':'✗ No — it is purely protocol mismatch: route protocol ≠ the model upstreamApi.');}
+function q3(b,ok){b.classList.add(ok?'correct':'wrong');fb('q3fb',ok,ok?'✓ tool_calls → function_call item (call_id, name, arguments). The tool RESULT (role:tool) → function_call_output.':'✗ No — assistant tool_calls map to function_call items; function_call_output is the tool RESULT side.');}
+</script>
+</body>
+</html>

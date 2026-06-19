@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>L09 · Capstone — Strengths &amp; Weaknesses</title>
+<style>
+  :root{ --ink:#1a1a1a; --muted:#6b6b6b; --rule:#e3e0d8; --bg:#fdfcf9; --accent:#7a1f1f;
+         --code:#f3f1ea; --good:#1e6b3a; --bad:#9a2b2b; --edge:#1f4e79; --llm:#7a1f1f; }
+  *{box-sizing:border-box}
+  body{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;color:var(--ink);
+       background:var(--bg);max-width:46rem;margin:0 auto;padding:3rem 1.5rem 5rem;line-height:1.55;font-size:18px}
+  h1{font-size:2rem;font-weight:600;letter-spacing:-.01em;margin:0 0 .15rem}
+  .kicker{text-transform:uppercase;letter-spacing:.12em;font-size:.72rem;color:var(--accent);font-weight:700;margin-bottom:.6rem}
+  .sub{color:var(--muted);font-style:italic;margin:0 0 1.6rem;font-size:1rem}
+  h2{font-size:1.25rem;font-weight:600;margin:2.4rem 0 .6rem}
+  h3{font-size:.95rem;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin:1.8rem 0 .5rem}
+  p{margin:.7rem 0}
+  code{background:var(--code);padding:.08em .35em;border-radius:3px;font-size:.78em;font-family:"SF Mono",Menlo,Consolas,monospace}
+  a{color:var(--accent)}
+  .win{background:#f0ede3;border-left:3px solid var(--accent);padding:.8rem 1rem;margin:1.2rem 0;font-size:.95rem}
+  .warm{background:#eef3f0;border-left:3px solid var(--good);padding:.8rem 1rem;margin:1.2rem 0;font-size:.93rem}
+  table{border-collapse:collapse;width:100%;font-size:.83rem;margin:1rem 0}
+  th,td{border:1px solid var(--rule);padding:.45rem .6rem;text-align:left;vertical-align:top} th{background:#f3f1ea}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.2rem 0}
+  .card{border:1px solid var(--rule);border-radius:6px;padding:.9rem 1rem;font-size:.9rem}
+  .card.good{border-top:3px solid var(--good)} .card.bad{border-top:3px solid var(--bad)}
+  .card h4{margin:.1rem 0 .5rem;font-size:1rem} .card.good h4{color:var(--good)} .card.bad h4{color:var(--bad)}
+  .card ol{margin:.3rem 0;padding-left:1.2rem} .card li{margin:.4rem 0}
+  .lref{font-size:.7rem;color:var(--muted)}
+  blockquote{border-left:3px solid var(--rule);margin:1rem 0;padding:.2rem 1rem;color:#444;font-style:italic}
+  .drill{border:1px solid var(--rule);border-radius:8px;padding:1.1rem 1.2rem;margin:1.4rem 0;background:#fff}
+  .drill .q{font-weight:600;margin:0 0 .7rem}
+  .sortwrap{text-align:center}
+  .sortcard{font-weight:600;font-size:1rem;padding:.7rem;border:1px solid var(--rule);border-radius:6px;background:#fbfaf6;margin:.5rem 0}
+  .sortbtn{border:1px solid var(--rule);background:#fcfbf7;border-radius:6px;padding:.5rem .9rem;margin:.3rem;cursor:pointer;font:inherit;font-size:.85rem}
+  .sortbtn.good{border-color:var(--good);color:var(--good)} .sortbtn.bad{border-color:var(--bad);color:var(--bad)}
+  .fb{font-size:.85rem;margin-top:.6rem;min-height:1.2em} .fb.ok{color:var(--good)} .fb.no{color:var(--bad)}
+  .score{font-size:.85rem;color:var(--muted);margin-top:.5rem}
+  .reveal{cursor:pointer;border:1px dashed var(--rule);border-radius:6px;padding:.7rem .9rem;color:var(--muted);font-size:.9rem;background:#fbfaf6}
+  .reveal[open]{border-style:solid;color:var(--ink)} .reveal summary{cursor:pointer;font-weight:600;color:var(--accent)}
+  .ask{background:#eef3f0;border-left:3px solid var(--good);padding:.7rem 1rem;font-size:.9rem;margin:1.4rem 0}
+  .final{background:#f0ede3;border:1px solid var(--rule);border-radius:8px;padding:1rem 1.2rem;margin:1.4rem 0}
+  footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--rule);color:var(--muted);font-size:.85rem}
+  @media(max-width:560px){.two{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="kicker">Lesson 09 · Capstone / judgement</div>
+<h1>Capstone — Strengths &amp; Weaknesses</h1>
+<p class="sub">Everything compresses to this: three strengths you can defend and three weaknesses you can name first, before a reviewer does. Mixed recall across all eight lessons. ~14 min.</p>
+
+<div class="warm">
+  <strong>Warm-up (mixed cold recall — no peeking). Answer all four out loud, then check:</strong>
+  <details class="reveal" style="margin-top:.5rem"><summary>the four questions</summary>
+  <p style="margin:.5rem 0 0">1) What travels on the edge→Node arrow? &nbsp; 2) Name budget hops 5 &amp; 6.
+  &nbsp; 3) Which trust layer isn't built? &nbsp; 4) What does the ADX rank trick prefer?</p></details>
+  <details class="reveal" style="margin-top:.5rem"><summary>answers</summary>
+  <p style="margin:.5rem 0 0">1) M2M token + <code>X-Principal-*</code> claims. 2) rateLimit (RPM/TPM),
+  budget (1.2× USD reserve). 3) ④ JWS-signed claims. 4) the committed copy (<code>redis_commit_result=='ok'</code>,
+  tokens&gt;0) via <code>ts+3650d</code>.</p></details>
+</div>
+
+<div class="win">
+  <strong>Win — the whole mission, delivered:</strong> by the end of this page you can, from memory,
+  sketch the request path, give 3 defensible strengths and 3 real weaknesses with evidence, and know
+  exactly which doc claims to distrust.
+</div>
+
+<h2>1 · The three strengths (defend these)</h2>
+<div class="card good"><h4>Three things this system gets genuinely right</h4>
+<ol>
+  <li><strong>Clean separation of concerns, plane by plane and hop by hop.</strong> Two planes split on
+  "generic vs LLM-domain" with first-party Entra validation at the edge <span class="lref">(L01)</span>;
+  a fail-closed pipeline where each hop has one job and talks only through typed context vars
+  <span class="lref">(L02)</span>; vertical-slice modules that test in isolation <span class="lref">(L07)</span>.</li>
+  <li><strong>Correct-by-construction money &amp; metering.</strong> Atomic Lua budget reserve/commit that's
+  last-dollar-safe and cluster-native via the hash-tag <span class="lref">(L04)</span>; metering that's
+  decoupled, layered, self-healing, and effectively-once through the ADX dedup view <span class="lref">(L05)</span>.</li>
+  <li><strong>Defense-in-depth without operational weight.</strong> A soft internal trust boundary held by
+  four independent layers — no mTLS burden, yet a forged header is useless <span class="lref">(L03)</span>;
+  and an honest, tiny live proxy that fails closed on what it can't do <span class="lref">(L06/L07)</span>.</li>
+</ol></div>
+
+<h2>2 · The three weaknesses (name these first)</h2>
+<div class="card bad"><h4>Three things to flag before anyone else does</h4>
+<ol>
+  <li><strong>The docs describe a system you don't run.</strong> CLAUDE.md documents Bun, Postgres, PATs,
+  circuit breaker, retry, streaming — all <em>legacy</em> or <em>deferred</em>. This is the most dangerous
+  gap because it hides the others <span class="lref">(L06/L08)</span>.</li>
+  <li><strong>No upstream resilience, and money leaks on failure.</strong> No breaker, no retry, faked
+  streaming <span class="lref">(L06)</span>; the budget charges the 1.2× <em>estimate</em> not actuals and
+  <em>doesn't release</em> a reservation on upstream failure <span class="lref">(L04)</span>.</li>
+  <li><strong>Soft edges that are fine now, risky later.</strong> Trust layer ④ (JWS) unbuilt → a valid-M2M
+  insider can spoof claims <span class="lref">(L03)</span>; ADX ingest is stubbed and WAL defaults to volatile
+  <code>/tmp</code> <span class="lref">(L05)</span>; single budget scope = no enforced org ceiling
+  <span class="lref">(L08)</span>; the SP-project-via-<code>roles</code> M0 hack <span class="lref">(L03)</span>.</li>
+</ol></div>
+
+<h2>3 · The whole request, one line per hop</h2>
+<div class="diagram" style="font-family:'SF Mono',Menlo,monospace;font-size:.7rem;background:#fbfaf6;border:1px solid var(--rule);border-radius:6px;padding:1rem;white-space:pre;overflow-x:auto">client ─M2M JWT─► EDGE(.NET): validate Entra · strip+set X-Principal · attach M2M
+   └─► NODE: 1 auth(M2M+claims)  2 tenant(policy+allowlist)  3 guard(model)  4 scope(allowlist)
+            5 rate(RPM/TPM)      6 budget(1.2× reserve)      7 handler: [bridge?] → Azure
+            → commit(reserved→spent) → usage event → Queue ─► Collector ─► ADX(dedup by request_id)
+            (on queue fail → WAL disk → replayer)</div>
+
+<h2>4 · Drill — strength or weakness?</h2>
+<div class="drill sortwrap">
+  <div class="sortcard" id="sortPrompt">Loading…</div>
+  <button class="sortbtn good" onclick="answerSort('good')">STRENGTH</button>
+  <button class="sortbtn bad" onclick="answerSort('bad')">WEAKNESS</button>
+  <div class="fb" id="sortFb">&nbsp;</div>
+  <div class="score" id="sortScore"></div>
+</div>
+
+<h2>5 · Drill — interleaved cold recall (all lessons)</h2>
+<div class="drill">
+  <p class="q">Two requests race for the last dollar of budget. Why can't both succeed?</p>
+  <button class="opt" onclick="q1(this,true)">RESERVE is one atomic Lua round-trip per request</button>
+  <button class="opt" onclick="q1(this,false)">A mutex in the Node process serialises the two</button>
+  <button class="opt" onclick="q1(this,false)">Postgres row locking blocks the second writer</button>
+  <div class="fb" id="q1fb">&nbsp;</div>
+</div>
+<div class="drill">
+  <p class="q">An attacker hits the gateway pod directly with a forged identity header. First thing that stops them?</p>
+  <button class="opt" onclick="q2(this,true)">NetworkPolicy — only edge pods can reach it</button>
+  <button class="opt" onclick="q2(this,false)">The JWS signature check on the claim set</button>
+  <button class="opt" onclick="q2(this,false)">Node re-validates their real Entra user token</button>
+  <div class="fb" id="q2fb">&nbsp;</div>
+</div>
+<div class="drill">
+  <p class="q">Where does duplicate-delivery get reconciled to one billed record?</p>
+  <button class="opt" onclick="q3(this,true)">At ADX — arg_max by request_id in the view</button>
+  <button class="opt" onclick="q3(this,false)">At the queue — it dedupes identical bodies</button>
+  <button class="opt" onclick="q3(this,false)">At the WAL — rename overwrites the old one</button>
+  <div class="fb" id="q3fb">&nbsp;</div>
+</div>
+<div class="drill">
+  <p class="q">You read a feature in CLAUDE.md. How do you know if it's actually live?</p>
+  <button class="opt" onclick="q4(this,true)">Check services/ and contracts/ — code wins</button>
+  <button class="opt" onclick="q4(this,false)">Trust CLAUDE.md — it is the maintained spec</button>
+  <button class="opt" onclick="q4(this,false)">Check legacy/ — that is the current system</button>
+  <div class="fb" id="q4fb">&nbsp;</div>
+</div>
+
+<h2>6 · Final self-assessment</h2>
+<div class="final">
+  Close this page. On paper, in 5 minutes, produce: <strong>(a)</strong> the request path, hop by hop;
+  <strong>(b)</strong> 3 strengths with a one-line reason each; <strong>(c)</strong> 3 weaknesses with the
+  fix direction. If you can do it cold, the mission is met — you own the model, not the AI.
+  <details class="reveal" style="margin-top:.7rem"><summary>scoring guide</summary>
+  <p style="margin:.5rem 0 0">Full marks: path names all 7 Node hops + edge + metering tail; strengths cover
+  separation / atomic-money / defense-in-depth; weaknesses cover docs-gap / no-resilience+leak /
+  soft-edges. Missed a hop? Re-run L02. Fuzzy on money? L04. Fuzzy on trust? L03.</p></details>
+</div>
+
+<h2>7 · Where to take this next (wisdom)</h2>
+<p>You've got knowledge + drilled skills. Wisdom comes from real critique. Take your 3-strengths /
+3-weaknesses to:</p>
+<ul style="font-size:.92rem">
+  <li><strong>r/ExperiencedDevs</strong> or <strong>YARP GitHub Discussions</strong> — "is this two-plane
+  split + soft trust boundary sound?" <span class="lref">(RESOURCES.md Tier 3)</span></li>
+  <li><strong>Azure Architecture Center</strong> — benchmark the Azure-native store choices against
+  reference LLM-gateway architectures.</li>
+  <li>Best critic: future-you. Re-do the §6 self-test in a week, cold. Spacing is the whole game.</li>
+</ul>
+
+<div class="ask">
+  <strong>Ask me to keep going:</strong> "quiz me cold across all lessons", "do a docs-truth pass on
+  CLAUDE.md", "plan the smallest PR to add billing-on-actuals", or "deep-dive the edge .NET side (we only
+  skimmed it)". The course has a spine now — we can branch anywhere.
+</div>
+
+<h3>Primary source — the whole corpus</h3>
+<p>📄 <code>docs/adr/0001</code>–<code>0015</code> (the why + rejected alternatives — the spine),
+<code>services/</code> + <code>contracts/</code> (the territory). Terms:
+<a href="glossary.html">glossary</a>. Prev: <a href="0008-the-mvp-cut.html">L08</a>.
+Start over: <a href="0001-two-plane-architecture.html">L01</a>.</p>
+
+<footer>
+  <strong>Course complete — L01→L09.</strong> The curriculum spine is in the decision records (<code>docs/adr/</code>);
+  your record of insights in the live source under <code>services/</code>. Spacing keeps it: I'll re-ask cold
+  across lessons whenever you want. Say <em>"quiz me"</em> anytime.
+</footer>
+
+<script>
+const items=[
+  {t:"Atomic Lua reserve is last-dollar-safe", a:"good"},
+  {t:"CLAUDE.md documents legacy as if live", a:"bad"},
+  {t:"Four-layer trust without mTLS burden", a:"good"},
+  {t:"No circuit breaker on a dead deployment", a:"bad"},
+  {t:"Effectively-once via ADX dedup view", a:"good"},
+  {t:"Reservation leaks on upstream failure", a:"bad"},
+  {t:"Fail-closed pipeline, one job per hop", a:"good"},
+  {t:"Charges the 1.2× estimate, not actuals", a:"bad"},
+  {t:"Adapter-pattern protocol bridge, testable", a:"good"},
+  {t:"JWS claim signing (layer 4) not built", a:"bad"},
+  {t:"Cluster-native via hash-tag scope keys", a:"good"},
+  {t:"WAL defaults to volatile /tmp storage", a:"bad"},
+];
+let order=items.map((_,i)=>i).sort(()=>Math.random()-0.5),idx=0,hit=0,seen=0;
+function renderSort(){
+  if(idx>=order.length){document.getElementById('sortPrompt').textContent="✓ Deck complete — you can name them all.";
+    document.getElementById('sortFb').textContent="";
+    document.getElementById('sortScore').textContent=`Final: ${hit}/${seen}. Reload to reshuffle.`;return;}
+  document.getElementById('sortPrompt').textContent=items[order[idx]].t;}
+function answerSort(pick){
+  if(idx>=order.length)return;const correct=items[order[idx]].a;const fb=document.getElementById('sortFb');seen++;
+  if(pick===correct){hit++;fb.className='fb ok';fb.textContent='✓ '+(correct==='good'?'a defensible strength.':'a real weakness — name it first.');}
+  else{fb.className='fb no';fb.textContent='✗ Actually a '+(correct==='good'?'STRENGTH.':'WEAKNESS.');}
+  document.getElementById('sortScore').textContent=`${hit}/${seen} · ${order.length-idx-1} left`;idx++;setTimeout(renderSort,750);}
+renderSort();
+function fb(id,ok,t){const f=document.getElementById(id);f.className='fb '+(ok?'ok':'no');f.textContent=t;}
+function q1(b,ok){b.classList.add(ok?'correct':'wrong');fb('q1fb',ok,ok?'✓ RESERVE checks cap and increments reserved in one atomic Lua call — no interleaving, so only one fits.':'✗ No — atomicity comes from the single Lua round-trip, not a process mutex or Postgres (which is gone).');}
+function q2(b,ok){b.classList.add(ok?'correct':'wrong');fb('q2fb',ok,ok?'✓ NetworkPolicy: the gateway only accepts ingress from app=edge pods, so the attacker never connects.':'✗ No — layer ① NetworkPolicy stops them first; JWS isn\'t built and Node never re-validates the user token.');}
+function q3(b,ok){b.classList.add(ok?'correct':'wrong');fb('q3fb',ok,ok?'✓ ADX UsageDedup: arg_max(...) by request_id, preferring the committed copy. Idempotency lives at the read side.':'✗ No — dedup is at ADX by request_id; the pipe itself is deliberately at-least-once.');}
+function q4(b,ok){b.classList.add(ok?'correct':'wrong');fb('q4fb',ok,ok?'✓ services/ + contracts/ are the territory. legacy/ is retired; CLAUDE.md is a partly-stale map. Code wins.':'✗ No — verify against services/ + contracts/. legacy/ is retired; CLAUDE.md can be stale.');}
+</script>
+</body>
+</html>

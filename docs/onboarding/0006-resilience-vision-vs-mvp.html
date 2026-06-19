@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>L06 · Resilience — Vision vs. MVP (the brain-rot trap)</title>
+<style>
+  :root{ --ink:#1a1a1a; --muted:#6b6b6b; --rule:#e3e0d8; --bg:#fdfcf9; --accent:#7a1f1f;
+         --code:#f3f1ea; --good:#1e6b3a; --bad:#9a2b2b; --edge:#1f4e79; --llm:#7a1f1f; --legacy:#8a6d1f; }
+  *{box-sizing:border-box}
+  body{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;color:var(--ink);
+       background:var(--bg);max-width:46rem;margin:0 auto;padding:3rem 1.5rem 5rem;line-height:1.55;font-size:18px}
+  h1{font-size:1.9rem;font-weight:600;letter-spacing:-.01em;margin:0 0 .15rem}
+  .kicker{text-transform:uppercase;letter-spacing:.12em;font-size:.72rem;color:var(--accent);font-weight:700;margin-bottom:.6rem}
+  .sub{color:var(--muted);font-style:italic;margin:0 0 1.6rem;font-size:1rem}
+  h2{font-size:1.25rem;font-weight:600;margin:2.4rem 0 .6rem}
+  h3{font-size:.95rem;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin:1.8rem 0 .5rem}
+  p{margin:.7rem 0}
+  code{background:var(--code);padding:.08em .35em;border-radius:3px;font-size:.8em;font-family:"SF Mono",Menlo,Consolas,monospace}
+  a{color:var(--accent)}
+  .win{background:#f0ede3;border-left:3px solid var(--accent);padding:.8rem 1rem;margin:1.2rem 0;font-size:.95rem}
+  .warm{background:#eef3f0;border-left:3px solid var(--good);padding:.8rem 1rem;margin:1.2rem 0;font-size:.93rem}
+  .trap{background:#fbf3f3;border-left:3px solid var(--bad);padding:.8rem 1rem;margin:1.2rem 0;font-size:.95rem}
+  .diagram{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.72rem;line-height:1.4;background:#fbfaf6;
+           border:1px solid var(--rule);border-radius:6px;padding:1rem;overflow-x:auto;white-space:pre;color:#2a2a2a}
+  table{border-collapse:collapse;width:100%;font-size:.83rem;margin:1rem 0}
+  th,td{border:1px solid var(--rule);padding:.4rem .55rem;text-align:left;vertical-align:top} th{background:#f3f1ea}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.2rem 0}
+  .card{border:1px solid var(--rule);border-radius:6px;padding:.9rem 1rem;font-size:.92rem}
+  .card.live{border-top:3px solid var(--llm)} .card.legacy{border-top:3px solid var(--legacy)}
+  .card h4{margin:.1rem 0 .5rem;font-size:1rem} .card.live h4{color:var(--llm)} .card.legacy h4{color:var(--legacy)}
+  .card ul{margin:.3rem 0;padding-left:1.1rem} .card li{margin:.2rem 0}
+  blockquote{border-left:3px solid var(--rule);margin:1rem 0;padding:.2rem 1rem;color:#444;font-style:italic}
+  .drill{border:1px solid var(--rule);border-radius:8px;padding:1.1rem 1.2rem;margin:1.4rem 0;background:#fff}
+  .drill .q{font-weight:600;margin:0 0 .7rem}
+  .opt{display:block;width:100%;text-align:left;border:1px solid var(--rule);background:#fcfbf7;border-radius:5px;
+       padding:.55rem .8rem;margin:.4rem 0;cursor:pointer;font:inherit;font-size:.9rem;transition:.12s}
+  .opt:hover{background:#f3f1ea} .opt.correct{background:#e7f2ea;border-color:var(--good);color:var(--good)}
+  .opt.wrong{background:#f6e9e9;border-color:var(--bad);color:var(--bad)}
+  .fb{font-size:.85rem;margin-top:.6rem;min-height:1.2em} .fb.ok{color:var(--good)} .fb.no{color:var(--bad)}
+  .sortwrap{text-align:center}
+  .sortcard{font-weight:600;font-size:1rem;padding:.7rem;border:1px solid var(--rule);border-radius:6px;background:#fbfaf6;margin:.5rem 0}
+  .sortbtn{border:1px solid var(--rule);background:#fcfbf7;border-radius:6px;padding:.5rem .9rem;margin:.3rem;cursor:pointer;font:inherit;font-size:.85rem}
+  .sortbtn.live{border-color:var(--llm);color:var(--llm)} .sortbtn.legacy{border-color:var(--legacy);color:var(--legacy)}
+  .score{font-size:.85rem;color:var(--muted);margin-top:.5rem}
+  .reveal{cursor:pointer;border:1px dashed var(--rule);border-radius:6px;padding:.7rem .9rem;color:var(--muted);font-size:.9rem;background:#fbfaf6}
+  .reveal[open]{border-style:solid;color:var(--ink)} .reveal summary{cursor:pointer;font-weight:600;color:var(--accent)}
+  .ask{background:#eef3f0;border-left:3px solid var(--good);padding:.7rem 1rem;font-size:.9rem;margin:1.4rem 0}
+  footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--rule);color:var(--muted);font-size:.85rem}
+  @media(max-width:560px){.two{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="kicker">Lesson 06 · Operations / the map-vs-territory lesson</div>
+<h1>Resilience — Vision vs. MVP</h1>
+<p class="sub">The single biggest brain-rot trap in this repo: the docs describe resilience your live system doesn't have. Today you learn to tell the map from the territory. ~13 min.</p>
+
+<div class="warm">
+  <strong>Warm-up (cold recall from L05 — no peeking):</strong> what does the ADX <code>UsageDedup</code> rank
+  trick do, and why <code>+3650d</code>?
+  <details class="reveal" style="margin-top:.5rem"><summary>check yourself</summary>
+  <p style="margin:.5rem 0 0">It dedups by <code>request_id</code> with <code>arg_max(_rank,*)</code>; a
+  committed copy (<code>redis_commit_result=='ok'</code> &amp; <code>tokens_total&gt;0</code>) gets
+  <code>ts+3650d</code> so it always out-ranks failed/partial duplicates. Counted once, the billed once.</p></details>
+</div>
+
+<div class="trap">
+  <strong>The trap, stated plainly.</strong> <code>CLAUDE.md</code> has a whole "Resilience" section:
+  circuit breaker (5 fails → open, 30s → half-open), retry with backoff (1s/2s/4s/8s), streaming usage
+  interception. <strong>None of that runs in your live gateway.</strong> It all lives in
+  <code>legacy/</code> — the retired Bun app (ADR-0015). If you believe the docs, you'll think your MVP
+  is resilient. It isn't yet. This lesson is the antidote.
+</div>
+
+<div class="win">
+  <strong>Win:</strong> you can state exactly what the live gateway does when Azure flakes (spoiler:
+  not much), name the three resilience features that exist only as legacy reference, and recall the
+  circuit-breaker + retry patterns well enough to port them.
+</div>
+
+<h2>1 · What the live gateway actually does on upstream failure</h2>
+<p>The entire upstream path is <code>providers/upstream-client.ts</code> calling
+<code>utils/fetch.ts</code>. Here is <em>all</em> of <code>upstreamHttpsFetch</code>:</p>
+<div class="diagram">if (!url.startsWith('https://')) throw new Error('Upstream requests must use HTTPS');
+return fetch(input, options);          // ← that's it. one fetch. no timeout, no retry.</div>
+<table>
+  <tr><th>When Azure…</th><th>Live MVP behaviour</th></tr>
+  <tr><td>returns 500 / 429</td><td><code>!result.ok</code> → status passed straight through to client. <strong>No retry.</strong></td></tr>
+  <tr><td>throws / connection drops</td><td>handler catch → <code>502 upstream_error</code>. <strong>Reservation NOT released</strong> (leaks until resv TTL).</td></tr>
+  <tr><td>is repeatedly down</td><td>every request still hits it. <strong>No circuit breaker</strong> to stop hammering it.</td></tr>
+  <tr><td>client asks <code>stream:true</code></td><td>response is <code>await response.text()</code> buffered into <code>_raw_stream</code> — <strong>not real SSE</strong>. Bridge + stream → <code>400</code>.</td></tr>
+</table>
+<p>The plan agrees — these are open TODOs in <code>.context/plans/current.md</code>:
+<em>"Budget reservation release on upstream failure"</em> and <em>"Real SSE streaming"</em>, both unchecked.</p>
+
+<h2>2 · How to tell live from legacy (the durable skill)</h2>
+<blockquote>
+<strong>live = <code>services/{edge,gateway,collector}</code> + <code>packages/shared</code>.
+legacy = <code>legacy/</code>, frozen, reference-only (ADR-0015).</strong> A tell: <code>CLAUDE.md</code>'s
+"Directory Structure" shows <code>src/index.ts</code> with <code>Bun.serve</code> — that's the legacy
+layout, not <code>services/gateway/src/server.ts</code>. When the docs and the code disagree, the code in
+<code>services/</code> wins.
+</blockquote>
+
+<h2>3 · The three features that live only in legacy (your port targets)</h2>
+<div class="two">
+  <div class="card legacy"><h4>① Circuit breaker <span style="font-size:.7rem">legacy/services/circuit-breaker.ts</span></h4>
+    <p>Redis-backed Lua state machine, per-deployment:</p>
+    <div class="diagram" style="font-size:.66rem">CLOSED ──5 failures──► OPEN
+  ▲                      │ 30s
+  │ 1 success            ▼
+  └────────────── HALF_OPEN (probe)</div>
+    <p style="font-size:.82rem;color:var(--muted)">Stops cascading failure: an OPEN breaker fails fast instead of hammering a dead deployment.</p>
+  </div>
+  <div class="card legacy"><h4>② Retry + backoff <span style="font-size:.7rem">legacy/services/retry.ts</span></h4>
+    <ul>
+      <li>Exponential: <strong>1s · 2s · 4s · 8s</strong>, capped 30s</li>
+      <li><strong>±1s jitter</strong> (avoid thundering herd)</li>
+      <li>Respects <code>Retry-After</code> header</li>
+      <li>Non-retryable: <strong>400, 401, 403</strong> (don't retry client errors)</li>
+      <li>Max 3 retries</li>
+    </ul>
+  </div>
+</div>
+<div class="card legacy"><h4>③ Streaming usage interception <span style="font-size:.7rem">legacy/utils/streaming.ts</span></h4>
+  <p>A <code>TransformStream</code> that passes SSE chunks through to the client <em>while</em> sniffing the
+  usage for billing — OpenAI's <code>usage</code> in the final chunk, Anthropic's <code>message_delta</code>.
+  This is what makes streaming responses billable. The MVP's buffer-and-dump can't do this live.</p>
+</div>
+
+<h2>4 · Drill — live MVP, or legacy reference?</h2>
+<div class="drill sortwrap">
+  <div class="sortcard" id="sortPrompt">Loading…</div>
+  <button class="sortbtn live" onclick="answerSort('live')">LIVE MVP</button>
+  <button class="sortbtn legacy" onclick="answerSort('legacy')">LEGACY only</button>
+  <div class="fb" id="sortFb">&nbsp;</div>
+  <div class="score" id="sortScore"></div>
+</div>
+
+<h2>5 · Drill — recall the patterns you'll port</h2>
+<div class="drill">
+  <p class="q">A circuit breaker trips to OPEN. After the reset timeout, what state does it move to?</p>
+  <button class="opt" onclick="q1(this,false)">Straight back to CLOSED and resumes traffic</button>
+  <button class="opt" onclick="q1(this,true)">HALF_OPEN — one probe decides close or reopen</button>
+  <button class="opt" onclick="q1(this,false)">It stays OPEN until an operator resets it</button>
+  <div class="fb" id="q1fb">&nbsp;</div>
+</div>
+<div class="drill">
+  <p class="q">Which status codes does the retry policy treat as non-retryable?</p>
+  <button class="opt" onclick="q2(this,true)">400, 401, 403 — client errors, not transient</button>
+  <button class="opt" onclick="q2(this,false)">500, 502, 503 — the server-side failure set</button>
+  <button class="opt" onclick="q2(this,false)">408, 429, 504 — every timeout-shaped code</button>
+  <div class="fb" id="q2fb">&nbsp;</div>
+</div>
+<div class="drill">
+  <p class="q">In the live MVP, what happens to the budget reservation when the upstream call throws?</p>
+  <button class="opt" onclick="q3(this,false)">It is released immediately in the catch block</button>
+  <button class="opt" onclick="q3(this,true)">It is not released — it leaks until the TTL</button>
+  <button class="opt" onclick="q3(this,false)">It is committed at the full estimated amount</button>
+  <div class="fb" id="q3fb">&nbsp;</div>
+</div>
+
+<h2>6 · Strength &amp; weakness (mission lens)</h2>
+<div class="two">
+  <div class="card live"><h4>Strength</h4>
+    <p>The live proxy is <strong>honest and tiny</strong> — one HTTPS fetch, easy to audit, fail-closed on
+    the one unsupported case (bridge+stream → 400). And you're not inventing resilience from scratch:
+    <code>legacy/</code> holds <em>battle-tested</em> breaker/retry/streaming with tests to port. The
+    architecture (per-deployment fallback chains in the model registry) is designed <em>for</em> a breaker.</p></div>
+  <div class="card legacy"><h4>Weakness / debt</h4>
+    <p>Today a flaky Azure deployment is <strong>not retried</strong>, a dead one is <strong>hammered</strong>
+    (no breaker → cascading failure), streaming is <strong>faked</strong>, and failed upstream calls
+    <strong>leak budget</strong> until TTL. Worse, the <strong>docs claim otherwise</strong> — the most
+    dangerous gap, because it hides the others. Fix the docs <em>and</em> the code.</p></div>
+</div>
+
+<h2>7 · Blank-page self-test</h2>
+<details class="reveal"><summary>List: what resilience the live gateway HAS, what it LACKS, and where the lacking parts exist. Reveal.</summary>
+<p style="margin-top:.6rem"><strong>Has:</strong> HTTPS-only upstream enforcement; fail-closed bridge+stream 400; status passthrough; 502 on throw.
+<strong>Lacks (live):</strong> circuit breaker, retry/backoff, real SSE streaming + usage intercept, reservation release on failure.
+<strong>Where the missing parts are:</strong> <code>legacy/services/circuit-breaker.ts</code> (5-fail/30s state machine),
+<code>legacy/services/retry.ts</code> (1/2/4/8s ±1s jitter, non-retryable 400/401/403),
+<code>legacy/utils/streaming.ts</code> (TransformStream usage intercept). Port targets per the Phase B plan.</p></details>
+
+<div class="ask">
+  <strong>Ask me:</strong> "what's the smallest first step to port the circuit breaker into <code>services/gateway</code>?",
+  or "should retry live in the gateway or be a YARP/Envoy concern?", or "show me the model-registry fallback
+  chain the breaker is supposed to drive."
+</div>
+
+<h3>Primary source — read next</h3>
+<p>📄 Live: <code>services/gateway/src/utils/fetch.ts</code> + <code>providers/upstream-client.ts</code>
+(see how little there is). Reference: <code>legacy/src/services/circuit-breaker.ts</code>,
+<code>retry.ts</code>, <code>utils/streaming.ts</code>. ADR: <a href="../adr/0015-legacy-bun-app-retirement-reference-and-rewrite.md">ADR-0015</a>
+(why legacy is frozen). Prev: <a href="0005-metering-path.html">L05</a>.</p>
+
+<footer>
+  <strong>Next — L07:</strong> the protocol bridge — chat ⇄ Responses API for codex models, the one piece
+  of real translation logic in the live gateway. Say <em>"next lesson"</em>.<br><br>
+  Spaced recall queued: next session, cold — "name the 3 resilience features that live only in legacy."
+</footer>
+
+<script>
+const items=[
+  {t:"HTTPS-only upstream fetch enforcement", a:"live"},
+  {t:"Per-deployment circuit breaker (5-fail/30s)", a:"legacy"},
+  {t:"M2M auth + forwarded-claims pipeline", a:"live"},
+  {t:"Exponential retry with ±1s jitter", a:"legacy"},
+  {t:"Atomic Lua budget reserve/commit", a:"live"},
+  {t:"Streaming SSE usage interception", a:"legacy"},
+  {t:"Usage event → Queue → Collector → ADX", a:"live"},
+  {t:"Retry-After header handling", a:"legacy"},
+  {t:"Chat ⇄ Responses protocol bridge", a:"live"},
+];
+let order=items.map((_,i)=>i).sort(()=>Math.random()-0.5),idx=0,hit=0,seen=0;
+function renderSort(){
+  if(idx>=order.length){document.getElementById('sortPrompt').textContent="✓ Deck complete.";
+    document.getElementById('sortFb').textContent="";
+    document.getElementById('sortScore').textContent=`Final: ${hit}/${seen}. Reload to reshuffle.`;return;}
+  document.getElementById('sortPrompt').textContent=items[order[idx]].t;}
+function answerSort(pick){
+  if(idx>=order.length)return;const correct=items[order[idx]].a;const fb=document.getElementById('sortFb');seen++;
+  if(pick===correct){hit++;fb.className='fb ok';fb.textContent='✓ '+(correct==='live'?'runs in services/ today.':'legacy/ only — not yet ported.');}
+  else{fb.className='fb no';fb.textContent='✗ Actually '+(correct==='live'?'LIVE — it runs in services/ today.':'LEGACY only — not in the MVP yet.');}
+  document.getElementById('sortScore').textContent=`${hit}/${seen} · ${order.length-idx-1} left`;idx++;setTimeout(renderSort,800);}
+renderSort();
+function fb(id,ok,t){const f=document.getElementById(id);f.className='fb '+(ok?'ok':'no');f.textContent=t;}
+function q1(b,ok){b.classList.add(ok?'correct':'wrong');fb('q1fb',ok,ok?'✓ OPEN → (reset timeout) → HALF_OPEN. One probe succeeds → CLOSED; fails → OPEN again.':'✗ No — after the reset it goes HALF_OPEN and lets a single probe decide.');}
+function q2(b,ok){b.classList.add(ok?'correct':'wrong');fb('q2fb',ok,ok?'✓ 400/401/403 are non-retryable — retrying a client error just wastes attempts.':'✗ No — the non-retryable set is 400, 401, 403 (client errors).');}
+function q3(b,ok){b.classList.add(ok?'correct':'wrong');fb('q3fb',ok,ok?'✓ The live handler returns 502 without releasing — the hold leaks until the resv TTL expires. (Open TODO.)':'✗ No — the live MVP does NOT release on failure; the reservation leaks until its TTL.');}
+</script>
+</body>
+</html>

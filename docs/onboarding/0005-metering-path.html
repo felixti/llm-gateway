@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>L05 · The Metering Path — At-Least-Once, Billed-Once</title>
+<style>
+  :root{ --ink:#1a1a1a; --muted:#6b6b6b; --rule:#e3e0d8; --bg:#fdfcf9; --accent:#7a1f1f;
+         --code:#f3f1ea; --good:#1e6b3a; --bad:#9a2b2b; --edge:#1f4e79; --llm:#7a1f1f; }
+  *{box-sizing:border-box}
+  body{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;color:var(--ink);
+       background:var(--bg);max-width:46rem;margin:0 auto;padding:3rem 1.5rem 5rem;line-height:1.55;font-size:18px}
+  h1{font-size:2rem;font-weight:600;letter-spacing:-.01em;margin:0 0 .15rem}
+  .kicker{text-transform:uppercase;letter-spacing:.12em;font-size:.72rem;color:var(--accent);font-weight:700;margin-bottom:.6rem}
+  .sub{color:var(--muted);font-style:italic;margin:0 0 1.6rem;font-size:1rem}
+  h2{font-size:1.25rem;font-weight:600;margin:2.4rem 0 .6rem}
+  h3{font-size:.95rem;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin:1.8rem 0 .5rem}
+  p{margin:.7rem 0}
+  code{background:var(--code);padding:.08em .35em;border-radius:3px;font-size:.8em;font-family:"SF Mono",Menlo,Consolas,monospace}
+  a{color:var(--accent)}
+  .win{background:#f0ede3;border-left:3px solid var(--accent);padding:.8rem 1rem;margin:1.2rem 0;font-size:.95rem}
+  .warm{background:#eef3f0;border-left:3px solid var(--good);padding:.8rem 1rem;margin:1.2rem 0;font-size:.93rem}
+  .diagram{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.7rem;line-height:1.4;background:#fbfaf6;
+           border:1px solid var(--rule);border-radius:6px;padding:1rem;overflow-x:auto;white-space:pre;color:#2a2a2a}
+  table{border-collapse:collapse;width:100%;font-size:.83rem;margin:1rem 0}
+  th,td{border:1px solid var(--rule);padding:.4rem .55rem;text-align:left;vertical-align:top} th{background:#f3f1ea}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.2rem 0}
+  .card{border:1px solid var(--rule);border-radius:6px;padding:.9rem 1rem;font-size:.92rem}
+  .card.edge{border-top:3px solid var(--edge)} .card.llm{border-top:3px solid var(--llm)}
+  .card h4{margin:.1rem 0 .5rem;font-size:1rem} .card.edge h4{color:var(--edge)} .card.llm h4{color:var(--llm)}
+  blockquote{border-left:3px solid var(--rule);margin:1rem 0;padding:.2rem 1rem;color:#444;font-style:italic}
+  .gem{background:#eef3f0;border-left:3px solid var(--good);padding:.7rem 1rem;font-size:.92rem;margin:1.1rem 0}
+  .gotcha{background:#fbf3f3;border-left:3px solid var(--bad);padding:.7rem 1rem;font-size:.92rem;margin:1.1rem 0}
+  .drill{border:1px solid var(--rule);border-radius:8px;padding:1.1rem 1.2rem;margin:1.4rem 0;background:#fff}
+  .drill .q{font-weight:600;margin:0 0 .7rem}
+  .opt{display:block;width:100%;text-align:left;border:1px solid var(--rule);background:#fcfbf7;border-radius:5px;
+       padding:.55rem .8rem;margin:.4rem 0;cursor:pointer;font:inherit;font-size:.9rem;transition:.12s}
+  .opt:hover{background:#f3f1ea} .opt.correct{background:#e7f2ea;border-color:var(--good);color:var(--good)}
+  .opt.wrong{background:#f6e9e9;border-color:var(--bad);color:var(--bad)}
+  .fb{font-size:.85rem;margin-top:.6rem;min-height:1.2em} .fb.ok{color:var(--good)} .fb.no{color:var(--bad)}
+  .chip{display:inline-block;padding:.45rem .7rem;margin:.25rem;border:1px solid var(--rule);border-radius:6px;
+        background:#fff;font-size:.8rem;cursor:pointer;font:inherit} .chip:hover{background:#f3f1ea}
+  .chip.done{background:#e7f2ea;border-color:var(--good);color:var(--good);cursor:default}
+  .chip.bad{background:#f6e9e9;border-color:var(--bad);color:var(--bad)}
+  .slot{min-height:2rem;border:1px dashed var(--rule);border-radius:6px;padding:.4rem;margin:.6rem 0;font-size:.78rem;color:var(--muted)}
+  .score{font-size:.85rem;color:var(--muted);margin-top:.5rem}
+  .reveal{cursor:pointer;border:1px dashed var(--rule);border-radius:6px;padding:.7rem .9rem;color:var(--muted);font-size:.9rem;background:#fbfaf6}
+  .reveal[open]{border-style:solid;color:var(--ink)} .reveal summary{cursor:pointer;font-weight:600;color:var(--accent)}
+  .ask{background:#eef3f0;border-left:3px solid var(--good);padding:.7rem 1rem;font-size:.9rem;margin:1.4rem 0}
+  footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--rule);color:var(--muted);font-size:.85rem}
+  @media(max-width:560px){.two{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="kicker">Lesson 05 · Implementation / the accounting pipeline</div>
+<h1>The Metering Path — At-Least-Once, Billed-Once</h1>
+<p class="sub">How a usage event survives a queue outage, a crash, and duplicate delivery — and still gets counted exactly once. ~12 min.</p>
+
+<div class="warm">
+  <strong>Warm-up (cold recall from L04 — no peeking):</strong> name the three budget Lua scripts, and say
+  what COMMIT moves from where to where.
+  <details class="reveal" style="margin-top:.5rem"><summary>check yourself</summary>
+  <p style="margin:.5rem 0 0">RESERVE · COMMIT · RELEASE. COMMIT moves the amount from
+  <code>:reserved</code> → <code>:spent</code> (<code>INCRBY spent</code>, <code>DECRBY reserved</code>,
+  <code>DEL resv</code>), idempotent via the commit key.</p></details>
+</div>
+
+<div class="win">
+  <strong>Win:</strong> you can trace a <code>UsageEvent</code> from the handler to an ADX row, name every
+  durability hop (queue → WAL → replayer), and explain the one KQL trick that turns "at-least-once
+  delivery" into "counted once, and the <em>right</em> once."
+</div>
+
+<h2>1 · The path, end to end</h2>
+<div class="diagram">handler ── buildUsageEvent ──► emitUsageEvent
+                                  │
+                    enqueue OK ───┤─── enqueue THROWS
+                                  ▼                 ▼
+                         Azure Storage Queue   WAL (disk DLQ)  unbilled-&lt;reqId&gt;.json
+                                  ▲                 │           0600 file in 0700 dir
+                                  │   replayer ─────┘           tmp-write + atomic rename
+                                  │   (interval; enqueue then delete file)
+                                  ▼
+                          Collector worker  ── receive(≤32, vis 30s) ──► batch file ──► delete msgs
+                                  │
+                                  ▼
+                          ADX  Usage table  ──► UsageDedup materialized view (arg_max by request_id)</div>
+
+<h2>2 · Durability is layered, idempotency is deferred</h2>
+<p>Every hop is <strong>at-least-once</strong>, on purpose. Nothing tries to be exactly-once in the
+pipe — that's pushed to the very end (ADX). The layers:</p>
+<table>
+  <tr><th>Hop</th><th>Failure it survives</th><th>How</th></tr>
+  <tr><td><b>enqueue → WAL</b></td><td>queue unreachable</td><td><code>emitUsageEvent</code> catches the throw, writes the event to disk instead</td></tr>
+  <tr><td><b>WAL durability</b></td><td>crash mid-write</td><td>write <code>.tmp</code> then <code>rename</code> — POSIX-atomic, no half file ever read; <code>0600</code>/<code>0700</code> perms; reqId regex-guarded</td></tr>
+  <tr><td><b>replayer</b></td><td>queue was down, now back</td><td>interval drains WAL → enqueue → delete file; leaves file on failure for next tick</td></tr>
+  <tr><td><b>queue visibility</b></td><td>collector crashes mid-batch</td><td>30s visibility timeout → unacked message reappears, redelivered</td></tr>
+  <tr><td><b>ADX dedup</b></td><td>the duplicates all of the above create</td><td><code>arg_max(...) by request_id</code> collapses them to one row</td></tr>
+</table>
+
+<div class="gem">
+  <strong>The gem — read this twice.</strong> The dedup view doesn't just pick <em>any</em> copy of a
+  <code>request_id</code>; it picks the <em>right</em> one:
+  <pre style="white-space:pre-wrap;margin:.5rem 0 0;font-size:.8rem">_rank = iff(redis_commit_result == 'ok' and tokens_total &gt; 0, ts + 3650d, ts)
+| summarize arg_max(_rank, *) by request_id</pre>
+  A copy that was actually billed (<code>redis_commit_result=='ok'</code> and has tokens) gets its
+  timestamp pushed <strong>10 years into the future</strong>, so <code>arg_max</code> always prefers the
+  successfully-committed record over a failed/partial duplicate of the same request. At-least-once in,
+  the <em>correct</em> single row out.
+</div>
+
+<h2>3 · The event carries its own billing truth</h2>
+<p>The <code>UsageEvent</code> isn't just tokens + cost. It carries <code>redis_commit_result</code>
+(<code>'ok'</code>|<code>'failed'</code>), <code>reservation_id</code>, <code>scope</code>, and
+<code>attempt</code>. So even if the budget COMMIT to Redis <em>failed</em>, the event is still emitted —
+the failure is a <em>field</em>, not a dropped record. ADX can then reconcile what was charged vs. what
+was used. Metering never silently loses a request.</p>
+
+<h2>4 · Drill — order the durability path</h2>
+<p style="font-size:.92rem;color:var(--muted)">Click the steps a usage event takes on the happy path (queue up).</p>
+<div class="drill">
+  <div class="slot" id="builtOrder">— start clicking —</div>
+  <div id="chipPool"></div>
+  <div class="fb" id="orderFb">&nbsp;</div>
+  <div class="score" id="orderScore"></div>
+</div>
+
+<h2>5 · Drill — the sharp edges</h2>
+<div class="drill">
+  <p class="q">Why does the WAL write to <code>.tmp</code> then <code>rename</code>, instead of writing the file directly?</p>
+  <button class="opt" onclick="q1(this,true)">Rename is atomic — no half-written file is read</button>
+  <button class="opt" onclick="q1(this,false)">It lets two writers append the same file safely</button>
+  <button class="opt" onclick="q1(this,false)">Temp files skip the 0600 permission requirement</button>
+  <div class="fb" id="q1fb">&nbsp;</div>
+</div>
+<div class="drill">
+  <p class="q">Duplicate usage events for one request can exist. Where are they reconciled to one?</p>
+  <button class="opt" onclick="q2(this,false)">At enqueue — the queue rejects duplicate bodies</button>
+  <button class="opt" onclick="q2(this,true)">At ADX — arg_max by request_id in the view</button>
+  <button class="opt" onclick="q2(this,false)">At commit — the Redis idempotency key blocks</button>
+  <div class="fb" id="q2fb">&nbsp;</div>
+</div>
+<div class="drill">
+  <p class="q">When two copies of a request reach ADX, which one does the dedup view keep?</p>
+  <button class="opt" onclick="q3(this,true)">The committed copy with tokens — ranked highest</button>
+  <button class="opt" onclick="q3(this,false)">The earliest arriving copy by its ts value</button>
+  <button class="opt" onclick="q3(this,false)">The copy with the larger total token count</button>
+  <div class="fb" id="q3fb">&nbsp;</div>
+</div>
+
+<h2>6 · Strength &amp; weakness (mission lens)</h2>
+<div class="two">
+  <div class="card llm"><h4>Strength</h4>
+    <p>Metering is <strong>decoupled</strong> from the request path — an ADX outage never slows a user.
+    Durability is layered and self-healing (WAL + replayer). Idempotency is solved <em>once</em>, at the
+    read side, with a view that also encodes "prefer the billed record." The event self-describes its
+    billing state, so nothing is silently lost.</p></div>
+  <div class="card edge"><h4>Weakness / MVP cut</h4>
+    <p>The "ADX sink" is <strong>stubbed</strong>: the collector writes <em>local batch JSON files</em>,
+    not real ADX ingest yet (ADR-0012). WAL's default dir is <code>/tmp/ai-gateway-wal</code> — on a
+    tmpfs/ephemeral host a reboot can <em>lose</em> unbilled entries; set <code>WAL_DIR</code> to durable
+    storage. And remember L04: <code>cost_usd</code> here is the 1.2× <em>estimate</em>, so ADX analytics
+    inherit that over-count until billing-on-actuals lands.</p></div>
+</div>
+
+<h2>7 · Blank-page self-test</h2>
+<details class="reveal"><summary>Trace one event from handler to a single ADX row, through one queue outage. Reveal.</summary>
+<p style="margin-top:.6rem"><strong>emit</strong>: <code>buildUsageEvent</code> → <code>enqueue</code> throws (queue down)
+→ <strong>WAL</strong> writes <code>unbilled-&lt;reqId&gt;.json</code> (tmp+rename, 0600). Queue recovers →
+<strong>replayer</strong> tick enqueues it, deletes the file. <strong>Collector</strong> <code>receive(≤32, vis 30s)</code>
+→ writes batch file → deletes messages. If it crashed first, the message reappears after 30s (a duplicate).
+<strong>ADX</strong>: both copies land; <code>UsageDedup</code> ranks the committed+tokens copy via <code>ts+3650d</code>
+and <code>arg_max by request_id</code> keeps that one. Counted once, the right once.</p></details>
+
+<div class="ask">
+  <strong>Ask me:</strong> "what does turning the ADX stub into real ingest involve?",
+  or "why visibility-timeout instead of an explicit ack?", or "could two replayers double-enqueue, and
+  does it matter?"
+</div>
+
+<h3>Primary source — read next</h3>
+<p>📄 <code>contracts/adx/usage.kql</code> (4 lines — the dedup trick) + <code>kernel/wal/usage-wal.ts</code>
++ <code>kernel/wal/wal-replayer.ts</code> + <code>services/collector/src/worker.ts</code>. ADR:
+<a href="../adr/0012-usage-metering-storage-queue-collector-adx-mvp.md">ADR-0012</a>.
+Terms: <a href="glossary.html">glossary</a>. Prev: <a href="0004-budget-engine.html">L04</a>.</p>
+
+<footer>
+  <strong>Next — <a href="0006-resilience-vision-vs-mvp.html">L06</a>:</strong> resilience — and the
+  brain-rot trap: the circuit breaker / retry / streaming the docs describe live only in <code>legacy/</code>.<br><br>
+  Spaced recall queued: next session, cold — "what does the ADX rank trick do, and why <code>+3650d</code>?"
+</footer>
+
+<script>
+const STEPS=["buildUsageEvent","enqueue to queue","collector receive(≤32)","write batch + delete msgs","ADX dedup by request_id"];
+let pool=STEPS.map((h,i)=>({h,i})).sort(()=>Math.random()-0.5);
+let expect=0,mistakes=0;
+const poolEl=document.getElementById('chipPool'),builtEl=document.getElementById('builtOrder');
+function drawPool(){poolEl.innerHTML='';pool.forEach(p=>{if(p.i<expect)return;
+  const b=document.createElement('button');b.className='chip';b.textContent=p.h;b.onclick=()=>pick(p,b);poolEl.appendChild(b);});}
+function pick(p,b){const fb=document.getElementById('orderFb');
+  if(p.i===expect){expect++;b.className='chip done';b.onclick=null;
+    builtEl.textContent=STEPS.slice(0,expect).map((h,n)=>`${n+1}. ${h}`).join('  →  ');fb.className='fb ok';fb.textContent='✓';
+    if(expect===STEPS.length)fb.textContent=`✓ Complete. ${mistakes} mistake(s).`;setTimeout(drawPool,150);}
+  else{mistakes++;b.classList.add('bad');fb.className='fb no';fb.textContent=`✗ Not next — step ${expect+1} is "${STEPS[expect]}".`;
+    setTimeout(()=>b.classList.remove('bad'),500);}
+  document.getElementById('orderScore').textContent=`placed ${expect}/${STEPS.length} · ${mistakes} miss`;}
+drawPool();
+function fb(id,ok,t){const f=document.getElementById(id);f.className='fb '+(ok?'ok':'no');f.textContent=t;}
+function q1(b,ok){b.classList.add(ok?'correct':'wrong');fb('q1fb',ok,ok?'✓ rename() is atomic on POSIX — a reader either sees the whole file or nothing, never a partial JSON.':'✗ No — it\'s about atomicity: tmp+rename guarantees no half-written entry is ever read by the replayer.');}
+function q2(b,ok){b.classList.add(ok?'correct':'wrong');fb('q2fb',ok,ok?'✓ At ADX: the UsageDedup view collapses duplicates with arg_max(...) by request_id. Idempotency lives at the read side.':'✗ No — the pipe is at-least-once; dedup is done at ADX by request_id, not at enqueue or commit.');}
+function q3(b,ok){b.classList.add(ok?'correct':'wrong');fb('q3fb',ok,ok?'✓ The committed copy (redis_commit_result==ok and tokens_total>0) gets ts+3650d, so arg_max keeps it over partial duplicates.':'✗ No — rank, not arrival or size: the billed copy is boosted +3650d and wins arg_max.');}
+</script>
+</body>
+</html>

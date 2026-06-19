@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>L02 · The Request Pipeline, Hop by Hop</title>
+<style>
+  :root{ --ink:#1a1a1a; --muted:#6b6b6b; --rule:#e3e0d8; --bg:#fdfcf9; --accent:#7a1f1f;
+         --code:#f3f1ea; --good:#1e6b3a; --bad:#9a2b2b; --edge:#1f4e79; --llm:#7a1f1f; }
+  *{box-sizing:border-box}
+  body{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+       color:var(--ink);background:var(--bg);max-width:46rem;margin:0 auto;padding:3rem 1.5rem 5rem;
+       line-height:1.55;font-size:18px}
+  h1{font-size:2rem;font-weight:600;letter-spacing:-.01em;margin:0 0 .15rem}
+  .kicker{text-transform:uppercase;letter-spacing:.12em;font-size:.72rem;color:var(--accent);font-weight:700;margin-bottom:.6rem}
+  .sub{color:var(--muted);font-style:italic;margin:0 0 1.6rem;font-size:1rem}
+  h2{font-size:1.25rem;font-weight:600;margin:2.4rem 0 .6rem}
+  h3{font-size:.95rem;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin:1.8rem 0 .5rem}
+  p{margin:.7rem 0}
+  code{background:var(--code);padding:.08em .35em;border-radius:3px;font-size:.8em;font-family:"SF Mono",Menlo,Consolas,monospace}
+  a{color:var(--accent)}
+  .win{background:#f0ede3;border-left:3px solid var(--accent);padding:.8rem 1rem;margin:1.2rem 0;font-size:.95rem}
+  .warm{background:#eef3f0;border-left:3px solid var(--good);padding:.8rem 1rem;margin:1.2rem 0;font-size:.93rem}
+  .hop{border:1px solid var(--rule);border-left:4px solid var(--llm);border-radius:6px;padding:.7rem 1rem;margin:.7rem 0}
+  .hop .n{display:inline-block;width:1.5rem;height:1.5rem;line-height:1.5rem;text-align:center;background:var(--llm);
+          color:#fff;border-radius:50%;font-size:.8rem;font-weight:700;margin-right:.5rem}
+  .hop.app{border-left-color:var(--edge)} .hop.app .n{background:var(--edge)}
+  .hop h4{display:inline;font-size:1rem} .hop .file{color:var(--muted);font-size:.78rem;font-family:"SF Mono",Menlo,monospace}
+  .hop .body{margin:.45rem 0 0;font-size:.9rem}
+  .hop .meta{font-size:.8rem;color:var(--muted);margin-top:.35rem}
+  .rej{color:var(--bad);font-weight:600}
+  .sets{color:var(--good)}
+  table{border-collapse:collapse;width:100%;font-size:.85rem;margin:1rem 0}
+  th,td{border:1px solid var(--rule);padding:.4rem .6rem;text-align:left}
+  th{background:#f3f1ea}
+  blockquote{border-left:3px solid var(--rule);margin:1rem 0;padding:.2rem 1rem;color:#444;font-style:italic}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.2rem 0}
+  .card{border:1px solid var(--rule);border-radius:6px;padding:.9rem 1rem;font-size:.92rem}
+  .card.edge{border-top:3px solid var(--edge)} .card.llm{border-top:3px solid var(--llm)}
+  .card h4{margin:.1rem 0 .5rem;font-size:1rem}
+  .card.edge h4{color:var(--edge)} .card.llm h4{color:var(--llm)}
+
+  .drill{border:1px solid var(--rule);border-radius:8px;padding:1.1rem 1.2rem;margin:1.4rem 0;background:#fff}
+  .drill .q{font-weight:600;margin:0 0 .7rem}
+  .opt{display:block;width:100%;text-align:left;border:1px solid var(--rule);background:#fcfbf7;border-radius:5px;
+       padding:.55rem .8rem;margin:.4rem 0;cursor:pointer;font:inherit;font-size:.9rem;transition:.12s}
+  .opt:hover{background:#f3f1ea}
+  .opt.correct{background:#e7f2ea;border-color:var(--good);color:var(--good)}
+  .opt.wrong{background:#f6e9e9;border-color:var(--bad);color:var(--bad)}
+  .fb{font-size:.85rem;margin-top:.6rem;min-height:1.2em}
+  .fb.ok{color:var(--good)} .fb.no{color:var(--bad)}
+  .chip{display:inline-block;padding:.45rem .7rem;margin:.25rem;border:1px solid var(--rule);border-radius:6px;
+        background:#fff;font-size:.83rem;cursor:pointer;font:inherit}
+  .chip:hover{background:#f3f1ea} .chip.done{background:#e7f2ea;border-color:var(--good);color:var(--good);cursor:default}
+  .chip.bad{background:#f6e9e9;border-color:var(--bad);color:var(--bad)}
+  .slot{min-height:2rem;border:1px dashed var(--rule);border-radius:6px;padding:.4rem;margin:.6rem 0;font-size:.83rem;color:var(--muted)}
+  .score{font-size:.85rem;color:var(--muted);margin-top:.5rem}
+  .reveal{cursor:pointer;border:1px dashed var(--rule);border-radius:6px;padding:.7rem .9rem;color:var(--muted);font-size:.9rem;background:#fbfaf6}
+  .reveal[open]{border-style:solid;color:var(--ink)} .reveal summary{cursor:pointer;font-weight:600;color:var(--accent)}
+  .ask{background:#eef3f0;border-left:3px solid var(--good);padding:.7rem 1rem;font-size:.9rem;margin:1.4rem 0}
+  footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--rule);color:var(--muted);font-size:.85rem}
+  @media(max-width:560px){.two{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="kicker">Lesson 02 · Architecture / the HOW begins</div>
+<h1>The Request Pipeline, Hop by Hop</h1>
+<p class="sub">What actually happens to a request once it's inside the Node plane — the seven gates it passes, in order, and what stops it at each. ~10 min.</p>
+
+<div class="warm">
+  <strong>Warm-up (cold recall from L01 — no peeking):</strong> what two things travel on the arrow
+  from the edge plane to the Node plane?
+  <details class="reveal" style="margin-top:.5rem"><summary>check yourself</summary>
+  <p style="margin:.5rem 0 0">A per-hop Entra <strong>M2M token</strong> (aud=<code>api://llm-gateway-internal</code>)
+  <em>plus</em> the forwarded <strong><code>X-Principal-*</code></strong> claim headers. The Node side
+  trusts the claims because the hop is gated by YARP's M2M token.</p></details>
+</div>
+
+<div class="win">
+  <strong>Win:</strong> you can recite the seven hops <em>in order</em> from memory, say what each
+  one <em>sets</em> for later hops and what status code it <em>rejects</em> with — and spot the two
+  hops that are quietly doing the same work twice.
+</div>
+
+<h2>1 · The chain, as actually wired</h2>
+<p>From <code>services/gateway/src/app.ts</code>. Two hops are wired app-wide
+(<code>api.use('*', …)</code>); the rest are per-route on each <code>/v1/*</code> POST. Order is the
+order they run:</p>
+
+<div class="hop app"><span class="n">1</span><h4>auth</h4> <span class="file">pipeline/auth.ts</span>
+  <p class="body">Bearer present? Verify the YARP <strong>M2M token</strong>. Reject duplicate/case-variant
+  <code>X-Principal-*</code> (header hygiene). Parse the forwarded claims.</p>
+  <p class="meta"><span class="sets">sets → <code>userAuth</code></span> &nbsp;·&nbsp; <span class="rej">reject → 401</span> (any failure)</p>
+</div>
+<div class="hop app"><span class="n">2</span><h4>tenantContext</h4> <span class="file">pipeline/tenant-context.ts</span>
+  <p class="body">Look up the principal in the config store → resolve its <strong>model allowlist</strong>
+  and <strong>budget policy</strong> (project- or user-scoped).</p>
+  <p class="meta"><span class="sets">sets → <code>tenantContext</code></span> &nbsp;·&nbsp; <span class="rej">reject → 403</span> (no budget policy configured)</p>
+</div>
+<div class="hop"><span class="n">3</span><h4>protocolGuard</h4> <span class="file">pipeline/protocol-guard.ts</span>
+  <p class="body">Parse the JSON body <em>once</em>; pull out <code>model</code>; tag the route's protocol family.</p>
+  <p class="meta"><span class="sets">sets → <code>model</code>, <code>parsedBody</code>, <code>family</code></span> &nbsp;·&nbsp; <span class="rej">reject → 400</span> (invalid json / missing model)</p>
+</div>
+<div class="hop"><span class="n">4</span><h4>scope</h4> <span class="file">pipeline/scope.ts</span>
+  <p class="body">Is <code>model</code> in this principal's <code>modelAllowlist</code>? (Now possible — model known from hop 3, allowlist from hop 2.)</p>
+  <p class="meta"><span class="rej">reject → 403</span> (model not allowed for principal)</p>
+</div>
+<div class="hop"><span class="n">5</span><h4>rateLimit</h4> <span class="file">pipeline/rate-limit.ts</span>
+  <p class="body">Estimate tokens; atomic <code>checkAndConsume</code> against <strong>RPM</strong> and token-aware <strong>TPM</strong> in Redis.</p>
+  <p class="meta"><span class="rej">reject → 429</span> (<code>rpm_exceeded</code> / <code>tpm_exceeded</code>)</p>
+</div>
+<div class="hop"><span class="n">6</span><h4>budget</h4> <span class="file">pipeline/budget.ts</span>
+  <p class="body">Sync policy → Redis. Estimate cost, multiply by <strong>1.2×</strong>, atomically
+  <strong>reserve</strong> microdollars with a TTL. This is a <em>pre-flight hold</em>, not the final charge.</p>
+  <p class="meta"><span class="sets">sets → <code>reservationId</code>, <code>budgetScope</code>, <code>reservedMicro</code></span> &nbsp;·&nbsp; <span class="rej">reject → 429</span> (<code>insufficient_quota</code>)</p>
+</div>
+<div class="hop"><span class="n">7</span><h4>handler → meter</h4> <span class="file">features/llm/handler.ts · pipeline/meter.ts</span>
+  <p class="body">Proxy upstream (Azure). On return: compute real cost, <strong>commit/release</strong> the
+  reservation, then <strong>emit a usage event</strong> → queue (or WAL on failure). Meter is <em>inside</em>
+  the handler, not a chain middleware.</p>
+  <p class="meta"><span class="sets">emits → <code>UsageEvent</code> → Storage Queue | WAL</span></p>
+</div>
+
+<blockquote>
+Mental model: <strong>hops 1–2 establish <em>who</em></strong> (identity + their policy),
+<strong>hops 3–4 establish <em>what</em></strong> (which model, allowed?),
+<strong>hops 5–6 establish <em>can-they-afford-it</em></strong> (rate + money),
+<strong>hop 7 does the work and accounts for it.</strong> Each hop only runs because the previous
+hop set a context variable it needs.
+</blockquote>
+
+<h2>2 · Reject-code map</h2>
+<table>
+  <tr><th>Code</th><th>Hop(s)</th><th>Meaning</th></tr>
+  <tr><td>401</td><td>auth</td><td>bad/absent M2M token, dup headers, malformed claims</td></tr>
+  <tr><td>400</td><td>protocolGuard / budget</td><td>invalid json, missing model, unknown model config</td></tr>
+  <tr><td>403</td><td>tenantContext / scope</td><td>no budget policy · model not in allowlist</td></tr>
+  <tr><td>429</td><td>rateLimit / budget</td><td>rpm/tpm exceeded · insufficient quota</td></tr>
+</table>
+
+<h2>3 · Drill — order the pipeline</h2>
+<p style="font-size:.92rem;color:var(--muted)">Click the hops in the order they run. Wrong pick flashes red and waits.</p>
+<div class="drill">
+  <div class="slot" id="builtOrder">— start clicking —</div>
+  <div id="chipPool"></div>
+  <div class="fb" id="orderFb">&nbsp;</div>
+  <div class="score" id="orderScore"></div>
+</div>
+
+<h2>4 · Drill — which hop sets it / stops it?</h2>
+<div class="drill">
+  <p class="q">A request asks for a model the principal isn't allowed to use. Which hop rejects it, with what code?</p>
+  <button class="opt" onclick="m1(this,false)">protocolGuard rejects it early with a 400 code</button>
+  <button class="opt" onclick="m1(this,true)">scope rejects it after model known, 403 code</button>
+  <button class="opt" onclick="m1(this,false)">tenantContext blocks the principal with a 401</button>
+  <div class="fb" id="m1fb">&nbsp;</div>
+</div>
+<div class="drill">
+  <p class="q">Which hop sets <code>reservationId</code>, and is the amount the final charge?</p>
+  <button class="opt" onclick="m2(this,false)">rateLimit sets it; yes it is the final charge</button>
+  <button class="opt" onclick="m2(this,true)">budget sets it; no it is a 1.2x pre-flight hold</button>
+  <button class="opt" onclick="m2(this,false)">the handler sets it; yes it is the final charge</button>
+  <div class="fb" id="m2fb">&nbsp;</div>
+</div>
+
+<h2>5 · Strength &amp; weakness (mission lens)</h2>
+<div class="two">
+  <div class="card llm">
+    <h4>Strength</h4>
+    <p>Strict <strong>fail-closed</strong> ordering: cheap rejects first (auth, json), expensive Redis ops
+    last. Each hop has one job and communicates only through typed context vars — easy to test in isolation,
+    easy to reorder. No model work happens before the caller is known and the model is allow-listed.</p>
+  </div>
+  <div class="card edge">
+    <h4>Weakness / smell</h4>
+    <p><code>estimateRequestTokens</code> runs <strong>twice</strong> (hop 5 <em>and</em> hop 6) — duplicated
+    work. <code>budget</code> re-<code>syncBudgetPolicy</code> to Redis on <em>every</em> request (config-store
+    cache softens it, but still hot-path). And TPM/budget both consume on an <em>estimate</em>, reconciled to
+    actuals only at hop 7 — transient over-hold, cleaned by the reservation TTL.</p>
+  </div>
+</div>
+
+<h2>6 · Blank-page self-test</h2>
+<details class="reveal"><summary>Trace a chat request from bytes-in to usage-event. Reveal model answer.</summary>
+<p style="margin-top:.6rem">1 <strong>auth</strong>: verify M2M, hygiene-check + parse <code>X-Principal-*</code> → <code>userAuth</code> (else 401).
+2 <strong>tenantContext</strong>: config-store lookup → <code>modelAllowlist</code> + <code>budgetPolicy</code> (else 403).
+3 <strong>protocolGuard</strong>: parse body, get <code>model</code> + <code>family</code> (else 400).
+4 <strong>scope</strong>: model ∈ allowlist? (else 403).
+5 <strong>rateLimit</strong>: RPM + token-aware TPM checkAndConsume (else 429).
+6 <strong>budget</strong>: sync policy, estimate cost ×1.2, reserve micro w/ TTL → <code>reservationId</code> (else 429).
+7 <strong>handler</strong>: proxy Azure → commit/release reservation → emit <code>UsageEvent</code> to Queue (WAL on failure).</p></details>
+
+<div class="ask">
+  <strong>Ask me:</strong> "show me where the reservation gets committed vs released in the handler",
+  or "what happens to the hold if the upstream call times out?", or "why is meter inside the handler
+  instead of a middleware?"
+</div>
+
+<h3>Primary source — read next</h3>
+<p>📄 <code>app.ts</code> — open
+<code>services/gateway/src/app.ts</code> in your editor: the <code>registerLlmRoute</code> function
+<em>is</em> this pipeline, top to bottom. Then skim each <code>pipeline/*.ts</code> — every file is &lt;60 lines.
+Terms: <a href="glossary.html">glossary</a>. Prev: <a href="0001-two-plane-architecture.html">L01</a>.</p>
+
+<footer>
+  <strong>Next — <a href="0003-trust-model.html">L03</a>:</strong> the trust model — per-hop M2M +
+  forwarded claims with no mTLS, and exactly how header-spoofing is closed (the weakness L01 flagged).<br><br>
+  Spaced recall queued: next session I re-ask "name hops 5 and 6 and what each consumes," cold.
+</footer>
+
+<script>
+const HOPS = ["auth","tenantContext","protocolGuard","scope","rateLimit","budget","handler/meter"];
+let pool = HOPS.map((h,i)=>({h,i})).sort(()=>Math.random()-0.5);
+let expect = 0, mistakes = 0;
+const poolEl = document.getElementById('chipPool');
+const builtEl = document.getElementById('builtOrder');
+function drawPool(){
+  poolEl.innerHTML='';
+  pool.forEach(p=>{
+    if(p.i < expect) return; // already placed
+    const b=document.createElement('button');
+    b.className='chip'; b.textContent=p.h; b.onclick=()=>pick(p,b);
+    poolEl.appendChild(b);
+  });
+}
+function pick(p,b){
+  const fb=document.getElementById('orderFb');
+  if(p.i===expect){
+    expect++; b.className='chip done'; b.onclick=null;
+    builtEl.textContent = HOPS.slice(0,expect).map((h,n)=>`${n+1}. ${h}`).join('   →   ');
+    fb.className='fb ok'; fb.textContent='✓';
+    if(expect===HOPS.length){ fb.textContent=`✓ Complete. ${mistakes} mistake(s).`; }
+    setTimeout(drawPool,150);
+  } else {
+    mistakes++; b.classList.add('bad');
+    fb.className='fb no'; fb.textContent=`✗ Not next — hop ${expect+1} is "${HOPS[expect]}".`;
+    setTimeout(()=>{b.classList.remove('bad');},500);
+  }
+  document.getElementById('orderScore').textContent=`placed ${expect}/${HOPS.length} · ${mistakes} miss`;
+}
+drawPool();
+function m1(b,ok){const f=document.getElementById('m1fb');b.classList.add(ok?'correct':'wrong');
+  if(ok){f.className='fb ok';f.textContent='✓ scope (hop 4) — needs model (hop 3) + allowlist (hop 2), so it lands at 4 with a 403.';}
+  else{f.className='fb no';f.textContent='✗ No — the allowlist check is scope, hop 4, returning 403.';}}
+function m2(b,ok){const f=document.getElementById('m2fb');b.classList.add(ok?'correct':'wrong');
+  if(ok){f.className='fb ok';f.textContent='✓ budget (hop 6) reserves a 1.2× hold; real cost is committed/released later in the handler.';}
+  else{f.className='fb no';f.textContent='✗ No — budget sets reservationId as a 1.2× pre-flight hold, not the final charge.';}}
+</script>
+</body>
+</html>

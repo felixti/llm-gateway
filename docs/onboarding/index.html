@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Gateway — Onboarding</title>
+<style>
+  :root{ --ink:#1a1a1a; --muted:#6b6b6b; --rule:#e3e0d8; --bg:#fdfcf9; --accent:#7a1f1f;
+         --code:#f3f1ea; --good:#1e6b3a; --bad:#9a2b2b; }
+  *{box-sizing:border-box}
+  body{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;color:var(--ink);
+       background:var(--bg);max-width:46rem;margin:0 auto;padding:3rem 1.5rem 5rem;line-height:1.55;font-size:18px}
+  h1{font-size:2.1rem;font-weight:600;letter-spacing:-.01em;margin:0 0 .2rem}
+  .sub{color:var(--muted);font-style:italic;margin:0 0 1.8rem;font-size:1.05rem}
+  h2{font-size:1.15rem;text-transform:uppercase;letter-spacing:.06em;color:var(--accent);
+     border-bottom:1px solid var(--rule);padding-bottom:.3rem;margin:2.2rem 0 1rem}
+  p{margin:.7rem 0}
+  code{background:var(--code);padding:.08em .35em;border-radius:3px;font-size:.8em;font-family:"SF Mono",Menlo,Consolas,monospace}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  ol.lessons{list-style:none;counter-reset:l;padding:0}
+  ol.lessons li{counter-increment:l;border:1px solid var(--rule);border-radius:8px;padding:.8rem 1rem .8rem 3.2rem;
+     margin:.6rem 0;position:relative;background:#fff}
+  ol.lessons li::before{content:"L0" counter(l);position:absolute;left:.9rem;top:.85rem;font-family:"SF Mono",Menlo,monospace;
+     font-size:.75rem;font-weight:700;color:var(--accent)}
+  ol.lessons a{font-weight:600;font-size:1.02rem}
+  ol.lessons .d{display:block;color:var(--muted);font-size:.85rem;margin-top:.15rem}
+  .note{background:#fbf3f3;border-left:3px solid var(--bad);padding:.7rem 1rem;font-size:.92rem;margin:1.2rem 0}
+  .how{background:#eef3f0;border-left:3px solid var(--good);padding:.7rem 1rem;font-size:.92rem;margin:1.2rem 0}
+  footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--rule);color:var(--muted);font-size:.85rem}
+</style>
+</head>
+<body>
+
+<h1>LLM Gateway — Onboarding</h1>
+<p class="sub">Nine short, interactive lessons that build a working mental model of this system — grounded in the live code, not the prose docs.</p>
+
+<p>This is a guided path through the AI Gateway: the two-plane architecture, the request pipeline,
+the trust model, the budget engine, metering, resilience, the protocol bridge, and the MVP cut —
+finishing with an honest strengths-and-weaknesses synthesis. Each lesson is a single self-contained
+page with active-recall drills (the quizzes give instant feedback). Work them in order; each opens by
+re-testing the previous one.</p>
+
+<div class="note">
+  <strong>Read this first — the most important thing for a new joiner.</strong> The repo's
+  <code>CLAUDE.md</code>/<code>AGENTS.md</code> describe a system that is substantially the
+  <em>retired legacy app</em> (Bun, PostgreSQL, PATs, circuit breaker, retry, streaming) — not the live
+  MVP. The live system is <code>services/{edge,gateway,collector}</code> + <code>packages/shared</code> +
+  <code>contracts/</code>; the rationale is in <a href="../adr/">the ADRs</a>. <strong>When the prose
+  docs and the code disagree, the code wins.</strong> Lesson 06 covers this gap directly.
+</div>
+
+<h2>The lessons</h2>
+<ol class="lessons">
+  <li><a href="0001-two-plane-architecture.html">The Two-Plane Architecture</a>
+    <span class="d">Why a .NET/YARP edge sits in front of a Node/Hono brain — and the alternatives that were rejected.</span></li>
+  <li><a href="0002-request-pipeline.html">The Request Pipeline, Hop by Hop</a>
+    <span class="d">The seven gates a request passes inside the Node plane, in order, and what stops it at each.</span></li>
+  <li><a href="0003-trust-model.html">The Trust Model — No mTLS, No Problem?</a>
+    <span class="d">Why blindly trusting identity headers is safe here — and the one defense layer that isn't built.</span></li>
+  <li><a href="0004-budget-engine.html">The Budget Engine — Atomic Money in Redis</a>
+    <span class="d">Microdollars, three Lua scripts, the hash-tag that makes it cluster-safe, and what's really charged.</span></li>
+  <li><a href="0005-metering-path.html">The Metering Path — At-Least-Once, Billed-Once</a>
+    <span class="d">Queue → Collector → ADX, the WAL disk DLQ, and the dedup view that counts each request once.</span></li>
+  <li><a href="0006-resilience-vision-vs-mvp.html">Resilience — Vision vs. MVP</a>
+    <span class="d">The map-vs-territory lesson: the resilience the docs describe lives only in <code>legacy/</code>.</span></li>
+  <li><a href="0007-protocol-bridge.html">The Protocol Bridge — Chat ⇄ Responses</a>
+    <span class="d">The one piece of real translation logic: four transforms that let a client protocol target any model.</span></li>
+  <li><a href="0008-the-mvp-cut.html">The MVP Cut — Vision Minus Everything Deferred</a>
+    <span class="d">How ADR-0010..0015 each reversed or narrowed the grand vision so the MVP could ship.</span></li>
+  <li><a href="0009-strengths-and-weaknesses.html">Capstone — Strengths &amp; Weaknesses</a>
+    <span class="d">Three defensible strengths, three weaknesses to name first, and mixed recall across the whole course.</span></li>
+</ol>
+
+<p>Reference: <a href="glossary.html">the glossary</a> — the project's ubiquitous language; the lessons adhere to it.</p>
+
+<div class="how">
+  <strong>How to read these.</strong> Open them in a browser (they're static HTML — no build, no server
+  needed; just open the file). Do the drills, don't just read them — the retrieval practice is the point.
+  Pair each lesson with its cited primary source (an ADR or a code file) for the full picture.
+</div>
+
+<footer>
+  Onboarding material for the LLM Gateway. Lessons are grounded in <code>services/</code> +
+  <code>contracts/</code> + <code>docs/adr/</code> as of mid-2026; if a detail has drifted from the code,
+  trust the code and send a fix. Primary sources are cited at the bottom of every lesson.
+</footer>
+</body>
+</html>

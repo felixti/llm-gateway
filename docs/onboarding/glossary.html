@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Gateway — Glossary</title>
+<style>
+  :root{ --ink:#1a1a1a; --muted:#6b6b6b; --rule:#e3e0d8; --bg:#fdfcf9; --accent:#7a1f1f; --code:#f3f1ea; }
+  *{box-sizing:border-box}
+  body{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+       color:var(--ink);background:var(--bg);max-width:48rem;margin:0 auto;padding:3rem 1.5rem;
+       line-height:1.5;font-size:18px}
+  h1{font-size:2rem;font-weight:600;letter-spacing:-.01em;margin:0 0 .2rem}
+  .sub{color:var(--muted);font-style:italic;margin:0 0 2rem;font-size:1rem}
+  h2{font-size:1.05rem;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);
+     border-bottom:1px solid var(--rule);padding-bottom:.3rem;margin:2.4rem 0 1rem}
+  dl{margin:0}
+  dt{font-weight:600;margin-top:1.1rem}
+  dd{margin:.15rem 0 0;color:#333}
+  dd .why{color:var(--muted);font-style:italic;font-size:.92em}
+  code{background:var(--code);padding:.08em .35em;border-radius:3px;font-size:.82em;
+       font-family:"SF Mono",Menlo,Consolas,monospace}
+  .tag{display:inline-block;font-size:.62em;text-transform:uppercase;letter-spacing:.06em;
+       padding:.12em .5em;border:1px solid var(--rule);border-radius:99px;color:var(--muted);
+       vertical-align:middle;margin-left:.4rem}
+  footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--rule);
+          color:var(--muted);font-size:.85rem;font-style:italic}
+  @media print{body{font-size:11pt}a{color:inherit;text-decoration:none}}
+</style>
+</head>
+<body>
+<h1>LLM Gateway — Glossary</h1>
+<p class="sub">The ubiquitous language. Adhere to these exact terms in every lesson. v1 · 2026-06-17</p>
+
+<h2>Planes &amp; topology</h2>
+<dl>
+  <dt>Edge plane <span class="tag">.NET 10 · YARP</span></dt>
+  <dd><code>services/edge</code>. Generic <em>identity/transport</em> governance: validate the
+  Entra user token, mint OBO, per-principal RPM, route. <span class="why">Why a separate plane:
+  Microsoft.Identity.Web does Entra validation/OBO better than a hand-rolled verifier (ADR-0009).</span></dd>
+
+  <dt>LLM-domain plane <span class="tag">Node 24 · Hono</span></dt>
+  <dd><code>services/gateway</code>. <em>LLM-specific</em> governance: USD budget, token-aware TPM,
+  guardrails/PII, provider resilience, FinOps. <span class="why">Needs tiktoken/pricing/protocol
+  parsing — can't live in .NET without re-implementing all of it (ADR-0009 SP-C rejected).</span></dd>
+
+  <dt>Edge, not execution plane <span class="tag">ADR-0008</span></dt>
+  <dd>Foundational principle: the gateway <em>governs</em> ingress/egress (auth, meter, guard,
+  route) and <strong>never executes</strong> the caller's work — no server-side tool/MCP exec, no
+  agentic loop. <span class="why">Executing = inheriting sandbox, SSRF, budget runaway: a far
+  bigger, riskier system.</span></dd>
+
+  <dt>Envoy ingress</dt>
+  <dd>k8s ingress (full vision). TLS terminate, global/per-IP rate-limit, network WAF, route to
+  YARP. Does <strong>no</strong> authN (identity stays solely in YARP).</dd>
+
+  <dt>Collector</dt>
+  <dd><code>services/collector</code>, Node 24. Drains the usage queue, batches, writes to ADX.</dd>
+</dl>
+
+<h2>Trust &amp; identity</h2>
+<dl>
+  <dt>Per-hop M2M token</dt>
+  <dd>YARP authenticates to the gateway with its <em>own</em> Entra client-credentials token
+  (<code>aud=api://llm-gateway-internal</code>). The gateway accepts only YARP's exact
+  <code>appid</code>/<code>azp</code>. <span class="why">Operator refused mTLS; this is the trust
+  anchor instead (ADR-0009).</span></dd>
+
+  <dt>Forwarded claims</dt>
+  <dd>YARP <strong>strips</strong> client-supplied <code>X-Principal-*</code> headers and sets its
+  own after validating the user token. Gateway trusts them <em>because</em> the hop is gated by
+  YARP's M2M token. Headers: <code>X-Principal-Id / -Kind / -Project / -Scopes</code>.</dd>
+
+  <dt>Header-spoofing control</dt>
+  <dd>The new top security risk in a two-plane split. Mitigations: NetworkPolicy (gateway accepts
+  ingress only from YARP), M2M appid pin, header hygiene (reject duplicate/case-variant
+  <code>X-Principal-*</code>), optional JWS-signed claim set.</dd>
+
+  <dt>OBO (On-Behalf-Of)</dt>
+  <dd>YARP exchanges the user token for a downstream token to call the KB Service as the user.
+  KB enforces per-user ACL. Gateway (Node) is <em>not</em> in the KB path.</dd>
+</dl>
+
+<h2>Stores (MVP — no PostgreSQL)</h2>
+<dl>
+  <dt>Azure Table Storage <span class="tag">ADR-0011</span></dt>
+  <dd>Authoritative config/policy store: budget caps, model allowlists. Synced into Redis.</dd>
+  <dt>Azure Managed Redis (cluster) <span class="tag">ADR-0013</span></dt>
+  <dd>Fast path: budget reserve/spent, RPM/TPM counters, circuit-breaker state. Atomic via Lua.</dd>
+  <dt>Storage Queue → Collector → ADX <span class="tag">ADR-0012</span></dt>
+  <dd>Usage metering pipeline. Async, decoupled from the request path.</dd>
+  <dt>WAL (Write-Ahead Log)</dt>
+  <dd>Disk DLQ (<code>0600</code> files in <code>0700</code> dir). Last-resort durability when both
+  Queue and Redis fail. Replayer drains it later.</dd>
+</dl>
+
+<h2>LLM-domain mechanics</h2>
+<dl>
+  <dt>Budget reserve (Lua)</dt>
+  <dd>Atomic check-and-reserve in one Redis round-trip: validate cap, increment <code>reserved</code>,
+  set TTL reservation. 1.2× multiplier; 300s TTL for orphan cleanup.</dd>
+  <dt>Protocol guard</dt>
+  <dd>Validates model ↔ endpoint compatibility before proxying (e.g. Claude model on
+  <code>/v1/messages</code>).</dd>
+  <dt>Streaming usage intercept</dt>
+  <dd>TransformStream passes chunks through while extracting final <code>usage</code> (OpenAI: last
+  chunk; Anthropic: <code>message_delta</code>) for billing.</dd>
+  <dt>Responses↔chat bridge</dt>
+  <dd>Translates Chat Completions ⇄ Responses API for codex models.</dd>
+  <dt>Circuit breaker</dt>
+  <dd>Per-deployment: CLOSED → OPEN (5 fails) → HALF_OPEN (30s) → CLOSED (1 success).</dd>
+</dl>
+
+<footer>
+  Reference doc for the LLM Gateway teaching workspace. Update when terminology shifts;
+  every lesson must adhere to these terms. ← back to your lessons in the onboarding lessons.
+</footer>
+</body>
+</html>
